@@ -58,7 +58,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>M</kbd> mute · <kbd>R</kbd> reset
 </div>
 <div id="status"></div>
 <div id="intro">
@@ -352,6 +352,70 @@ function dismissIntro(){
 intro.addEventListener('click', dismissIntro);
 addEventListener('keydown', e=>{ if (state.introOpen && (e.code==='Space' || e.code==='Enter')) dismissIntro(); });
 
+// ====== ENGINE AUDIO (Web Audio drone scaling with throttle) ======
+// Two-layer synth: low sawtooth = piston rumble, higher triangle = propeller blade-pass.
+// Master gain ducks with throttle and goes silent when paused / crashed / on intro.
+const engineAudio = {
+  ctx: null, master: null, lp: null,
+  lowOsc: null, highOsc: null,
+  muted: false, ready: false
+};
+function initEngineAudio(){
+  if (engineAudio.ready) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  const ctx = new AC();
+  const master = ctx.createGain();
+  master.gain.value = 0.0001;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 900;
+  lp.Q.value = 0.6;
+  master.connect(lp).connect(ctx.destination);
+  const lowOsc = ctx.createOscillator();
+  lowOsc.type = 'sawtooth';
+  lowOsc.frequency.value = 70;
+  const lowGain = ctx.createGain();
+  lowGain.gain.value = 0.45;
+  lowOsc.connect(lowGain).connect(master);
+  const highOsc = ctx.createOscillator();
+  highOsc.type = 'triangle';
+  highOsc.frequency.value = 180;
+  const highGain = ctx.createGain();
+  highGain.gain.value = 0.18;
+  highOsc.connect(highGain).connect(master);
+  lowOsc.start(); highOsc.start();
+  Object.assign(engineAudio, { ctx, master, lp, lowOsc, highOsc, ready: true });
+}
+function updateEngineAudio(){
+  const ea = engineAudio;
+  if (!ea.ready || !ea.ctx) return;
+  const silent = ea.muted || state.introOpen || state.crashed;
+  const thr = silent ? 0 : state.throttle;
+  const lowF  = 65 + thr * 100;
+  const highF = 175 + thr * 360;
+  const cutoff = 480 + thr * 2200;
+  const targetGain = silent ? 0.0001 : (0.05 + thr * 0.32);
+  const now = ea.ctx.currentTime;
+  const tc = 0.08;
+  ea.lowOsc.frequency.setTargetAtTime(lowF, now, tc);
+  ea.highOsc.frequency.setTargetAtTime(highF, now, tc);
+  ea.lp.frequency.setTargetAtTime(cutoff, now, tc);
+  ea.master.gain.setTargetAtTime(targetGain, now, tc);
+}
+function startEngineAudioOnGesture(){
+  initEngineAudio();
+  if (engineAudio.ctx && engineAudio.ctx.state === 'suspended'){
+    engineAudio.ctx.resume().catch(()=>{});
+  }
+}
+intro.addEventListener('click', startEngineAudioOnGesture);
+addEventListener('keydown', e=>{
+  if (e.repeat) return;
+  if (e.code === 'Space' || e.code === 'Enter') startEngineAudioOnGesture();
+  if (e.code === 'KeyM') engineAudio.muted = !engineAudio.muted;
+});
+
 // ====== PHYSICS ======
 // Constants tuned for arcade-but-plausible feel.
 const G = 9.81;
@@ -600,6 +664,7 @@ function step(dt){
   // Propeller
   propSpin += (state.throttle * 60 + 4) * dt;
   propGroup.rotation.z = propSpin;
+  updateEngineAudio();
   // Flap deflection
   const fr = flapRad;
   flapL.rotation.x = fr;
