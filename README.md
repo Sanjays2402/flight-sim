@@ -1,6 +1,8 @@
 # Browser Flight Simulator ✈️
 
-A procedural browser flight simulator. Vanilla JS + [Three.js](https://threejs.org/) via ES module import-map. **Zero npm. Zero build. Single `index.html` (~32 KB).**
+A procedural browser flight simulator. Vanilla JS + [Three.js](https://threejs.org/) via ES module import-map. **Zero npm. Zero build. Single `index.html` (~50 KB).**
+
+Features a 30 km × 30 km procedural heightmap world with grass plains, forested hills, gray rock and snow-capped mountains, a distant mountain ring, a lake and ocean coastline, drifting volumetric-feel clouds at multiple altitudes, sparse instanced trees and rocks, and three landable airfields scattered across the terrain.
 
 Open `index.html` in any modern browser (or visit the live page) and fly.
 
