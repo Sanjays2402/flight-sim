@@ -1158,6 +1158,16 @@ flapL.position.set(-2.4, 0.04, 0.62);
 flapR.position.set( 2.4, 0.04, 0.62);
 plane.add(flapL); plane.add(flapR);
 
+// Animated gear + flap state. Flaps used to snap to their target deflection and
+// the gear group used to flip visible/invisible. Now we ease toward the target
+// so the wing surfaces visibly hinge down and the gear tucks up into the belly
+// over ~1.2s, matching the clunk/whoosh SFX timing.
+let flapAnimRad = 0;          // current rendered flap rotation (radians)
+let gearAnim = 0;             // 0 = fully extended, 1 = fully retracted
+const GEAR_LIFT = 1.05;       // how far up the gearGrp travels when retracting
+const FLAP_RATE = 1.6;        // rad/sec target chase speed (covers 0->40deg in ~0.4s)
+const GEAR_RATE = 0.85;       // 1/sec, full extend/retract in ~1.2s
+
 // ====== AI TRAFFIC ======
 // One other plane doing left-hand circuits at the home airport (MAIN_AP).
 // Flies a five-leg rectangular pattern: upwind → crosswind → downwind →
@@ -1805,9 +1815,19 @@ function updateReplay(dt){
   propGroup.rotation.z = propSpin;
   const flapDeg = state.flapDeg[state.flaps];
   const flapRad = flapDeg * Math.PI/180;
-  flapL.rotation.x = flapRad;
-  flapR.rotation.x = flapRad;
-  gearGrp.visible = state.gearDown;
+  // Replay also eases instead of snapping so retracts/deploys look continuous
+  // when watching the rolling 30s buffer back.
+  const dStep = FLAP_RATE * dt;
+  if (flapAnimRad < flapRad) flapAnimRad = Math.min(flapRad, flapAnimRad + dStep);
+  else if (flapAnimRad > flapRad) flapAnimRad = Math.max(flapRad, flapAnimRad - dStep);
+  const gearTarget = state.gearDown ? 0 : 1;
+  const gStep = GEAR_RATE * dt;
+  if (gearAnim < gearTarget) gearAnim = Math.min(gearTarget, gearAnim + gStep);
+  else if (gearAnim > gearTarget) gearAnim = Math.max(gearTarget, gearAnim - gStep);
+  flapL.rotation.x = flapAnimRad;
+  flapR.rotation.x = flapAnimRad;
+  gearGrp.position.y = -gearAnim * GEAR_LIFT;
+  gearGrp.visible = gearAnim < 0.999;
   // Camera follows the replayed plane in whatever cam mode is active.
   updateCamera(dt);
 }
@@ -1825,8 +1845,8 @@ addEventListener('keydown', e=>{
 addEventListener('keyup', e=>{ keys[e.code]=false; });
 addEventListener('keydown', e=>{
   if (e.repeat) return;
-  if (e.code==='KeyG') state.gearDown = !state.gearDown;
-  if (e.code==='KeyF') state.flaps = (state.flaps + 1) % 3;
+  if (e.code==='KeyG') toggleGear();
+  if (e.code==='KeyF') cycleFlaps();
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyX'){
@@ -1966,8 +1986,8 @@ addEventListener('keydown', e=>{
   const bFlap = document.getElementById('mbFlap');
   const bBrk  = document.getElementById('mbBrk');
   const bCam  = document.getElementById('mbCam');
-  if (bGear) bGear.addEventListener('click', e => { e.preventDefault(); state.gearDown = !state.gearDown; });
-  if (bFlap) bFlap.addEventListener('click', e => { e.preventDefault(); state.flaps = (state.flaps + 1) % 3; });
+  if (bGear) bGear.addEventListener('click', e => { e.preventDefault(); toggleGear(); });
+  if (bFlap) bFlap.addEventListener('click', e => { e.preventDefault(); cycleFlaps(); });
   if (bCam)  bCam.addEventListener('click',  e => { e.preventDefault(); state.cam = (state.cam + 1) % 4; updateCamModeUi(); });
   // Brakes are a hold-to-engage action so a quick taxi stop feels natural.
   if (bBrk){
@@ -1998,6 +2018,14 @@ function resetPlane(){
   state.throttle = 0;
   state.flaps = 0;
   state.gearDown = true;
+  // Snap animated visuals back to match the freshly reset state so the gear
+  // doesn't briefly hang mid-retract after a hot reset.
+  flapAnimRad = 0;
+  gearAnim = 0;
+  gearGrp.position.y = 0;
+  gearGrp.visible = true;
+  flapL.rotation.x = 0;
+  flapR.rotation.x = 0;
   state.brakes = false;
   state.onGround = true;
   state.crashed = false;
@@ -2120,6 +2148,91 @@ function setStallAudio(active){
   } else {
     gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
   }
+}
+
+// ====== Gear / flap one-shot SFX ======
+// Re-uses the same WebAudio context as the stall horn so we don't pile up
+// hardware audio nodes. Gear gives a low "clunk" (snap of filtered noise +
+// short sine thump). Flaps give a soft "whoosh" (bandpassed noise fading out).
+// Both scale with settings.volume so the audio slider mutes them with the
+// rest of the sim.
+function sfxReady(){
+  initStallAudio();
+  if (!stallAudio) return null;
+  const { ctx } = stallAudio;
+  if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+  return ctx;
+}
+function playGearClunk(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.35 * settings.volume;
+  if (vol <= 0) return;
+  // Sine "thump" — 90Hz drops to 55Hz, ~120ms.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(90, t0);
+  osc.frequency.exponentialRampToValueAtTime(55, t0 + 0.12);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.18);
+  // Short noise burst layered on top for the metallic edge of the clunk.
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.06), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * (1 - i/data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 240;
+  bp.Q.value = 0.9;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(vol * 0.5, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
+  src.connect(bp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + 0.08);
+}
+function playFlapWhoosh(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.25 * settings.volume;
+  if (vol <= 0) return;
+  // Filtered noise sweep for the airflow whoosh, ~280ms.
+  const dur = 0.28;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(900, t0);
+  bp.frequency.exponentialRampToValueAtTime(380, t0 + dur);
+  bp.Q.value = 0.7;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.04);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+}
+// Centralized toggle helpers so keyboard + touch + any future binding all
+// trigger the same animation + SFX path.
+function toggleGear(){
+  state.gearDown = !state.gearDown;
+  playGearClunk();
+}
+function cycleFlaps(){
+  state.flaps = (state.flaps + 1) % 3;
+  playFlapWhoosh();
 }
 
 // ====== PHYSICS ======
@@ -2554,9 +2667,23 @@ function step(dt){
     propSpin += Math.min(8, speed * 0.06) * dt;
   }
   propGroup.rotation.z = propSpin;
-  flapL.rotation.x = flapRad;
-  flapR.rotation.x = flapRad;
-  gearGrp.visible = state.gearDown;
+  // Ease flaps + gear toward target. flapAnimRad chases flapRad at FLAP_RATE,
+  // gearAnim chases 0/1 at GEAR_RATE so the gear hauls up and tucks into the
+  // belly instead of popping out of existence. gearGrp.visible stays true
+  // through the travel so the animation is actually seen.
+  {
+    const dStep = FLAP_RATE * dt;
+    if (flapAnimRad < flapRad) flapAnimRad = Math.min(flapRad, flapAnimRad + dStep);
+    else if (flapAnimRad > flapRad) flapAnimRad = Math.max(flapRad, flapAnimRad - dStep);
+    const gearTarget = state.gearDown ? 0 : 1;
+    const gStep = GEAR_RATE * dt;
+    if (gearAnim < gearTarget) gearAnim = Math.min(gearTarget, gearAnim + gStep);
+    else if (gearAnim > gearTarget) gearAnim = Math.max(gearTarget, gearAnim - gStep);
+  }
+  flapL.rotation.x = flapAnimRad;
+  flapR.rotation.x = flapAnimRad;
+  gearGrp.position.y = -gearAnim * GEAR_LIFT;
+  gearGrp.visible = gearAnim < 0.999;
 
   // Cloud drift
   for (const p of cloudPuffs){

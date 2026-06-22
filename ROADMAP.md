@@ -38,10 +38,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Autopilot altitude + heading hold — press `H` to lock current altitude and heading (A is roll, so H = hold), HUD shows AP ON with locked alt/hdg, any stick input disengages, auto-off on ground or crash.
 - [x] Persistent pilot stats screen — total flights, landings, crashes, best landing score, average score, longest flight, total air time. Opens from main menu via 📊 PILOT STATS button, stored in localStorage, reset with confirm.
 - [x] Photo mode — press `P` to pause sim, free-orbit camera (drag + wheel), hide HUD, one-tap PNG download (`S` or SAVE button).
+- [x] Gear and flaps sound effects + animated flaps — clunk on gear up/down, whoosh on flaps, flap surfaces visibly deflect on the wing.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-- [ ] Gear and flaps sound effects + animated flaps — clunk on gear up/down, whoosh on flaps, flap surfaces visibly deflect on the wing.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
