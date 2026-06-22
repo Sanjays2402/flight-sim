@@ -113,6 +113,20 @@
   #replay { position:fixed; top:100px; left:50%; transform:translateX(-50%); padding:6px 14px; font-size:12px; letter-spacing:2px; color:#ffd166; background:rgba(8,14,22,.78); border:1px solid #ffd166; border-radius:6px; font-weight:700; display:none; z-index:9; text-align:center; }
   #replay .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#ff3030; margin-right:8px; vertical-align:middle; animation: blink 1s steps(2) infinite; }
   #replay small { display:block; font-size:10px; letter-spacing:1px; color:#9bb; font-weight:500; margin-top:2px; }
+  /* Crash report card — pops in after a crash so every wreck becomes a lesson.
+     Lives bottom-center so the replay banner up top stays visible. Click or
+     press R/Esc to dismiss. Auto-cleared on resetPlane(). */
+  #crashcard { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); width:300px; padding:14px 16px 12px; border:1px solid #ff5252; border-radius:10px; background:rgba(12,6,8,.92); color:#fde; font-size:12px; display:none; z-index:11; box-shadow:0 6px 24px rgba(0,0,0,.45); cursor:pointer; }
+  #crashcard h3 { font-size:14px; color:#ff5252; margin:0 0 4px; letter-spacing:2px; font-weight:800; text-align:center; }
+  #crashcard .verdict { font-size:13px; color:#ffd166; font-weight:700; text-align:center; margin:0 0 10px; letter-spacing:1px; }
+  #crashcard .grid { display:grid; grid-template-columns:1fr auto; gap:3px 12px; font-size:11px; }
+  #crashcard .grid .lbl { color:#9bb; letter-spacing:1px; }
+  #crashcard .grid .val { color:#cfe; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
+  #crashcard .grid .val.warn { color:#ffd166; }
+  #crashcard .grid .val.bad { color:#ff5252; }
+  #crashcard .reason { font-size:10px; color:#9bb; margin-top:8px; text-align:center; font-style:italic; }
+  #crashcard .hint { font-size:9px; color:#7a8a98; margin-top:8px; text-align:center; letter-spacing:1px; }
+  #crashcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
   /* Mobile touch controls: virtual stick bottom-left (pitch/roll), throttle slider bottom-right.
      Hidden by default; .show class added at runtime on touch-capable devices. A small
      row of tap buttons under the throttle covers gear/flaps/brakes/camera so the sim is
@@ -317,6 +331,18 @@
   </div>
 </div>
 <div id="replay"><span class="dot"></span>REPLAY · LAST 30s<small>click or press <b>R</b> to skip</small></div>
+<div id="crashcard">
+  <h3>CRASH REPORT</h3>
+  <div class="verdict" id="ccVerdict">—</div>
+  <div class="grid">
+    <span class="lbl">PEAK G</span><span class="val" id="ccG">—</span>
+    <span class="lbl">SINK @ IMPACT</span><span class="val" id="ccSink">—</span>
+    <span class="lbl">SPEED @ IMPACT</span><span class="val" id="ccSpd">—</span>
+    <span class="lbl">AOA @ IMPACT</span><span class="val" id="ccAoa">—</span>
+  </div>
+  <div class="reason" id="ccReason"></div>
+  <div class="hint">click to dismiss · <kbd>R</kbd> restart</div>
+</div>
 <div id="photo">
   <div class="ttl">📸 PHOTO MODE</div>
   <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save PNG · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span></div>
@@ -2493,6 +2519,13 @@ const state = {
   windNextChangeMs: 0,
   stall: 0,
   vortex: 0,
+  // Crash report card data: peakG and peakSink track the worst values seen
+  // during the current flight, reset on resetPlane(). crashReport is populated
+  // at each crash site and rendered into #crashcard so every wreck becomes a
+  // lesson instead of just a replay. Cleared on resetPlane / quick-restart.
+  peakG: 0,
+  peakSink: 0,
+  crashReport: null,
   // Aerobatic ribbon trail: Y toggles a colored smoke trail off the tail in
   // the current livery accent color. Off by default; great for loops/rolls
   // and screenshots, hidden anywhere we wouldn't want a live trail (paused,
@@ -2894,6 +2927,61 @@ function showStatus(title, sub, cls){
 }
 function hideStatus(){ statusEl.style.display = 'none'; }
 
+// ====== CRASH REPORT CARD ======
+// After every crash we want the player to know *why*, not just *that*. The
+// card shows peak G during the flight, sink rate + speed + AoA at impact, and
+// a one-line plain-English verdict picked from the worst offender. Builder
+// just stuffs the numbers; the verdict heuristic below decides what to blame.
+const crashCardEl = document.getElementById('crashcard');
+const ccVerdictEl = document.getElementById('ccVerdict');
+const ccGEl       = document.getElementById('ccG');
+const ccSinkEl    = document.getElementById('ccSink');
+const ccSpdEl     = document.getElementById('ccSpd');
+const ccAoaEl     = document.getElementById('ccAoa');
+const ccReasonEl  = document.getElementById('ccReason');
+function pickCrashVerdict(d){
+  // Priority order: catastrophic / structural first, then flight-envelope
+  // mistakes, then geometry, then a generic fallback. Each return is short
+  // so the card stays readable at a glance.
+  if (d.kind === 'airframe')         return 'AIRFRAME FAILURE';
+  if (!d.gearDown)                   return 'GEAR-UP LANDING';
+  if (d.peakG >= 6)                  return 'PULLED THE WINGS OFF';
+  if (d.stalled)                     return 'STALLED ON FINAL';
+  if (d.speedKmh > 280)              return 'OVERSPEED IMPACT';
+  if (d.sinkRate > 14)               return 'SLAMMED IT IN';
+  if (d.pitchDeg < -25)              return 'TOO STEEP, NOSE DOWN';
+  if (d.pitchDeg > 22)               return 'NOSE-HIGH, TAIL STRIKE';
+  if (Math.abs(d.rollDeg) > 35)      return 'WING STRIKE — BANKED TOO HARD';
+  if (!d.onRunway)                   return 'OFF THE RUNWAY';
+  return 'HARD IMPACT';
+}
+function showCrashCard(d){
+  if (!crashCardEl) return;
+  state.crashReport = d;
+  ccVerdictEl.textContent = pickCrashVerdict(d);
+  // PEAK G — amber over 4 g, red over 6 g (where the airframe is screaming).
+  ccGEl.textContent = d.peakG.toFixed(1) + ' G';
+  ccGEl.className = 'val' + (d.peakG >= 6 ? ' bad' : d.peakG >= 4 ? ' warn' : '');
+  // Sink at impact — amber > 5 m/s, red > 10 m/s.
+  ccSinkEl.textContent = d.sinkRate.toFixed(1) + ' m/s';
+  ccSinkEl.className = 'val' + (d.sinkRate >= 10 ? ' bad' : d.sinkRate >= 5 ? ' warn' : '');
+  // Speed at impact — amber > 200 km/h, red > 280.
+  ccSpdEl.textContent = Math.round(d.speedKmh) + ' km/h';
+  ccSpdEl.className = 'val' + (d.speedKmh >= 280 ? ' bad' : d.speedKmh >= 200 ? ' warn' : '');
+  // AoA at impact — amber when near/over stall.
+  ccAoaEl.textContent = d.aoaDeg.toFixed(1) + '°';
+  ccAoaEl.className = 'val' + (d.stalled ? ' bad' : Math.abs(d.aoaDeg) >= 12 ? ' warn' : '');
+  ccReasonEl.textContent = d.reason ? d.reason : '';
+  crashCardEl.style.display = 'block';
+}
+function hideCrashCard(){
+  if (crashCardEl) crashCardEl.style.display = 'none';
+}
+if (crashCardEl){
+  // Click anywhere on the card to dismiss. Doesn't restart — R still does that.
+  crashCardEl.addEventListener('click', hideCrashCard);
+}
+
 // ====== ATC CHATTER ======
 // Fake radio strip at the top of the HUD. Two queues:
 //   * eventQueue — high-priority calls fired from game events (gear up, flap
@@ -3027,6 +3115,12 @@ function resetPlane(){
   state.refueling = false;
   state.stall = 0;
   state.vortex = 0;
+  // Fresh flight = fresh crash trackers. Hide the card if it was up from a
+  // prior wreck; click handler also hides it but R/menu can bypass clicks.
+  state.peakG = 0;
+  state.peakSink = 0;
+  state.crashReport = null;
+  hideCrashCard();
   state.ap.on = false;
   state.msgT = 0;
   // Seed a fresh wind on reset so reps feel different.
@@ -3690,6 +3784,20 @@ function step(dt){
           showStatus('CRASHED', reason, 'bad');
           pushATC('Crash, crash, crash — rolling the trucks.', { now:true });
           state.crashed = true;
+          // Snapshot impact telemetry so the card can show what went wrong.
+          showCrashCard({
+            kind: 'impact',
+            reason,
+            peakG: state.peakG,
+            sinkRate,
+            speedKmh: fwdKmh,
+            aoaDeg: THREE.MathUtils.radToDeg(aoa),
+            pitchDeg,
+            rollDeg,
+            gearDown: state.gearDown,
+            onRunway,
+            stalled: Math.abs(aoa) > STALL_AOA * 0.85 || state.stall > 0.4
+          });
           onCrash();
           startReplay();
         } else {
@@ -3781,6 +3889,13 @@ function step(dt){
   // G-load: vertical body-frame accel reaction. Idle ~1 g; pulling >2.5 g spawns visible vortices.
   const gLoad = Math.max(0, (liftMag / MASS) / G);
   const gFactor = Math.max(0, (gLoad - 2.5) / 2.0); // 0 at 2.5 g, 1 at 4.5 g
+  // Peak trackers for the post-crash report card. Only count airborne values
+  // so taxi bumps and parked weight don't pollute the readout.
+  if (!state.onGround && !state.crashed){
+    if (gLoad > state.peakG) state.peakG = gLoad;
+    const sinkNow = -state.vel.y;
+    if (sinkNow > state.peakSink) state.peakSink = sinkNow;
+  }
   // Over-G damage: above 4.5 g, airframe starts breaking. Accumulates slowly so
   // brief peaks are forgivable; sustained 6+ g rips the wings off fast.
   if (!state.onGround && gLoad > 4.5 && !state.crashed){
@@ -3792,6 +3907,25 @@ function step(dt){
     showStatus('AIRFRAME FAILURE', 'damage 100%', 'bad');
     pushATC('Airframe failure, going down!', { tag:'PILOT', now:true });
     state.crashed = true;
+    // Read final attitude / speed off the live plane so the card has real
+    // numbers even when the wings come off mid-air rather than on touchdown.
+    tmpE.setFromQuaternion(plane.quaternion, 'YXZ');
+    const _failPitchDeg = THREE.MathUtils.radToDeg(tmpE.x);
+    const _failRollDeg  = THREE.MathUtils.radToDeg(tmpE.z);
+    const _failKmh = Math.max(0, vFwd) * 3.6;
+    showCrashCard({
+      kind: 'airframe',
+      reason: 'Damage hit 100% — structure failed',
+      peakG: state.peakG,
+      sinkRate: Math.max(0, -state.vel.y),
+      speedKmh: _failKmh,
+      aoaDeg: THREE.MathUtils.radToDeg(aoa),
+      pitchDeg: _failPitchDeg,
+      rollDeg: _failRollDeg,
+      gearDown: state.gearDown,
+      onRunway: false,
+      stalled: Math.abs(aoa) > STALL_AOA * 0.85 || state.stall > 0.4
+    });
     onCrash();
     startReplay();
   }
@@ -4952,7 +5086,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino','crashcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
