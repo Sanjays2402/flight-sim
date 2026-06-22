@@ -30,15 +30,15 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Damage model — over-G or hard-landing gives damage %, affects handling.
 - [x] Engine-out glide — fuel burns with throttle, X toggles engine kill, prop windmills on deadstick approaches.
 - [x] Refuel on ground at airport — taxi onto the apron, throttle to idle, fuel ticks back up (~30s for a full tank).
+- [x] AI traffic — one other plane doing circuits at the home airport.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **AI traffic** — one other plane doing circuits at the home airport.
-2. **Mobile touch controls** — virtual stick on left, throttle slider on right.
-3. **Settings panel** — sensitivity, FOV, audio volume.
+1. **Mobile touch controls** — virtual stick on left, throttle slider on right.
+2. **Settings panel** — sensitivity, FOV, audio volume.
+3. **Liveries / paint picker** — 3–5 color schemes for the plane.
 4. **Liveries / paint picker** — 3–5 color schemes for the plane.
-5. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

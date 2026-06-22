@@ -896,6 +896,143 @@ flapL.position.set(-2.4, 0.04, 0.62);
 flapR.position.set( 2.4, 0.04, 0.62);
 plane.add(flapL); plane.add(flapR);
 
+// ====== AI TRAFFIC ======
+// One other plane doing left-hand circuits at the home airport (MAIN_AP).
+// Flies a five-leg rectangular pattern: upwind → crosswind → downwind →
+// base → final → touch-and-go and repeat. Banks into turns, scales prop with
+// "throttle", shows up on the minimap as a small cyan dot. Purely visual —
+// no physics, no collision; it's there to make the airspace feel alive.
+const aiPlane = new THREE.Group();
+const aiMatFuse   = new THREE.MeshLambertMaterial({ color: 0xd8e4f0 });
+const aiMatAccent = new THREE.MeshLambertMaterial({ color: 0x2196f3 });
+const aiMatDark   = new THREE.MeshLambertMaterial({ color: 0x222428 });
+const aiMatGlass  = new THREE.MeshLambertMaterial({ color: 0x223344, transparent:true, opacity:0.75 });
+{
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 4.6, 14), aiMatFuse);
+  body.rotation.x = Math.PI/2; aiPlane.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 14), aiMatFuse);
+  nose.rotation.x = -Math.PI/2; nose.position.z = -2.9; aiPlane.add(nose);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 14), aiMatFuse);
+  tail.rotation.x = Math.PI/2; tail.position.z = 3.1; aiPlane.add(tail);
+  const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.561, 0.561, 0.5, 14), aiMatAccent);
+  stripe.rotation.x = Math.PI/2; aiPlane.add(stripe);
+  const cp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 10, 0, Math.PI*2, 0, Math.PI/2), aiMatGlass);
+  cp.position.set(0, 0.42, -0.9); cp.scale.set(1.0, 0.9, 1.7); aiPlane.add(cp);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.12, 1.4), aiMatFuse);
+  wing.position.set(0, 0.05, -0.2); aiPlane.add(wing);
+  for (const s of [-1,1]){
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 1.0), aiMatAccent);
+    tip.position.set(s*4.3, 0.06, -0.2); aiPlane.add(tip);
+  }
+  const tp = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.1, 0.9), aiMatFuse);
+  tp.position.set(0, 0.3, 3.4); aiPlane.add(tp);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 1.1), aiMatFuse);
+  fin.position.set(0, 0.7, 3.4); aiPlane.add(fin);
+  const finAcc = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.4), aiMatAccent);
+  finAcc.position.set(0, 1.05, 3.5); aiPlane.add(finAcc);
+}
+const aiProp = new THREE.Group();
+{
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.22, 12), aiMatDark);
+  hub.rotation.x = Math.PI/2; aiProp.add(hub);
+  for (let i=0;i<2;i++){
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.9, 0.06), aiMatDark);
+    blade.rotation.z = i*Math.PI/2; aiProp.add(blade);
+  }
+}
+aiProp.position.set(0, 0, -3.6);
+aiPlane.add(aiProp);
+scene.add(aiPlane);
+
+// Pattern geometry — left-hand circuit at MAIN_AP. Lengths in metres along
+// the runway's local axes (lz = along runway, lx = across, +lx is the
+// pattern side). Altitudes are AGL above MAIN_AP.elev.
+const AI_PATTERN_ALT   = 180;   // m AGL on downwind
+const AI_DOWNWIND_OFF  = 700;   // m abeam of the runway
+const AI_BASE_OFF      = 1200;  // m past the threshold for base leg turn
+const AI_FINAL_DIST    = 2400;  // m straight-in distance start of final
+const AI_SPEED         = 38;    // m/s ≈ 137 km/h cruise/pattern speed
+const AI_TURN_RATE     = 0.45;  // rad/s turn rate (gives ~14s 180° turn)
+// Convert runway-local (lz along, lx across) → world XZ using MAIN_AP heading.
+function aiLocalToWorld(lx, lz){
+  const cs = Math.cos(MAIN_AP.hdg), sn = Math.sin(MAIN_AP.hdg);
+  return {
+    x: MAIN_AP.x + lx*cs + lz*sn,
+    z: MAIN_AP.z - lx*sn + lz*cs
+  };
+}
+// Five waypoints around the pattern. Heading reference: runway points along
+// +lz, so upwind heading = MAIN_AP.hdg, downwind = MAIN_AP.hdg + π.
+const AI_LEGS = [
+  // upwind: just past departure end, climbing to pattern alt
+  { lx:    0,                lz:  MAIN_AP.len/2 + 800,  alt: AI_PATTERN_ALT * 0.85 },
+  // crosswind: pattern side, level
+  { lx:  AI_DOWNWIND_OFF,    lz:  MAIN_AP.len/2 + 800,  alt: AI_PATTERN_ALT },
+  // downwind: abeam the runway, opposite direction
+  { lx:  AI_DOWNWIND_OFF,    lz: -MAIN_AP.len/2 - AI_BASE_OFF, alt: AI_PATTERN_ALT },
+  // base: turning to final
+  { lx:    0,                lz: -MAIN_AP.len/2 - AI_BASE_OFF, alt: AI_PATTERN_ALT * 0.6 },
+  // final: lined up on runway, descending toward threshold for touch-and-go
+  { lx:    0,                lz: -MAIN_AP.len/2 + 200,  alt: 8 }
+];
+const aiState = {
+  leg: 0,                 // current waypoint index
+  pos: new THREE.Vector3(),
+  heading: MAIN_AP.hdg,   // radians, 0 = north (-z)
+  bank: 0                 // current visual roll for smoothing
+};
+// Spawn somewhere on downwind so it shows up immediately.
+{
+  const start = aiLocalToWorld(AI_LEGS[2].lx, AI_LEGS[2].lz);
+  aiState.pos.set(start.x, MAIN_AP.elev + AI_LEGS[2].alt, start.z);
+  aiState.leg = 3; // heading for base next
+  aiState.heading = MAIN_AP.hdg + Math.PI; // flying downwind direction
+}
+function updateAITraffic(dt){
+  if (dt <= 0) return;
+  const leg = AI_LEGS[aiState.leg];
+  const wp = aiLocalToWorld(leg.lx, leg.lz);
+  const targetY = MAIN_AP.elev + leg.alt;
+  const dx = wp.x - aiState.pos.x;
+  const dz = wp.z - aiState.pos.z;
+  const distH = Math.hypot(dx, dz);
+  // Heading to waypoint. atan2(dx, -dz): 0 = north (-z), +π/2 = east (+x).
+  const desiredHdg = Math.atan2(dx, -dz);
+  // Smallest signed delta.
+  let dh = desiredHdg - aiState.heading;
+  while (dh >  Math.PI) dh -= 2*Math.PI;
+  while (dh < -Math.PI) dh += 2*Math.PI;
+  const turn = Math.max(-AI_TURN_RATE*dt, Math.min(AI_TURN_RATE*dt, dh));
+  aiState.heading += turn;
+  // Smooth bank toward the turn rate (visual only).
+  const wantBank = Math.max(-0.5, Math.min(0.5, dh * 0.9));
+  aiState.bank += (wantBank - aiState.bank) * Math.min(1, 2.5*dt);
+  // Move forward along current heading at fixed speed.
+  const vx = Math.sin(aiState.heading) * AI_SPEED;
+  const vz = -Math.cos(aiState.heading) * AI_SPEED;
+  aiState.pos.x += vx * dt;
+  aiState.pos.z += vz * dt;
+  // Altitude trends to target altitude at a steady ~3 m/s.
+  const dy = targetY - aiState.pos.y;
+  const vy = Math.max(-3, Math.min(3, dy * 0.5));
+  aiState.pos.y += vy * dt;
+  // Waypoint capture: advance when close enough horizontally.
+  if (distH < 120){
+    aiState.leg = (aiState.leg + 1) % AI_LEGS.length;
+  }
+  // Push to the visual group.
+  aiPlane.position.copy(aiState.pos);
+  aiPlane.rotation.set(0, 0, 0);
+  aiPlane.rotateY(aiState.heading);
+  aiPlane.rotateZ(-aiState.bank);
+  // Mild nose attitude tracking the climb/descent.
+  aiPlane.rotateX(Math.max(-0.18, Math.min(0.18, -vy * 0.05)));
+  aiProp.rotation.z += dt * 60;
+  // Cull if absurdly far (shouldn't happen, but safe).
+  const distToPlayer = aiPlane.position.distanceTo(plane.position);
+  aiPlane.visible = distToPlayer < 12000;
+}
+
 // ====== WINGTIP VORTEX TRAILS ======
 // Tapered ribbon trail behind each wingtip; visible when pulling Gs or near stall.
 const VORTEX_SEGS = 28;            // ribbon segments (points along the trail)
@@ -1916,6 +2053,9 @@ function step(dt){
     el.className = 'light ' + (showPAPI ? (i <= reds ? 'red' : 'white') : '');
   }
 
+  // AI traffic update (visual only, runs alongside player physics).
+  updateAITraffic(dt);
+
   drawAttitude(plane.quaternion);
   drawCompass(hdg);
   drawVSI(vs);
@@ -2196,6 +2336,28 @@ function drawMinimap(hdgDeg){
     minimapCtx.textBaseline = 'top';
     minimapCtx.fillText(a.id, px + 5, py + 4);
   }
+  // AI traffic dot: small cyan triangle pointing along its heading. Draws
+  // after airports so the symbol sits on top when colocated.
+  if (aiPlane.visible){
+    const adx = aiPlane.position.x - plane.position.x;
+    const adz = aiPlane.position.z - plane.position.z;
+    const apx = cx + adx * scale;
+    const apy = cy + adz * scale;
+    if (apx > 3 && apx < W-3 && apy > 3 && apy < H-3){
+      minimapCtx.save();
+      minimapCtx.translate(apx, apy);
+      minimapCtx.rotate(aiState.heading);
+      minimapCtx.fillStyle = '#4fc3f7';
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(0, -4);
+      minimapCtx.lineTo(-3, 3);
+      minimapCtx.lineTo( 3, 3);
+      minimapCtx.closePath();
+      minimapCtx.fill();
+      minimapCtx.restore();
+    }
+  }
+
   // Hop target highlight: pulsing ring around the current target airport.
   if (state.mode === 'hop' && !state.hopDone){
     const wantId = state.hopOrder[state.hopIdx];
