@@ -329,6 +329,18 @@
   #pause .card { width:300px; padding:24px 28px 20px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; text-align:center; }
   #pause h2 { font-size:22px; color:#ffd166; margin-bottom:6px; letter-spacing:3px; font-weight:800; }
   #pause .sub { font-size:11px; color:#9bb; margin-bottom:18px; letter-spacing:1px; }
+  /* Pause screenshot thumbnail — grabbed off the live WebGL canvas the
+     moment Esc fires and stuck above the action buttons inside the card,
+     so the freeze screen actually shows what you froze. Width matches the
+     300px card minus its 28px side padding; aspect-ratio crop keeps the
+     wide-screen feel without making the card jump in height. A faint inner
+     ring + tiny corner watermark sells the "polaroid" framing without
+     fighting the existing chrome. Hidden via .hidden when capture fails or
+     the toDataURL path throws (e.g. context loss). */
+  #pause .thumb-wrap { position:relative; width:100%; aspect-ratio:16/9; margin:0 0 14px 0; border:1px solid #2a4a6a; border-radius:6px; overflow:hidden; background:#02060c; box-shadow:0 4px 14px rgba(0,0,0,.35), inset 0 0 0 1px rgba(126,231,135,.08); }
+  #pause .thumb-wrap.hidden { display:none; }
+  #pause .thumb-wrap img { width:100%; height:100%; display:block; object-fit:cover; }
+  #pause .thumb-stamp { position:absolute; right:6px; bottom:5px; font-size:9px; letter-spacing:2px; color:#ffd166; background:rgba(0,0,0,.55); padding:2px 6px; border-radius:3px; border:1px solid rgba(255,209,102,.35); pointer-events:none; font-weight:700; }
   #pause .actions { display:flex; flex-direction:column; gap:8px; }
   #pause button { width:100%; padding:10px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; transition:all .15s ease; }
   #pause button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; transform:translateY(-1px); }
@@ -526,6 +538,10 @@
   <div class="card">
     <h2>PAUSED</h2>
     <div class="sub">SIM FROZEN</div>
+    <div class="thumb-wrap hidden" id="pauseThumbWrap">
+      <img id="pauseThumb" alt="paused frame">
+      <div class="thumb-stamp">PAUSED</div>
+    </div>
     <div class="actions">
       <button id="pauseResume" class="primary" type="button">RESUME</button>
       <button id="pauseRestart" type="button">RESTART MISSION</button>
@@ -11401,12 +11417,44 @@ updateCamModeUi();
   const btnMenu    = document.getElementById('pauseMenu');
   const settingsPanel = document.getElementById('settings');
   const statsPanel    = document.getElementById('stats');
+  const thumbWrap     = document.getElementById('pauseThumbWrap');
+  const thumbImg      = document.getElementById('pauseThumb');
+  // Snap the current WebGL frame into the pause card so the freeze
+  // screen has a tiny souvenir of whatever moment the player paused on.
+  // preserveDrawingBuffer is already on the renderer, so toDataURL hits
+  // the live framebuffer with no extra render. JPEG @ 0.55 keeps the
+  // payload tiny (~30–80 KB) and we never persist it — it's wiped on
+  // closePause() so memory doesn't bloat across many pauses.
+  function captureThumb(){
+    if (!thumbWrap || !thumbImg) return;
+    try {
+      const url = canvas.toDataURL('image/jpeg', 0.55);
+      if (typeof url === 'string' && url.startsWith('data:image')){
+        thumbImg.src = url;
+        thumbWrap.classList.remove('hidden');
+        return;
+      }
+    } catch (_e){ /* fall through to hidden */ }
+    thumbImg.removeAttribute('src');
+    thumbWrap.classList.add('hidden');
+  }
+  function clearThumb(){
+    if (!thumbWrap || !thumbImg) return;
+    thumbImg.removeAttribute('src');
+    thumbWrap.classList.add('hidden');
+  }
   function isAnyOtherModalOpen(){
     return (settingsPanel && settingsPanel.classList.contains('show')) ||
            (statsPanel    && statsPanel.classList.contains('show'));
   }
   function openPause(){
     if (state.paused) return;
+    // Capture BEFORE flipping state.paused / showing the overlay so the
+    // thumbnail grabs the live scene instead of a frame that's already
+    // had the pause-card composited over it. The card lives in DOM, not
+    // the WebGL canvas, so this is mostly belt-and-braces, but capturing
+    // first also dodges any sub-frame race with the next renderer.render.
+    captureThumb();
     state.paused = true;
     panel.classList.add('show');
     // Quiet the horn so its last gain target doesn't hang while step()
@@ -11417,6 +11465,7 @@ updateCamModeUi();
     if (!state.paused) return;
     state.paused = false;
     panel.classList.remove('show');
+    clearThumb();
     // Reset the dt baseline so the first unpaused frame doesn't apply the
     // entire paused wall-clock delta at once (clamp in loop() also caps it,
     // but this avoids a 50ms slug right after Resume).
