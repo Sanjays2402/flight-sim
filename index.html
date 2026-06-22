@@ -302,6 +302,7 @@
   <div class="row"><span class="lbl">DMG</span><span class="val" id="dmg">0%</span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
+  <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
@@ -324,7 +325,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -2714,6 +2715,11 @@ const state = {
   // (Shift = 1° fine, plain = 5° coarse). Heading hold tracks the bug, not
   // the heading captured at engage, so the pilot can re-aim mid-flight.
   ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0 },
+  // Pitch trim wheel: -1..+1, where +1 = full nose-up bias. Applied to pIn as
+  // a constant offset so the pilot can fly hands-off in cruise. Adjust with
+  // `;` (nose down) and `'` (nose up); Shift = 1% fine, plain = 5% coarse.
+  // Autopilot ignores trim (AP owns pitch). Reset to 0 on resetPlane().
+  trim: 0,
   // Replay system: rolling ~30s ring buffer of plane snapshots. After a
   // landing (good or bad) we rewind and play back so you can watch your
   // touchdown from any camera angle. Live physics is paused while replaying.
@@ -2862,7 +2868,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','KeyJ','BracketLeft','BracketRight'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','KeyJ','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -2948,6 +2954,16 @@ addEventListener('keydown', e=>{
       // Update the locked heading immediately so the AP tracks the new bug.
       state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
     }
+  }
+  if (e.code==='Semicolon' || e.code==='Quote'){
+    // Pitch trim wheel. `;` = nose down, `'` = nose up. Plain = 5% coarse,
+    // Shift = 1% fine. Skip while the intro modal is up (no flight yet) and
+    // while autopilot is on (AP owns pitch — trim would just fight it).
+    if (state.introOpen) return;
+    if (state.ap.on) return;
+    const step = e.shiftKey ? 0.01 : 0.05;
+    const dir  = (e.code === 'Semicolon') ? -1 : 1;
+    state.trim = Math.max(-1, Math.min(1, state.trim + dir*step));
   }
   if (e.code==='KeyP'){
     // Photo mode toggle. Skip while the intro modal is up (no plane in the
@@ -3383,6 +3399,9 @@ function resetPlane(){
   state.landReport = null;
   hideLandCard();
   state.ap.on = false;
+  // Trim is a per-flight setting — a fresh reset wipes it back to neutral
+  // so the next takeoff doesn't have the elevator pre-loaded from last cruise.
+  state.trim = 0;
   state.msgT = 0;
   // Seed a fresh wind on reset so reps feel different.
   pickWindTarget();
@@ -3874,6 +3893,14 @@ function step(dt){
       // sim is inverted (pIn<0 = pull back), so negate.
       pIn = -Math.max(-1, Math.min(1, vsErr * 0.35));
     }
+  }
+
+  // Pitch trim wheel: bias the pitch input by the trim setting so the pilot
+  // can hand off the stick in cruise. Sign matches pIn (pIn<0 = pull back),
+  // so +trim (nose-up) subtracts from pIn. Skipped while AP is on (AP already
+  // owns pitch above) and on the ground (no trim authority taxiing).
+  if (!state.ap.on && !state.crashed && !state.onGround){
+    pIn = Math.max(-1, Math.min(1, pIn - state.trim));
   }
 
   const fwd = tmpV1.set(0,0,-1).applyQuaternion(plane.quaternion);
@@ -4430,6 +4457,26 @@ function step(dt){
       'ON · ' + Math.round(state.ap.alt - GEAR_H) + 'm / ' + String(apHdgDeg).padStart(3,'0') + '°';
   } else {
     apRow.style.display = 'none';
+  }
+
+  // Trim HUD row: hidden when neutral so the panel stays tidy on a fresh
+  // takeoff. Arrow points the way the trim is biasing the nose (▲ = nose up,
+  // ▼ = nose down), and the percentage shows how far the wheel is wound off
+  // neutral. Color tracks magnitude so a heavy trim setting is obvious.
+  const trimRow = document.getElementById('trimRow');
+  if (Math.abs(state.trim) > 0.005){
+    trimRow.style.display = 'flex';
+    const arrowEl = document.getElementById('trimArrow');
+    const valEl   = document.getElementById('trimVal');
+    const pct = Math.round(state.trim * 100);
+    arrowEl.textContent = state.trim > 0 ? '▲' : '▼';
+    valEl.textContent   = (pct > 0 ? '+' : '') + pct + '%';
+    const mag = Math.abs(state.trim);
+    const color = mag > 0.5 ? '#ffd166' : '#cfe';
+    arrowEl.style.color = color;
+    valEl.style.color   = color;
+  } else {
+    trimRow.style.display = 'none';
   }
 
   // Wind HUD: direction wind is coming FROM (aviation convention) + speed in knots.
