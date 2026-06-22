@@ -2563,6 +2563,10 @@ const state = {
   // Time of day in 0..24 hours; advances with TOD_SPEED. Starts near sunrise
   // so the first frames show off the cycle without waiting.
   todHours: 9.0,
+  // Previous-frame todHours value, used to detect sunrise/sunset crossings
+  // so we can fire a quick toast when the world transitions. Seeded to the
+  // same starting hour so the first tick doesn't false-fire.
+  todLastHours: 9.0,
   // Autopilot: holds current altitude + heading. Toggle with H. Locked targets
   // are captured at engage time. Any manual stick input (keyboard pitch/roll/yaw
   // or touch stick) auto-disengages so the pilot can grab control without
@@ -4026,8 +4030,26 @@ function step(dt){
   state.wind.x += gust * 0.02;
   state.wind.z += gust * 0.02;
   // Time of day advances every step.
+  const _prevTod = state.todHours;
   state.todHours = (state.todHours + TOD_SPEED * dt) % 24;
   applyTimeOfDay(state.todHours);
+  // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
+  // (sunset), fire a quick golden toast so the player notices the world
+  // changing mid-flight. Wrap-aware: a midnight wrap (prev > now) only
+  // counts as a crossing if the threshold sits between prev..24 or 0..now.
+  if (!state.paused && !state.replayActive && !state.photoMode && !state.introOpen){
+    const _crossed = function(threshold){
+      if (_prevTod === state.todHours) return false;
+      if (state.todHours >= _prevTod){
+        return _prevTod < threshold && state.todHours >= threshold;
+      }
+      // Wrapped past midnight this frame.
+      return _prevTod < threshold || state.todHours >= threshold;
+    };
+    if (_crossed(6))  showToast('\u{1F305}', 'Sunrise', 'The world wakes up.');
+    if (_crossed(18)) showToast('\u{1F307}', 'Sunset',  'Golden hour \u2014 enjoy the view.');
+  }
+  state.todLastHours = state.todHours;
 
   // HUD
   const speedKmh = speed * 3.6;
