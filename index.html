@@ -89,7 +89,7 @@
   <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val" id="dmg">0%</span></div>
-  <div class="row"><span class="lbl">FUEL</span><span class="val" id="fuel">100%</span></div>
+  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
 </div>
@@ -1111,6 +1111,10 @@ const state = {
   // kills the engine with X, thrust stops and the prop windmills — deadstick.
   fuel: 1,
   engineOut: false,
+  // Refueling on the apron: when the plane is stopped on an airport ramp with
+  // throttle at idle, fuel ticks back up. Set each frame by step(); HUD shows
+  // a small ▲ FUEL tag while it's happening.
+  refueling: false,
   msgT: 0,
   cam: 0,
   flyByPos: new THREE.Vector3(),
@@ -1297,6 +1301,7 @@ function resetPlane(){
   state.damage = 0;
   state.fuel = 1;
   state.engineOut = false;
+  state.refueling = false;
   state.stall = 0;
   state.vortex = 0;
   state.msgT = 0;
@@ -1524,6 +1529,39 @@ function step(dt){
       state.engineOut = true;
       state.throttle = 0;
       showStatus('FUEL EXHAUSTED', 'Deadstick — glide her in', 'hard');
+    }
+  }
+  // Refuel on the ground at an airport apron. Conditions: wheels on the deck,
+  // crawling or stopped, throttle pulled to idle, and parked inside an airport's
+  // apron rectangle (the wider grey pad around each runway). Refill rate fills
+  // an empty tank in ~30s — long enough to be a real pit stop, short enough
+  // that you don't get bored. Engine restart on the ground (existing logic)
+  // handles getting moving again afterward.
+  state.refueling = false;
+  if (state.onGround && !state.crashed && state.fuel < 1 && state.throttle <= 0.05 && speed < 4){
+    // Check the closest airport's local-frame apron envelope. Apron geometry
+    // above is (a.w + 24) × (a.len + 60); add a small slack so the wheels can
+    // be just past the painted edge and still count.
+    let onApron = false;
+    for (const a of AIRPORTS){
+      const cs = Math.cos(-a.hdg), sn = Math.sin(-a.hdg);
+      const dx = plane.position.x - a.x, dz = plane.position.z - a.z;
+      const lx = dx*cs - dz*sn;
+      const lz = dx*sn + dz*cs;
+      if (Math.abs(lx) <= a.w/2 + 18 && Math.abs(lz) <= a.len/2 + 36){
+        onApron = true;
+        break;
+      }
+    }
+    if (onApron){
+      const REFUEL_RATE = 1 / 30; // empty → full in ~30s
+      state.fuel = Math.min(1, state.fuel + REFUEL_RATE * dt);
+      state.refueling = true;
+      // Topping off the tank also clears a dry-tank engine-out so the pilot
+      // can fire back up and taxi away without hitting reset.
+      if (state.engineOut && state.fuel > 0.05){
+        state.engineOut = false;
+      }
     }
   }
   // Engine produces no thrust when it's been killed or fuel is dry. Prop windmills
@@ -1788,6 +1826,7 @@ function step(dt){
   const fuelEl = document.getElementById('fuel');
   fuelEl.textContent = fuelPct + '%';
   fuelEl.style.color = fuelPct <= 10 ? '#ff5252' : (fuelPct <= 25 ? '#ffd166' : '#7ee787');
+  document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
 
   // Wind HUD: direction wind is coming FROM (aviation convention) + speed in knots.
