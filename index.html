@@ -29,6 +29,12 @@
   #ai { position:fixed; top:12px; right:12px; width:140px; height:140px; border-radius:50%; overflow:hidden; border:2px solid #1e3548; background:#000; }
   #apinfo { position:fixed; top:160px; right:12px; padding:6px 10px; font-size:11px; color:#9bb; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; max-width:160px; }
   #apinfo b { color:#cfe; }
+  #score { position:fixed; top:228px; right:12px; padding:6px 10px; font-size:11px; color:#9bb; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; min-width:140px; }
+  #score .ttl { color:#ffd166; font-weight:700; letter-spacing:1px; font-size:10px; }
+  #score .row { display:flex; justify-content:space-between; gap:14px; }
+  #score .lbl { color:#6aa; }
+  #score .val { color:#cfe; font-weight:600; }
+  #score .last { color:#7ee787; }
   #status { position:fixed; top:38%; left:50%; transform:translate(-50%,-50%); padding:18px 32px; border-radius:10px; font-size:28px; font-weight:800; letter-spacing:1px; display:none; border:2px solid; text-align:center; }
   #status.good { background:rgba(20,80,40,.85); color:#7ee787; border-color:#7ee787; }
   #status.hard { background:rgba(100,70,10,.85); color:#ffd166; border-color:#ffd166; }
@@ -62,6 +68,13 @@
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
+<div id="score">
+  <div class="ttl">TOUCH &amp; GO</div>
+  <div class="row"><span class="lbl">Last</span><span class="val last" id="scLast">—</span></div>
+  <div class="row"><span class="lbl">Best</span><span class="val" id="scBest">0</span></div>
+  <div class="row"><span class="lbl">Total</span><span class="val" id="scTotal">0</span></div>
+  <div class="row"><span class="lbl">Landings</span><span class="val" id="scN">0</span></div>
+</div>
 <div id="papi">
   <div class="light" id="p1"></div><div class="light" id="p2"></div>
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
@@ -762,7 +775,11 @@ const state = {
   introOpen: true,
   wind: new THREE.Vector3(2, 0, 1.2),
   stall: 0,
-  vortex: 0
+  vortex: 0,
+  scoreLast: null,
+  scoreBest: 0,
+  scoreTotal: 0,
+  scoreCount: 0
 };
 
 const keys = {};
@@ -1010,11 +1027,24 @@ function step(dt){
         }
       } else {
         const apid = land && land.ri ? land.ri.ap.id : '';
-        if (sinkRate < 2.5){
-          showStatus('GREASED IT', 'Sink '+sinkRate.toFixed(1)+' m/s @ '+apid, 'good');
-        } else {
-          showStatus('GOOD LANDING', 'Sink '+sinkRate.toFixed(1)+' m/s @ '+apid, 'good');
-        }
+        // Touch-and-go scoring: reward soft sink, centerline accuracy, and a sweet-spot touchdown speed.
+        // Each component is 0..1, summed * 100 → 0..300 per landing.
+        const sinkScore = Math.max(0, 1 - sinkRate / 6);              // 6 m/s sink = 0 pts; 0 m/s = full
+        const centerOff = Math.abs(land ? land.lx : 0);
+        const halfW = land && land.ri ? land.ri.ap.w/2 : 25;
+        const centerScore = Math.max(0, 1 - centerOff / halfW);       // edge = 0; dead-center = full
+        const targetKmh = 110;                                        // ~typical short-final speed
+        const speedOff = Math.abs(fwdKmh - targetKmh);
+        const speedScore = Math.max(0, 1 - speedOff / 60);            // ±60 km/h off = 0
+        const greaseBonus = sinkRate < 2.5 ? 0.25 : 0;                // soft-touch bonus
+        const score = Math.round((sinkScore + centerScore + speedScore + greaseBonus) * 100);
+        state.scoreLast = score;
+        state.scoreTotal += score;
+        state.scoreCount += 1;
+        if (score > state.scoreBest) state.scoreBest = score;
+        const title = (sinkRate < 2.5 ? 'GREASED IT' : 'GOOD LANDING') + ' · +' + score;
+        const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid;
+        showStatus(title, sub, 'good');
         state.landed = true;
       }
     }
@@ -1098,6 +1128,12 @@ function step(dt){
   $('#flp').textContent  = flapDeg;
   $('#gear').textContent = state.gearDown ? 'DOWN' : 'UP';
   $('#aoa').textContent  = aoaDeg.toFixed(1);
+
+  // Touch-and-go score panel
+  document.getElementById('scLast').textContent  = state.scoreLast == null ? '—' : ('+'+state.scoreLast);
+  document.getElementById('scBest').textContent  = state.scoreBest;
+  document.getElementById('scTotal').textContent = state.scoreTotal;
+  document.getElementById('scN').textContent     = state.scoreCount;
   const stallActive = (Math.abs(aoa) > STALL_AOA*0.85) && speed > 10 && !state.onGround;
   // Stall intensity: 0 below warn threshold, 1 at MAX_AOA. Used for buffet shake + audio.
   const stallNorm = (Math.abs(aoa) - STALL_AOA*0.85) / (MAX_AOA - STALL_AOA*0.85);
