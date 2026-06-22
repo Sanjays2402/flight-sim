@@ -387,6 +387,7 @@
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
   <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
+  <div class="row"><span id="pbrake" style="display:none;color:#ffd166;font-weight:700">🅿 BRK</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
   <div class="row"><span id="engfire" class="warn-red" style="display:none">🔥 ENG FIRE — CUT THROTTLE</span></div>
@@ -413,7 +414,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -603,6 +604,7 @@
       <span>Gear up/down</span><span><kbd>G</kbd></span>
       <span>Flaps cycle</span><span><kbd>F</kbd></span>
       <span>Brakes (ground)</span><span><kbd>B</kbd></span>
+      <span>Parking brake (ground)</span><span><kbd>Shift</kbd>+<kbd>B</kbd></span>
       <span>Reverse thrust (ground)</span><span><kbd>Z</kbd></span>
       <span>Camera cycle</span><span><kbd>C</kbd></span>
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
@@ -4546,6 +4548,10 @@ const state = {
   flapDeg: [0, 20, 40],
   gearDown: true,
   brakes: false,
+  // Parking brake: Shift+B toggles a latch that pins the wheels at low
+  // ground speed without holding B. Auto-releases above ~5 km/h so a
+  // forgotten parking brake can't kill a takeoff roll.
+  parkingBrake: false,
   // Reverse thrust (Z key, runway only). reverser = held-input intent for
   // this frame; reverserActive = post-gate (on ground + on runway + ground
   // speed above the cutoff so we can't shove the plane backwards). reverserT
@@ -4969,6 +4975,16 @@ addEventListener('keydown', e=>{
   if (e.repeat) return;
   if (e.code==='KeyG') toggleGear();
   if (e.code==='KeyF') cycleFlaps();
+  // Shift+B toggles the parking brake. Plain B is hold-to-brake (handled in
+  // step() via keys map), so we only trigger the latch when Shift is held
+  // and we're not already mid-air. Engaging plays a soft ratchet click; the
+  // step() loop auto-releases the latch once ground speed climbs past ~5
+  // km/h so a forgotten parking brake can't kill a takeoff.
+  if (e.code==='KeyB' && e.shiftKey){
+    state.parkingBrake = !state.parkingBrake;
+    playParkingBrakeClick(state.parkingBrake);
+    showStatus(state.parkingBrake ? 'PARKING BRAKE SET' : 'PARKING BRAKE RELEASED', null, 'good');
+  }
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyI'){
@@ -5630,6 +5646,9 @@ function resetPlane(){
   if (wingTipPivotL) wingTipPivotL.rotation.z = 0;
   if (wingTipPivotR) wingTipPivotR.rotation.z = 0;
   state.brakes = false;
+  // Parking brake clears on reset/restart so the new sortie isn't held
+  // hostage by a latch left over from the previous one.
+  state.parkingBrake = false;
   // Reverse thrust resets cleanly so a quick-restart doesn't inherit a
   // half-deployed reverser visual / dust emitter from the prior sortie.
   state.reverser = false;
@@ -5920,6 +5939,37 @@ function playGearClunk(){
   src.connect(bp).connect(ng).connect(ctx.destination);
   src.start(t0);
   src.stop(t0 + 0.08);
+}
+function playParkingBrakeClick(setting){
+  // Soft mechanical ratchet click on parking-brake toggle. Set = three
+  // rapid clicks (ratchet engaging), release = single softer pop. Reuses
+  // the shared WebAudio context so no new hardware nodes.
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const vol = 0.18 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  const clicks = setting ? 3 : 1;
+  const gap = 0.045;
+  for (let i = 0; i < clicks; i++){
+    const ts = t0 + i * gap;
+    // Tiny bandpassed-noise burst at ~1.6 kHz for a plasticky click.
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.025), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let j = 0; j < data.length; j++) data[j] = (Math.random()*2-1) * (1 - j/data.length);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1600;
+    bp.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol * (setting ? 1 : 0.7), ts);
+    g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.03);
+    src.connect(bp).connect(g).connect(ctx.destination);
+    src.start(ts);
+    src.stop(ts + 0.035);
+  }
 }
 function playFlapWhoosh(){
   const ctx = sfxReady();
@@ -6640,6 +6690,21 @@ function step(dt){
     state.throttle = Math.max(0, state.throttle - 1.0*dt);
   }
   state.brakes = !!keys['KeyB'] || !!touch.brake;
+  // Parking brake: locks wheels at low speed so the pilot can sit on the
+  // hold-short line hands-free. Auto-releases above ~5 km/h ground speed so
+  // a forgotten brake can't sabotage a takeoff roll. Drops the brake input
+  // into the same `state.brakes` channel the friction model already uses,
+  // so the physics path stays unchanged.
+  if (state.parkingBrake){
+    const gspKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+    if (gspKmh > 5){
+      state.parkingBrake = false;
+      playParkingBrakeClick(false);
+      showStatus('PARKING BRAKE RELEASED', 'rolling above 5 km/h', null);
+    } else if (state.onGround && !state.crashed){
+      state.brakes = true;
+    }
+  }
   // Reverse thrust input: held Z asks for reverse. Gating to "actually applies
   // a force" happens in the on-ground physics block below (we need onRunway
   // and ground speed, which are computed there). Mid-air this is a no-op so
@@ -7473,6 +7538,12 @@ function step(dt){
   // Reverse-thrust HUD pill: visible while the visual lerp is non-zero so it
   // tracks the ease-in/out rather than snapping when the player releases Z.
   document.getElementById('reverser').style.display = (state.reverserT > 0.05) ? 'inline' : 'none';
+
+  // Parking-brake HUD pill: shows whenever the latch is set. Auto-release
+  // (above ~5 km/h ground speed) clears state.parkingBrake in step() so the
+  // pill drops with it without any extra fade logic here.
+  const pbEl = document.getElementById('pbrake');
+  if (pbEl) pbEl.style.display = state.parkingBrake ? 'inline' : 'none';
 
   // Landing-gear stress indicator: when low + descending fast, warn the pilot
   // to flare. Amber once sink rate would start adding damage on touchdown
@@ -10948,6 +11019,7 @@ updateCamModeUi();
     flapL.rotation.x = 0;
     flapR.rotation.x = 0;
     state.brakes = false;
+    state.parkingBrake = false;
     state.onGround = true;
     state.crashed = false;
     state.landed = false;
