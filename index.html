@@ -67,6 +67,14 @@
      by default — drawGlideslope() flips display:block when active. */
   #glide { position:fixed; top:308px; right:162px; width:46px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
   #glide canvas { display:block; width:100%; height:100%; }
+  /* Crosswind crab indicator: short horizontal bar pinned just below the ATC
+     strip. Green tick = runway centerline heading (always at bar center),
+     magenta arrow = current ground track. Visual gap between them is the crab
+     angle you're flying. Only visible on short final (<3 km, <200m AGL,
+     roughly aligned) so it doesn't pollute the HUD outside the slot when it
+     matters most. Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #crab { position:fixed; top:88px; left:50%; transform:translateX(-50%); width:240px; height:34px; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); padding:2px; display:none; z-index:5; }
+  #crab canvas { display:block; width:100%; height:100%; }
   @keyframes blink { 50% { opacity: 0.25; } }
   #help { bottom:12px; left:12px; max-width:380px; color:#9bb; }
   #help kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:11px; margin:0 1px; border:1px solid #2a4a6a; }
@@ -371,6 +379,7 @@
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
+<div id="crab"><canvas id="crabCv" width="480" height="68"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
 <div id="score">
@@ -7124,6 +7133,7 @@ function step(dt){
   drawCompass(hdg, state.ap.hdgBug);
   drawVSI(vs);
   drawGlideslope(hdg);
+  drawCrabIndicator(hdg);
   drawMinimap(hdg);
   drawWeatherRadar();
   drawCockpitPanel(speedKmh, altM);
@@ -7532,6 +7542,192 @@ function drawGlideslope(hdgDeg){
   glideCtx.font = '9px ui-monospace, monospace';
   const sign = devDeg >= 0 ? '+' : '−';
   glideCtx.fillText(sign + Math.abs(devDeg).toFixed(1) + '°', cx, H - 30);
+}
+
+// ====== Crosswind crab indicator ======
+// Short horizontal tape pinned just below the ATC strip. Green tick sits at
+// the bar center marking the runway centerline heading; magenta arrow shows
+// the plane's current ground track (where the wind is actually taking it).
+// Visual gap between them is the crab angle pilots need to kick out at flare.
+// Only visible on short final: within 3 km of a runway threshold, below 200m
+// AGL, roughly aligned with that runway's course (either end). Otherwise it
+// hides so it doesn't add HUD noise during cruise. Reuses the same runway
+// alignment math as the glideslope strip, but checks both runway ends so the
+// indicator works for left-to-right or right-to-left landings on the same
+// strip (matches the quick-jump Shift+digit reciprocal end behaviour).
+const crabEl = document.getElementById('crab');
+const crabCv = document.getElementById('crabCv');
+const crabCtx = crabCv.getContext('2d');
+const CRAB_RANGE_DEG  = 30;     // full-scale ±deflection across the bar
+const CRAB_MAX_DIST   = 3000;   // metres from threshold
+const CRAB_MAX_AGL    = 200;    // metres above ground / runway elev
+const CRAB_ALIGN_LAT  = 600;    // metres laterally off the centerline
+const CRAB_ALIGN_HDG  = 40;     // degrees of heading off runway course (either end)
+function drawCrabIndicator(hdgDeg){
+  // Find best-aligned runway end. Each runwayInfo describes one strip with
+  // a canonical heading; we also consider the reciprocal (hdg + 180) so
+  // approaches from either end activate the indicator.
+  let best = null, bestScore = 1e9;
+  for (const ri of runwayInfos){
+    const aimX = ri.aimX, aimZ = ri.aimZ;
+    // Distance to the canonical threshold (close enough on either end of a
+    // ~1.5 km strip that this is fine as a coarse range gate).
+    const dxA = plane.position.x - aimX;
+    const dzA = plane.position.z - aimZ;
+    const horizA = Math.hypot(dxA, dzA);
+    // Allow either threshold to be "close": use min of distance to both ends.
+    const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
+    const dx = plane.position.x - ri.ap.x;
+    const dz = plane.position.z - ri.ap.z;
+    const lx = dx*cs - dz*sn;       // lateral offset from centerline (m)
+    const lz = dx*sn + dz*cs;       // along-runway offset (m)
+    // Distance to the *nearest* threshold (south end at +len/2 in runway
+    // local frame, north end at -len/2). This lets opposite-end approaches
+    // pass the range gate.
+    const distSouth = horizA;
+    const dxN = plane.position.x - (ri.ap.x - Math.sin(ri.ap.hdg) * (ri.ap.len/2));
+    const dzN = plane.position.z - (ri.ap.z - Math.cos(ri.ap.hdg) * (ri.ap.len/2));
+    const distNorth = Math.hypot(dxN, dzN);
+    const nearest = Math.min(distSouth, distNorth);
+    if (nearest > CRAB_MAX_DIST) continue;
+    if (Math.abs(lx) > CRAB_ALIGN_LAT) continue;
+    // AGL: nearest runway elevation gives a sensible local ground reference.
+    const agl = plane.position.y - ri.ap.elev;
+    if (agl < 5 || agl > CRAB_MAX_AGL) continue;
+    // Two candidate runway courses: canonical and reciprocal. Pick whichever
+    // the plane heading is closer to so opposite-end finals also fire.
+    const rwyHdg0 = ((ri.ap.hdg * 180/Math.PI) % 360 + 360) % 360;
+    const rwyHdg1 = (rwyHdg0 + 180) % 360;
+    const dh0 = ((hdgDeg - rwyHdg0) + 540) % 360 - 180;
+    const dh1 = ((hdgDeg - rwyHdg1) + 540) % 360 - 180;
+    const useReciprocal = Math.abs(dh1) < Math.abs(dh0);
+    const rwyHdg = useReciprocal ? rwyHdg1 : rwyHdg0;
+    const dh = useReciprocal ? dh1 : dh0;
+    if (Math.abs(dh) > CRAB_ALIGN_HDG) continue;
+    // Score: prefer the runway with the smallest combined range + alignment
+    // error so a closer well-aligned strip wins over a distant one.
+    const score = nearest + Math.abs(lx)*2 + Math.abs(dh)*60;
+    if (score < bestScore){
+      bestScore = score;
+      best = { ri, rwyHdg, dh };
+    }
+  }
+  if (!best){
+    if (crabEl.style.display !== 'none') crabEl.style.display = 'none';
+    return;
+  }
+  if (crabEl.style.display !== 'block') crabEl.style.display = 'block';
+
+  // Ground track from world-frame velocity. Same convention as `hdg` so the
+  // delta against runway course reads as a real heading error.
+  const gsx = state.vel.x, gsz = state.vel.z;
+  const gsMag = Math.hypot(gsx, gsz);
+  // Below ~5 m/s ground speed the track angle gets jittery (taxi / hover);
+  // hide the magenta arrow but keep the bar so the centerline cue stays.
+  let trackDeg = null;
+  if (gsMag > 5){
+    trackDeg = Math.atan2(gsx, -gsz) * 180/Math.PI;
+    if (trackDeg < 0) trackDeg += 360;
+  }
+
+  const W = crabCv.width, H = crabCv.height;
+  const cx = W/2, cy = H/2;
+  crabCtx.clearRect(0, 0, W, H);
+
+  // Tape background — thin horizontal strip with end caps.
+  crabCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  crabCtx.fillRect(10, cy - 12, W - 20, 24);
+  crabCtx.strokeStyle = '#1e3548';
+  crabCtx.lineWidth = 1;
+  crabCtx.strokeRect(10, cy - 12, W - 20, 24);
+
+  // Reference scale ticks every 10° around center (centerline).
+  crabCtx.strokeStyle = '#3a5d77';
+  crabCtx.lineWidth = 1;
+  for (const d of [-20, -10, 10, 20]){
+    const tx = cx + (d / CRAB_RANGE_DEG) * (W/2 - 14);
+    crabCtx.beginPath();
+    crabCtx.moveTo(tx, cy - 8);
+    crabCtx.lineTo(tx, cy + 8);
+    crabCtx.stroke();
+  }
+
+  // Centerline (runway course) — fat green tick at bar center.
+  crabCtx.strokeStyle = '#7ee787';
+  crabCtx.lineWidth = 3;
+  crabCtx.beginPath();
+  crabCtx.moveTo(cx, cy - 13);
+  crabCtx.lineTo(cx, cy + 13);
+  crabCtx.stroke();
+  // Tiny RWY label above the centerline so the pilot knows which course it
+  // represents (runway designator for the active landing direction).
+  const rwyId = Math.round(best.rwyHdg / 10);
+  const rwyTwo = String(((rwyId - 1 + 36) % 36) + 1).padStart(2, '0');
+  crabCtx.fillStyle = '#7ee787';
+  crabCtx.font = 'bold 9px ui-monospace, monospace';
+  crabCtx.textAlign = 'center';
+  crabCtx.textBaseline = 'bottom';
+  crabCtx.fillText('RWY ' + rwyTwo, cx, cy - 14);
+
+  // Ground track arrow — magenta filled triangle pointing down into the bar
+  // at the track angle offset from runway course. Clamps + chevrons when
+  // off-scale (mirrors the heading-bug / glideslope chevron pattern).
+  if (trackDeg != null){
+    let offset = ((trackDeg - best.rwyHdg) + 540) % 360 - 180;
+    const clamped = Math.max(-CRAB_RANGE_DEG, Math.min(CRAB_RANGE_DEG, offset));
+    const ax = cx + (clamped / CRAB_RANGE_DEG) * (W/2 - 14);
+    crabCtx.fillStyle = '#e88be8';
+    crabCtx.strokeStyle = '#2a0a2a';
+    crabCtx.lineWidth = 1;
+    crabCtx.beginPath();
+    crabCtx.moveTo(ax,     cy - 12);
+    crabCtx.lineTo(ax - 6, cy - 2);
+    crabCtx.lineTo(ax + 6, cy - 2);
+    crabCtx.closePath();
+    crabCtx.fill();
+    crabCtx.stroke();
+    // Off-scale chevron when the crab angle exceeds full deflection.
+    if (offset > CRAB_RANGE_DEG){
+      crabCtx.fillStyle = '#e88be8';
+      crabCtx.beginPath();
+      crabCtx.moveTo(W - 6,  cy);
+      crabCtx.lineTo(W - 14, cy - 6);
+      crabCtx.lineTo(W - 14, cy + 6);
+      crabCtx.closePath();
+      crabCtx.fill();
+    } else if (offset < -CRAB_RANGE_DEG){
+      crabCtx.fillStyle = '#e88be8';
+      crabCtx.beginPath();
+      crabCtx.moveTo(6,   cy);
+      crabCtx.lineTo(14,  cy - 6);
+      crabCtx.lineTo(14,  cy + 6);
+      crabCtx.closePath();
+      crabCtx.fill();
+    }
+    // Numeric crab readout under the bar — signed degrees with L/R suffix so
+    // a glance reads "7L" (track is 7° left of centerline => kick right
+    // rudder at flare). Color-coded: green when essentially aligned, amber
+    // for noticeable crab, magenta when the crab is large enough to bust the
+    // landing.
+    const aoff = Math.abs(offset);
+    let txtColor;
+    if (aoff < 2)        txtColor = '#7ee787';
+    else if (aoff < 8)   txtColor = '#ffd166';
+    else                 txtColor = '#e88be8';
+    const dir = offset < 0 ? 'L' : (offset > 0 ? 'R' : '');
+    crabCtx.fillStyle = txtColor;
+    crabCtx.font = 'bold 10px ui-monospace, monospace';
+    crabCtx.textAlign = 'center';
+    crabCtx.textBaseline = 'top';
+    crabCtx.fillText(Math.round(aoff) + '° ' + dir + ' CRAB', cx, cy + 15);
+  } else {
+    // Stationary / ultra-slow: still show the centerline + a hint line.
+    crabCtx.fillStyle = '#9bb';
+    crabCtx.font = '9px ui-monospace, monospace';
+    crabCtx.textAlign = 'center';
+    crabCtx.textBaseline = 'top';
+    crabCtx.fillText('— CRAB —', cx, cy + 15);
+  }
 }
 
 // ====== Mini-map ======
@@ -8806,7 +9002,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','crab','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
