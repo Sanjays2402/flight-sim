@@ -40,11 +40,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Photo mode — press `P` to pause sim, free-orbit camera (drag + wheel), hide HUD, one-tap PNG download (`S` or SAVE button).
 - [x] Gear and flaps sound effects + animated flaps — clunk on gear up/down, whoosh on flaps, flap surfaces visibly deflect on the wing.
 - [x] Cockpit instrument panel — airspeed, attitude, and altimeter gauges drawn on small canvases at the bottom-center; only shown in cockpit cam (C key) so the cockpit view actually feels like sitting behind a panel.
+- [x] Birds — small flocks of birds drift around low-altitude near airports, gentle flap animation, harmless but adds life to the scene.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Birds — small flocks of birds drift around low-altitude near airports, gentle flap animation, harmless but adds life to the scene.
 - [ ] Rain weather toggle — settings option for rain, adds streaks across the screen and dims the sky, persisted to localStorage.
 - [ ] Landing gear stress indicator — HUD light flashes amber when sink rate is high enough to risk damage on touchdown, red when guaranteed damage, gives pilots a flare cue.
 - [ ] Achievement popups — quick toast in the corner when player hits milestones (first landing, 10 landings, perfect landing score, ring chase under 60s, etc.), stored in localStorage so each only fires once.
