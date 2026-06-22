@@ -324,6 +324,7 @@
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
+  <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
   <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
@@ -348,7 +349,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -3028,7 +3029,15 @@ const state = {
   // `hdgBug` is the magenta tick on the compass strip; nudged with [ and ]
   // (Shift = 1° fine, plain = 5° coarse). Heading hold tracks the bug, not
   // the heading captured at engage, so the pilot can re-aim mid-flight.
-  ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0 },
+  ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0, wpFollow:false },
+  // Mini-map waypoint: optional magenta pin the pilot can drop anywhere on the
+  // mini-map (click on desktop, long-press on mobile). Stored in world coords;
+  // null when no pin. The HUD shows bearing+distance to it, and pressing M
+  // engages the autopilot with `ap.wpFollow=true` so heading hold tracks the
+  // pin live (the bug is auto-driven by the bearing each frame). Auto-clears
+  // when the plane passes within 300 m so the pin doesn't stick around after
+  // arrival. Free-flight only — scored missions own their own goals.
+  waypoint: null,
   // Pitch trim wheel: -1..+1, where +1 = full nose-up bias. Applied to pIn as
   // a constant offset so the pilot can fly hands-off in cruise. Adjust with
   // `;` (nose down) and `'` (nose up); Shift = 1% fine, plain = 5% coarse.
@@ -3242,6 +3251,7 @@ addEventListener('keydown', e=>{
     // heading bug to that heading so the displayed bug matches the lock.
     if (state.ap.on){
       state.ap.on = false;
+      state.ap.wpFollow = false;
       showStatus('AUTOPILOT OFF', null, 'hard');
       pushATC('Autopilot disengaged, hand-flying.', { tag:'PILOT' });
     } else if (!state.crashed && !state.onGround){
@@ -3267,6 +3277,41 @@ addEventListener('keydown', e=>{
     if (state.ap.on){
       // Update the locked heading immediately so the AP tracks the new bug.
       state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
+    }
+    // Manual bug nudges break the waypoint-follow lock — pilot is taking aim.
+    state.ap.wpFollow = false;
+  }
+  if (e.code==='KeyM'){
+    // Waypoint AP toggle. Requires a waypoint pin (dropped on the mini-map).
+    // First press engages AP if needed and locks heading-hold onto the bearing
+    // to the pin (the bug is auto-driven each frame so the plane tracks even
+    // as it moves). Second press releases the follow lock; the AP keeps the
+    // last heading. Gated to free flight + airborne, same as autopilot itself.
+    if (state.introOpen) return;
+    if (state.crashed || state.onGround) return;
+    if (state.mode !== 'free') return;
+    if (!state.waypoint){
+      showStatus('NO WAYPOINT', 'tap the mini-map to drop a pin', 'hard');
+      return;
+    }
+    if (state.ap.wpFollow){
+      state.ap.wpFollow = false;
+      showStatus('WAYPOINT AP OFF', 'AP holding last heading', 'hard');
+      pushATC('Waypoint nav released, holding present heading.', { tag:'PILOT' });
+    } else {
+      if (!state.ap.on){
+        // Engage AP at current alt before locking to the pin so altitude hold
+        // kicks in too — prevents the plane from settling into terrain while
+        // chasing a faraway pin.
+        state.ap.alt = plane.position.y;
+        state.ap.on = true;
+      }
+      state.ap.wpFollow = true;
+      const dx = state.waypoint.x - plane.position.x;
+      const dz = state.waypoint.z - plane.position.z;
+      const distKm = Math.hypot(dx, dz) / 1000;
+      showStatus('WAYPOINT AP ON', 'tracking pin · ' + distKm.toFixed(1) + ' km', 'good');
+      pushATC('Direct to waypoint, ' + distKm.toFixed(1) + ' km.', { tag:'PILOT' });
     }
   }
   if (e.code==='Semicolon' || e.code==='Quote'){
@@ -3714,6 +3759,10 @@ function resetPlane(){
   state.landReport = null;
   hideLandCard();
   state.ap.on = false;
+  state.ap.wpFollow = false;
+  // Mini-map waypoint is a per-flight target — reset clears the pin so the
+  // next sortie starts with a clean map (matches trim, which also resets).
+  state.waypoint = null;
   // Trim is a per-flight setting — a fresh reset wipes it back to neutral
   // so the next takeoff doesn't have the elevator pre-loaded from last cruise.
   state.trim = 0;
@@ -4172,12 +4221,25 @@ function step(dt){
     const manualStick = (pIn !== 0) || (rIn !== 0) || (yIn !== 0) || (touch.active && (Math.abs(touch.stickX) > 0.05 || Math.abs(touch.stickY) > 0.05));
     if (manualStick || state.crashed || state.onGround){
       state.ap.on = false;
+      state.ap.wpFollow = false;
       // Suppress noisy re-trigger if we just disengaged this frame.
       if (performance.now() - state.ap.disengageMsgT > 500){
         state.ap.disengageMsgT = performance.now();
         showStatus('AUTOPILOT OFF', manualStick ? 'manual override' : null, 'hard');
       }
     } else {
+      // Waypoint follow: when wpFollow is on and we still have a pin, drive
+      // the heading bug directly from the bearing to the pin so the existing
+      // heading-hold loop below does all the actual flying. World convention:
+      // +x east, +z south; heading 0 = north (-z). atan2(dx, -dz) gives the
+      // bearing in radians measured clockwise from north, matching state.ap.
+      if (state.ap.wpFollow && state.waypoint){
+        const wdx = state.waypoint.x - plane.position.x;
+        const wdz = state.waypoint.z - plane.position.z;
+        const brgRad = Math.atan2(wdx, -wdz);
+        const brgDeg = ((brgRad * 180/Math.PI) % 360 + 360) % 360;
+        state.ap.hdgBug = brgDeg;
+      }
       // ---- Heading hold: bug-driven target. The bug (set with [ / ]) is the
       // authoritative heading; we mirror it into hdgRad so existing readouts
       // stay consistent. Then shortest-arc error, command roll proportional
@@ -4785,6 +4847,33 @@ function step(dt){
       'ON · ' + Math.round(state.ap.alt - GEAR_H) + 'm / ' + String(apHdgDeg).padStart(3,'0') + '°';
   } else {
     apRow.style.display = 'none';
+  }
+
+  // Waypoint HUD row: hidden when no pin. Shows bearing (to-bug, 000–359) and
+  // slant distance in km. Auto-clear within 300 m so the row vanishes after
+  // arrival; if the AP was following, release the lock and toast the pilot.
+  const wpRow = document.getElementById('wpRow');
+  if (state.waypoint){
+    const wdx = state.waypoint.x - plane.position.x;
+    const wdz = state.waypoint.z - plane.position.z;
+    const wDist = Math.hypot(wdx, wdz);
+    if (wDist < 300){
+      const wasFollowing = state.ap.wpFollow;
+      state.waypoint = null;
+      state.ap.wpFollow = false;
+      wpRow.style.display = 'none';
+      showStatus('WAYPOINT REACHED', wasFollowing ? 'AP releasing nav' : null, 'good');
+      pushATC('Waypoint reached, good navigation.', { tag:'TOWER' });
+    } else {
+      wpRow.style.display = 'flex';
+      const brgRad = Math.atan2(wdx, -wdz);
+      const brgDeg = ((Math.round(brgRad * 180/Math.PI) % 360) + 360) % 360;
+      const tag = state.ap.wpFollow ? 'AP → ' : '';
+      document.getElementById('wpReadout').textContent =
+        tag + String(brgDeg).padStart(3,'0') + '° / ' + (wDist/1000).toFixed(1) + ' km';
+    }
+  } else {
+    wpRow.style.display = 'none';
   }
 
   // Trim HUD row: hidden when neutral so the panel stays tidy on a fresh
@@ -5490,6 +5579,64 @@ function drawMinimap(hdgDeg){
       }
     }
   }
+  // Mini-map waypoint pin (free flight). Draw a thin magenta line from the
+  // plane to the pin (or to the rim if it's off-map), and a small diamond at
+  // the pin position. Sits below the plane triangle so the player marker
+  // stays on top, but above airports so the line is readable over labels.
+  if (state.waypoint){
+    const wdx = state.waypoint.x - plane.position.x;
+    const wdz = state.waypoint.z - plane.position.z;
+    const wpx = cx + wdx * scale;
+    const wpy = cy + wdz * scale;
+    const wpInside = (wpx >= 4 && wpx <= W-4 && wpy >= 4 && wpy <= H-4);
+    const wpAng = Math.atan2(wdz, wdx);
+    // Rim point where the line exits the circle when the pin is off-map.
+    const rimX = cx + Math.cos(wpAng) * (R - 8);
+    const rimY = cy + Math.sin(wpAng) * (R - 8);
+    const endX = wpInside ? wpx : rimX;
+    const endY = wpInside ? wpy : rimY;
+    // Dashed connecting line so it's distinguishable from the heading line.
+    minimapCtx.save();
+    minimapCtx.strokeStyle = state.ap.wpFollow ? '#ff6cf7' : 'rgba(255,108,247,0.7)';
+    minimapCtx.lineWidth = state.ap.wpFollow ? 1.5 : 1;
+    minimapCtx.setLineDash([4, 3]);
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(cx, cy);
+    minimapCtx.lineTo(endX, endY);
+    minimapCtx.stroke();
+    minimapCtx.setLineDash([]);
+    if (wpInside){
+      // Diamond marker.
+      minimapCtx.fillStyle = '#ff6cf7';
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(wpx, wpy - 5);
+      minimapCtx.lineTo(wpx + 5, wpy);
+      minimapCtx.lineTo(wpx, wpy + 5);
+      minimapCtx.lineTo(wpx - 5, wpy);
+      minimapCtx.closePath();
+      minimapCtx.fill();
+      // Hollow ring around it for visibility on busy backgrounds.
+      minimapCtx.strokeStyle = 'rgba(255,255,255,0.6)';
+      minimapCtx.lineWidth = 1;
+      minimapCtx.beginPath();
+      minimapCtx.arc(wpx, wpy, 7, 0, Math.PI*2);
+      minimapCtx.stroke();
+    } else {
+      // Off-rim chevron pointing outward so the pilot can see which way the pin lies.
+      minimapCtx.save();
+      minimapCtx.translate(rimX, rimY);
+      minimapCtx.rotate(wpAng + Math.PI/2);
+      minimapCtx.fillStyle = '#ff6cf7';
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(0, -5);
+      minimapCtx.lineTo(-4, 3);
+      minimapCtx.lineTo( 4, 3);
+      minimapCtx.closePath();
+      minimapCtx.fill();
+      minimapCtx.restore();
+    }
+    minimapCtx.restore();
+  }
   // Plane (centre): yellow triangle pointing along current heading. Forward
   // heading 0° = north (up on screen, -z), 90° = east (+x).
   const hdgRad = hdgDeg * Math.PI/180;
@@ -5570,6 +5717,92 @@ function drawMinimap(hdgDeg){
     minimapCtx.fillText('W', _wcx, _wcy + 13);
   }
 }
+
+// ====== Mini-map waypoint input ======
+// Click on the mini-map canvas (or long-press on touch) drops a magenta pin in
+// world coordinates at that point. Click again (anywhere on the map) clears
+// the existing pin. Gated to free flight — scored missions own their own
+// goals and a stray waypoint would just be noise. Bearing/distance update
+// each frame in the HUD and the AP can chase the pin via M.
+(function setupMinimapWaypoint(){
+  function canSetWaypoint(){
+    if (state.introOpen) return false;
+    if (state.mode !== 'free') return false;
+    if (state.replayActive) return false;
+    if (state.photoMode) return false;
+    if (state.paused) return false;
+    if (state.crashed) return false;
+    return true;
+  }
+  // Convert a canvas-relative click point (CSS px) to world (x,z) using the
+  // same MINIMAP_RANGE / scale convention as drawMinimap. North is up so +y
+  // on screen maps to +z in world space.
+  function pxToWorld(clientX, clientY){
+    const r = minimapCv.getBoundingClientRect();
+    // Map CSS px → internal canvas px (canvas is 320x320 displayed at 160x160).
+    const sx = (clientX - r.left) * (minimapCv.width / r.width);
+    const sy = (clientY - r.top)  * (minimapCv.height / r.height);
+    const cx = minimapCv.width/2, cy = minimapCv.height/2;
+    const scale = (minimapCv.width - 8) / MINIMAP_RANGE;
+    const R = Math.min(minimapCv.width, minimapCv.height)/2 - 2;
+    // Reject clicks outside the circular face so taps on the corner badge
+    // (wind arrow) don't accidentally drop a pin.
+    if (Math.hypot(sx - cx, sy - cy) > R) return null;
+    return { x: plane.position.x + (sx - cx) / scale,
+             z: plane.position.z + (sy - cy) / scale };
+  }
+  function setOrClear(p){
+    if (!canSetWaypoint()) return;
+    if (state.waypoint){
+      state.waypoint = null;
+      state.ap.wpFollow = false;
+      showStatus('WAYPOINT CLEARED', null, 'hard');
+      return;
+    }
+    if (!p) return;
+    state.waypoint = p;
+    const distKm = Math.hypot(p.x - plane.position.x, p.z - plane.position.z) / 1000;
+    showStatus('WAYPOINT SET', distKm.toFixed(1) + ' km · press M for AP', 'good');
+    pushATC('Waypoint logged, ' + distKm.toFixed(1) + ' km out.', { tag:'PILOT' });
+  }
+  // Desktop: a plain click sets/clears. Use pointerup so it works for mouse
+  // and pen alike; touch is handled below with a long-press so a casual finger
+  // tap (often a mis-fire on small HUD elements) doesn't drop accidental pins.
+  let lpTimer = 0, lpFired = false, lpX = 0, lpY = 0, lpId = -1;
+  minimapCv.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch'){
+      if (!canSetWaypoint()) return;
+      lpId = e.pointerId;
+      lpFired = false;
+      lpX = e.clientX; lpY = e.clientY;
+      clearTimeout(lpTimer);
+      lpTimer = setTimeout(() => {
+        lpFired = true;
+        setOrClear(pxToWorld(lpX, lpY));
+      }, 450);
+    }
+  });
+  minimapCv.addEventListener('pointermove', e => {
+    if (e.pointerId !== lpId) return;
+    // Cancel long-press if the finger drifts — user is probably scrolling.
+    if (Math.hypot(e.clientX - lpX, e.clientY - lpY) > 10){
+      clearTimeout(lpTimer); lpId = -1;
+    }
+  });
+  minimapCv.addEventListener('pointerup', e => {
+    if (e.pointerType === 'touch'){
+      clearTimeout(lpTimer);
+      lpId = -1;
+      // Short tap on touch is intentionally ignored — only long-press drops a
+      // pin (lpFired). Prevents stray taps while the HUD is being read.
+      return;
+    }
+    // Desktop pointer: treat as a click.
+    setOrClear(pxToWorld(e.clientX, e.clientY));
+  });
+  // Make sure native page gestures don't fight the long-press.
+  minimapCv.style.touchAction = 'none';
+})();
 
 // ====== Cockpit instrument panel ======
 // Three round analog gauges (ASI / Attitude / Altimeter) drawn into the small
@@ -6709,6 +6942,8 @@ updateCamModeUi();
     state.landReport = null;
     hideLandCard();
     state.ap.on = false;
+    state.ap.wpFollow = false;
+    state.waypoint = null;
     state.msgT = 0;
     state.refueling = false;
     state.repairing = false;
