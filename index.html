@@ -349,7 +349,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -388,6 +388,11 @@
       <div class="top"><span class="name">RAIN</span><span class="val" id="setRainV">OFF</span></div>
       <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">COLD START</span><span class="val" id="setColdV">ON</span></div>
+      <button id="setColdBtn" type="button" style="width:100%">TOGGLE COLD START</button>
+      <div class="hint">Start each flight with engine off; press <kbd>I</kbd> on the ground to crank it over. Off = wheels-warm and ready to roll.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">SMOKE TRAIL COLOR</span><span class="val" id="setTrailV">LIVERY</span></div>
@@ -438,6 +443,7 @@
     <button id="mbFlap">FLAP</button>
     <button id="mbBrk">BRK</button>
     <button id="mbCam">CAM</button>
+    <button id="mbIgn">IGN</button>
   </div>
 </div>
 <div id="status"></div>
@@ -559,7 +565,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true };
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -585,6 +591,7 @@ try {
     if (Number.isInteger(saved.livery) && saved.livery >= 0 && saved.livery < LIVERIES.length) settings.livery = saved.livery;
     if (typeof saved.rain === 'boolean') settings.rain = saved.rain;
     if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
+    if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -3018,6 +3025,15 @@ const state = {
   // kills the engine with X, thrust stops and the prop windmills — deadstick.
   fuel: 1,
   engineOut: false,
+  // Cold start ritual (settings.coldStart). When true, throttle is locked at
+  // 0 and the engine produces no thrust until the player taps `I` (or the
+  // mobile IGN button) to crank it over. `ignitionT` is the seconds elapsed
+  // since the player armed the crank; -1 = idle, >=0 = cranking, >=COLD_START_SPOOL_S
+  // clears `coldStart` (engine fires up). Re-armed on resetPlane() and on
+  // X-restart from an engine-out, both gated by settings.coldStart so the
+  // toggle is honored mid-flight (off-by-toggle clears any pending ritual).
+  coldStart: false,
+  ignitionT: -1,
   // Refueling on the apron: when the plane is stopped on an airport ramp with
   // throttle at idle, fuel ticks back up. Set each frame by step(); HUD shows
   // a small ▲ FUEL tag while it's happening.
@@ -3284,18 +3300,37 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyF') cycleFlaps();
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
+  if (e.code==='KeyI'){
+    // Cold-start ignition. Only fires when the cold-start sequence is armed —
+    // otherwise this is a no-op so the I key keeps working as pitch input on
+    // the existing keys[] map (which the step() loop reads each frame).
+    if (state.coldStart) beginIgnition();
+  }
   if (e.code==='KeyX'){
     // Toggle the engine. Lets the pilot deliberately practice deadstick approaches,
     // and also restart the engine on the ground if there's fuel left.
     if (state.engineOut){
       if (state.fuel > 0.001){
-        state.engineOut = false;
-        showStatus('ENGINE RESTARTED', null, 'good');
-        pushATC('Engine restart confirmed.', { now:true });
+        // Cold-start setting routes restart through the same crank ritual as
+        // mission start, so even a mid-flight emergency restart feels like
+        // turning a key. Setting off = legacy one-tap restart.
+        if (settings.coldStart && state.onGround && !state.crashed){
+          armColdStart();
+          showStatus('IGNITION ARMED', 'press I to crank', 'hard');
+          pushATC('Restart attempt, cranking on your call.', { tag:'PILOT', now:true });
+        } else {
+          state.engineOut = false;
+          showStatus('ENGINE RESTARTED', null, 'good');
+          pushATC('Engine restart confirmed.', { now:true });
+        }
       }
     } else {
       state.engineOut = true;
       state.throttle = 0;
+      // Pilot pulled the mixture — abort any in-progress crank so the sequence
+      // doesn't fire the engine back on a couple ticks later.
+      state.coldStart = false;
+      state.ignitionT = -1;
       showStatus('ENGINE OUT', 'Deadstick — glide her in', 'hard');
       pushATC('Mayday, engine out, declaring emergency.', { tag:'PILOT', now:true });
     }
@@ -3519,14 +3554,18 @@ addEventListener('keydown', e=>{
     thr.addEventListener(evt, e => { if (e.pointerId === thrId) thrRelease(); });
   }
 
-  // ---- Tap buttons: gear / flaps / brakes (hold) / camera cycle ----
+  // ---- Tap buttons: gear / flaps / brakes (hold) / camera cycle / ignition ----
   const bGear = document.getElementById('mbGear');
   const bFlap = document.getElementById('mbFlap');
   const bBrk  = document.getElementById('mbBrk');
   const bCam  = document.getElementById('mbCam');
+  const bIgn  = document.getElementById('mbIgn');
   if (bGear) bGear.addEventListener('click', e => { e.preventDefault(); toggleGear(); });
   if (bFlap) bFlap.addEventListener('click', e => { e.preventDefault(); cycleFlaps(); });
   if (bCam)  bCam.addEventListener('click',  e => { e.preventDefault(); state.cam = (state.cam + 1) % 4; updateCamModeUi(); });
+  // Ignition: only fires when the cold-start sequence is armed. Same gate as
+  // the I key handler so the button can't sneak around the rules.
+  if (bIgn)  bIgn.addEventListener('click',  e => { e.preventDefault(); if (state.coldStart) beginIgnition(); });
   // Brakes are a hold-to-engage action so a quick taxi stop feels natural.
   if (bBrk){
     const press = e => { e.preventDefault(); touch.brake = true; };
@@ -3877,6 +3916,12 @@ function resetPlane(){
     setRingMissionVisible(true);
   }
   hideStatus();
+  // Cold-start ritual: arm AFTER hideStatus so the "press I" banner sticks
+  // around for the player to actually read. armColdStart() is a no-op when
+  // settings.coldStart is off, so impatient pilots get the legacy hot start.
+  state.coldStart = false;
+  state.ignitionT = -1;
+  armColdStart();
 }
 resetPlane();
 
@@ -4085,6 +4130,87 @@ function cycleFlaps(){
   pushATC('Flaps ' + state.flaps + ', configured.');
 }
 
+// ====== COLD START SEQUENCE ======
+// When settings.coldStart is on, every fresh sortie (and any X-restart from an
+// engine-out) parks the engine off with throttle locked at 0 until the player
+// taps `I` to crank. Cranking spins the prop with a layered starter-motor SFX,
+// then the engine catches and control returns. Skippable for impatient pilots
+// via the settings toggle.
+const COLD_START_SPOOL_S = 1.6;     // seconds from crank-tap to engine-online
+function armColdStart(){
+  if (!settings.coldStart) return;
+  state.coldStart = true;
+  state.ignitionT = -1;
+  state.throttle = 0;
+  showStatus('COLD START', 'press I to ignite', 'hard');
+}
+function beginIgnition(){
+  // Crank gate: only valid while the cold-start sequence is armed and we're
+  // safely parked. Already-cranking presses are ignored (the SFX would stack).
+  if (!state.coldStart || state.ignitionT >= 0) return;
+  if (state.introOpen || state.crashed || !state.onGround) return;
+  // No fuel = no fire. Bail with a helpful nudge instead of silently faking it.
+  if (state.fuel <= 0){
+    showStatus('NO FUEL', 'taxi onto the apron to refuel', 'hard');
+    return;
+  }
+  state.ignitionT = 0;
+  // Pilot is in command; tower hears the crank confirmation either way.
+  pushATC('Cranking — stand by.', { tag:'PILOT', now:true });
+  showStatus('IGNITION', 'spooling up...', 'good');
+  playIgnitionCrank();
+}
+function finishIgnition(){
+  state.coldStart = false;
+  state.ignitionT = -1;
+  // If the engine was killed (X) AND we're going through cold-start to bring
+  // it back, also clear the engine-out so thrust returns when the player
+  // pushes the throttle. Pure mission-start path already has engineOut=false.
+  state.engineOut = false;
+  showStatus('ENGINE ONLINE', 'cleared to taxi', 'good');
+  pushATC('Engine running, all gauges green.', { tag:'PILOT' });
+}
+// Starter-motor whir + a quick catch thump. Cheap WebAudio nodes; mirrors
+// the gear/flap SFX style so nothing leaks across the loop.
+function playIgnitionCrank(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.32 * settings.volume;
+  if (vol <= 0) return;
+  // Starter whir: sawtooth that ramps up in pitch while the cranking lasts,
+  // then hands off to a quick "catch" pop when the cylinders fire.
+  const dur = COLD_START_SPOOL_S;
+  const whir = ctx.createOscillator();
+  whir.type = 'sawtooth';
+  whir.frequency.setValueAtTime(85, t0);
+  whir.frequency.linearRampToValueAtTime(140, t0 + dur * 0.85);
+  const wlp = ctx.createBiquadFilter();
+  wlp.type = 'lowpass';
+  wlp.frequency.value = 600;
+  wlp.Q.value = 0.6;
+  const wg = ctx.createGain();
+  wg.gain.setValueAtTime(0.0, t0);
+  wg.gain.linearRampToValueAtTime(vol * 0.7, t0 + 0.08);
+  wg.gain.setValueAtTime(vol * 0.7, t0 + dur * 0.85);
+  wg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.05);
+  whir.connect(wlp).connect(wg).connect(ctx.destination);
+  whir.start(t0);
+  whir.stop(t0 + dur + 0.08);
+  // Catch thump at the end — small sine bloop announcing the engine fires.
+  const pop = ctx.createOscillator();
+  pop.type = 'sine';
+  pop.frequency.setValueAtTime(160, t0 + dur * 0.9);
+  pop.frequency.exponentialRampToValueAtTime(95, t0 + dur + 0.18);
+  const pg = ctx.createGain();
+  pg.gain.setValueAtTime(0.0, t0 + dur * 0.9);
+  pg.gain.linearRampToValueAtTime(vol * 0.55, t0 + dur * 0.95);
+  pg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.22);
+  pop.connect(pg).connect(ctx.destination);
+  pop.start(t0 + dur * 0.9);
+  pop.stop(t0 + dur + 0.24);
+}
+
 // ====== PHYSICS ======
 const G = 9.81;
 const RHO = 1.225;
@@ -4265,8 +4391,19 @@ function updateAcrobat(dt){
 }
 
 function step(dt){
+  // Cold-start ritual: tick the ignition timer here so the legacy throttle
+  // path stays untouched. Throttle pinning lives inside the throttle branch
+  // below; this just advances the spool clock when the player has cranked.
+  if (state.coldStart && state.ignitionT >= 0){
+    state.ignitionT += dt;
+    if (state.ignitionT >= COLD_START_SPOOL_S) finishIgnition();
+  }
   if (!state.crashed){
-    if (state.engineOut){
+    if (state.coldStart){
+      // Engine isn't running yet — keep the throttle pinned regardless of
+      // W/S taps so the player can't sneak around the crank.
+      state.throttle = 0;
+    } else if (state.engineOut){
       // Engine out — no throttle response; bleed any commanded throttle to zero.
       state.throttle = Math.max(0, state.throttle - 1.0*dt);
     } else if (touch.throttle !== null){
@@ -4283,7 +4420,11 @@ function step(dt){
 
   let pIn = 0, rIn = 0, yIn = 0;
   if (!state.crashed){
-    if (keys['KeyI']) pIn -= 1;
+    // Suppress the KeyI pitch contribution during a cold-start so the
+    // "press I to ignite" tap doesn't also bunt the elevator. Plane is parked
+    // with throttle locked so the pitch input would do nothing visible anyway,
+    // but skipping it keeps the keys map honest.
+    if (keys['KeyI'] && !state.coldStart) pIn -= 1;
     if (keys['KeyK']) pIn += 1;
     if (keys['KeyA']) rIn -= 1;
     if (keys['KeyD']) rIn += 1;
@@ -4472,8 +4613,9 @@ function step(dt){
     }
   }
   // Engine produces no thrust when it's been killed or fuel is dry. Prop windmills
-  // visually slow in the animate-parts block below.
-  const engineLive = !state.engineOut && state.fuel > 0;
+  // visually slow in the animate-parts block below. Cold-start also kills thrust
+  // (no fuel reaching combustion until the crank ritual finishes).
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
   const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
@@ -6127,10 +6269,15 @@ function drawCockpitRpm(speedKmh){
   const sweep = Math.PI * 4/3;
   const startA = -Math.PI - Math.PI/6;
   // Map engine state to RPM: live engine idles around 600 and climbs to 2800
-  // at full throttle; engine-out just windmills with airspeed.
-  const engineLive = !state.engineOut && state.fuel > 0;
+  // at full throttle; engine-out just windmills with airspeed. Cold-start
+  // shows 0 — the engine is off, no idle.
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
   let rpm;
-  if (engineLive){
+  if (state.coldStart){
+    // During the crank itself, sweep up from 0 to ~300 RPM (starter motor)
+    // so the gauge needle actually moves while the player waits.
+    rpm = state.ignitionT >= 0 ? Math.min(300, state.ignitionT / COLD_START_SPOOL_S * 320) : 0;
+  } else if (engineLive){
     rpm = 600 + state.throttle * 2200;
   } else {
     rpm = Math.min(900, speedKmh * 4);
@@ -6523,7 +6670,7 @@ function loop(now){
     propGroup.rotation.z += 0.4*dt;
     updateCamera(dt);
   }
-  if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed){
+  if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed && !state.coldStart){
     hideStatus();
   }
   // ATC chatter strip: pump queued/idle lines. Skipped while the intro or
@@ -6788,6 +6935,8 @@ addEventListener('keydown', e => {
   const livV = document.getElementById('setLivV');
   const rainBtn = document.getElementById('setRainBtn');
   const rainV = document.getElementById('setRainV');
+  const coldBtn = document.getElementById('setColdBtn');
+  const coldV = document.getElementById('setColdV');
   const trailSel = document.getElementById('setTrail');
   const trailV = document.getElementById('setTrailV');
   if (!panel || !btnOpen) return;
@@ -6847,6 +6996,11 @@ addEventListener('keydown', e => {
       rainBtn.textContent = settings.rain ? 'RAIN: ON' : 'RAIN: OFF';
       rainBtn.classList.toggle('primary', settings.rain);
     }
+    if (coldV) coldV.textContent = settings.coldStart ? 'ON' : 'OFF';
+    if (coldBtn){
+      coldBtn.textContent = settings.coldStart ? 'COLD START: ON' : 'COLD START: OFF';
+      coldBtn.classList.toggle('primary', settings.coldStart);
+    }
     if (trailSel) trailSel.value = settings.trailColor;
     if (trailV){
       const tc = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
@@ -6883,6 +7037,21 @@ addEventListener('keydown', e => {
       e.stopPropagation();
       settings.rain = !settings.rain;
       applyRainVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (coldBtn){
+    coldBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.coldStart = !settings.coldStart;
+      // Flipping the toggle mid-flight clears any pending ritual so the
+      // player isn't stuck staring at a status banner with no way out.
+      if (!settings.coldStart && state.coldStart){
+        state.coldStart = false;
+        state.ignitionT = -1;
+        hideStatus();
+      }
       syncInputs();
       saveSettings();
     });
