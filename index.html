@@ -806,7 +806,9 @@ const state = {
   mode: 'free',
   hopOrder: [],
   hopIdx: 0,
-  hopDone: false
+  hopDone: false,
+  hopStartMs: 0,
+  hopElapsedMs: 0
 };
 
 const keys = {};
@@ -867,6 +869,8 @@ function startMission(mode){
     state.hopOrder = AIRPORTS.filter(a => a.id !== MAIN_AP.id).map(a => a.id);
     state.hopIdx = 0;
     state.hopDone = false;
+    state.hopStartMs = performance.now();
+    state.hopElapsedMs = 0;
   }
   document.getElementById('msTtl').textContent = missionTitles[mode] || 'MISSION';
   missionEl.style.display = (mode === 'free') ? 'none' : 'block';
@@ -948,6 +952,13 @@ const tmpV1 = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const tmpV3 = new THREE.Vector3();
 const tmpE  = new THREE.Euler();
+
+function fmtHopTime(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
 
 function landingProj(px, pz){
   let best = null, bestS = 1e9;
@@ -1108,7 +1119,8 @@ function step(dt){
             state.hopIdx += 1;
             if (state.hopIdx >= state.hopOrder.length){
               state.hopDone = true;
-              extra = ' · HOP COMPLETE';
+              state.hopElapsedMs = performance.now() - state.hopStartMs;
+              extra = ' · HOP COMPLETE in ' + fmtHopTime(state.hopElapsedMs);
             } else {
               extra = ' · next: ' + state.hopOrder[state.hopIdx];
             }
@@ -1237,17 +1249,19 @@ function step(dt){
     document.getElementById('msVal').textContent = state.scoreCount + ' · best +' + state.scoreBest;
   } else if (state.mode === 'hop'){
     if (state.hopDone){
-      document.getElementById('msTgt').textContent = 'DONE';
+      document.getElementById('msTgt').textContent = 'DONE · ' + fmtHopTime(state.hopElapsedMs);
       document.getElementById('msLbl').textContent = 'Score';
       document.getElementById('msVal').textContent = '+' + state.scoreTotal;
     } else {
       const wantId = state.hopOrder[state.hopIdx];
       const wantAp = AIRPORTS.find(a => a.id === wantId);
-      document.getElementById('msTgt').textContent = wantId + ' (' + (state.hopIdx+1) + '/' + state.hopOrder.length + ')';
+      // Live finish timer ticks while hop is in progress.
+      const elapsedMs = performance.now() - state.hopStartMs;
+      document.getElementById('msTgt').textContent = wantId + ' (' + (state.hopIdx+1) + '/' + state.hopOrder.length + ') · ' + fmtHopTime(elapsedMs);
       document.getElementById('msLbl').textContent = 'To target';
       if (wantAp){
-        const dt = Math.hypot(plane.position.x - wantAp.x, plane.position.z - wantAp.z);
-        document.getElementById('msVal').textContent = (dt/1000).toFixed(1) + ' km';
+        const dtKm = Math.hypot(plane.position.x - wantAp.x, plane.position.z - wantAp.z);
+        document.getElementById('msVal').textContent = (dtKm/1000).toFixed(1) + ' km';
       }
     }
   }
