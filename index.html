@@ -243,6 +243,29 @@
   #pause button.primary:hover { background:rgba(60,120,75,.95); }
   #pause .hint { font-size:10px; color:#9bb; margin-top:12px; letter-spacing:1px; }
   #pause kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
+  /* Quick-jump airport selector (J key): tiny overlay listing every airport
+     with a one-key number so the player can warp straight to that field's
+     runway threshold instead of restarting the mission. Free-flight only —
+     gated against scored missions, replay, photo, pause, and intro. Styled
+     to feel like the pause menu / settings panels so the chrome stays
+     consistent. Hidden by default; .show flips display on. */
+  #jumpsel { position:fixed; inset:0; background:rgba(0,5,12,.78); display:none; align-items:center; justify-content:center; z-index:26; }
+  #jumpsel.show { display:flex; }
+  #jumpsel .card { width:340px; padding:22px 24px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; text-align:center; }
+  #jumpsel h2 { font-size:20px; color:#7ee787; margin-bottom:4px; letter-spacing:3px; font-weight:800; }
+  #jumpsel .sub { font-size:11px; color:#9bb; margin-bottom:16px; letter-spacing:1px; }
+  #jumpsel .list { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
+  #jumpsel .ap { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; cursor:pointer; transition:all .15s ease; text-align:left; }
+  #jumpsel .ap:hover { background:rgba(40,80,110,.85); border-color:#7ee787; transform:translateY(-1px); }
+  #jumpsel .ap .num { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:5px; background:#1a2a3a; border:1px solid #2a4a6a; color:#ffd166; font-weight:800; font-size:13px; flex:0 0 auto; }
+  #jumpsel .ap .id { color:#7ee787; font-weight:800; letter-spacing:1px; font-size:12px; width:54px; flex:0 0 auto; }
+  #jumpsel .ap .nm { color:#cfe; font-weight:600; font-size:12px; flex:1 1 auto; }
+  #jumpsel .ap .meta { color:#9bb; font-size:10px; letter-spacing:1px; flex:0 0 auto; }
+  #jumpsel .ap.here { border-color:#7ee787; background:rgba(40,90,55,.55); cursor:default; }
+  #jumpsel .ap.here:hover { transform:none; }
+  #jumpsel .ap.here .num { color:#7ee787; }
+  #jumpsel .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
+  #jumpsel kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
 </style>
 </head>
 <body>
@@ -286,7 +309,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -372,6 +395,14 @@
     <div class="hint">press <kbd>Esc</kbd> to resume</div>
   </div>
 </div>
+<div id="jumpsel">
+  <div class="card">
+    <h2>QUICK JUMP</h2>
+    <div class="sub">PICK A FIELD</div>
+    <div class="list" id="jumpList"></div>
+    <div class="hint">press <kbd>1</kbd>–<kbd>9</kbd> to jump · <kbd>J</kbd>/<kbd>Esc</kbd> to cancel</div>
+  </div>
+</div>
 <div id="achievements"></div>
 <div id="mission">
   <div class="ttl" id="msTtl">MISSION</div>
@@ -422,6 +453,7 @@
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
       <span>Pause menu</span><span><kbd>Esc</kbd></span>
+      <span>Quick-jump airport</span><span><kbd>J</kbd> (free flight)</span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
     <div class="tip">
@@ -2578,6 +2610,11 @@ const state = {
   scoreBest: 0,
   scoreTotal: 0,
   scoreCount: 0,
+  // Quick-jump airport selector overlay: open/closed flag. When true, the
+  // #jumpsel modal is visible and number keys 1–9 teleport the plane to the
+  // matching airport's runway threshold (free-flight only). Other Esc/keyboard
+  // handlers check this gate so the overlay's Esc/J close path wins cleanly.
+  jumpOpen: false,
   mode: 'free',
   hopOrder: [],
   hopIdx: 0,
@@ -2756,7 +2793,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','BracketLeft','BracketRight'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','KeyJ','BracketLeft','BracketRight'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -5690,9 +5727,161 @@ updateCamModeUi();
     if (state.introOpen) return;
     if (state.photoMode) return;
     if (state.replayActive) return;
+    if (state.jumpOpen) return;
     if (!state.paused && isAnyOtherModalOpen()) return;
     e.preventDefault();
     if (state.paused) closePause(); else openPause();
+  });
+})();
+
+// ====== QUICK-JUMP AIRPORT SELECTOR ======
+// Press J in free flight to open a small overlay listing every airport with a
+// one-key number (1–9). Pressing the number teleports the plane to that
+// airport's runway threshold, engine running at 30% throttle, gear down, on
+// the ground — a fast "practice landings at the other field" shortcut that
+// doesn't restart the mission. Gated to free flight: scored missions (T&G,
+// Hop, Ring), replay, photo, pause, and intro all block it so it can't be
+// abused to skip objectives. The current field is shown but not selectable.
+(function setupQuickJumpUi(){
+  const panel    = document.getElementById('jumpsel');
+  const listEl   = document.getElementById('jumpList');
+  if (!panel || !listEl) return;
+
+  // Teleport the plane to ap's runway threshold, mirroring resetPlane()'s
+  // pose math but for the chosen field. Throttle is bumped to 30% so the
+  // pilot can roll straight into a takeoff instead of restarting from zero,
+  // and old trails/contrails/ribbon/replay buffer are cleared so nothing
+  // ghosts from the previous spot. Mission timers / scores are left alone.
+  function teleportTo(ap){
+    plane.position.set(ap.x, ap.elev + GEAR_H, ap.z + ap.len/2 - 100);
+    plane.quaternion.identity();
+    if (ap.hdg !== 0) plane.rotateY(ap.hdg);
+    state.vel.set(0,0,0);
+    state.throttle = 0.30;
+    state.flaps = 0;
+    state.gearDown = true;
+    flapAnimRad = 0;
+    gearAnim = 0;
+    gearGrp.position.y = 0;
+    gearGrp.visible = true;
+    flapL.rotation.x = 0;
+    flapR.rotation.x = 0;
+    state.brakes = false;
+    state.onGround = true;
+    state.crashed = false;
+    state.landed = false;
+    state.stall = 0;
+    state.vortex = 0;
+    state.peakG = 0;
+    state.peakSink = 0;
+    state.gLoad = 1.0;
+    state.crashReport = null;
+    hideCrashCard();
+    state.ap.on = false;
+    state.msgT = 0;
+    state.refueling = false;
+    state.engineOut = false;
+    pickWindTarget();
+    state.wind.copy(state.windTarget);
+    for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
+    clearContrails();
+    clearRibbon();
+    clearAirshowSmoke();
+    stopReplay();
+    clearReplayBuffer();
+  }
+
+  // The "current" airport is whichever runway nearestRunwayInfo picks AND we're
+  // actually close to (within ~250m of it). Anything farther counts as "in the
+  // air" and every field is jumpable.
+  function currentAirportId(){
+    const r = nearestRunwayInfo(plane.position.x, plane.position.z);
+    if (r.ap && r.d < 250) return r.ap.id;
+    return null;
+  }
+
+  function renderList(){
+    const hereId = currentAirportId();
+    let html = '';
+    AIRPORTS.forEach((ap, i) => {
+      const n = i + 1;
+      const here = (ap.id === hereId);
+      html += '<div class="ap' + (here ? ' here' : '') + '" data-idx="' + i + '">'
+            +   '<span class="num">' + n + '</span>'
+            +   '<span class="id">'  + ap.id + '</span>'
+            +   '<span class="nm">'  + ap.name + (here ? ' · here' : '') + '</span>'
+            +   '<span class="meta">' + Math.round(ap.elev) + 'm</span>'
+            + '</div>';
+    });
+    listEl.innerHTML = html;
+    for (const row of listEl.querySelectorAll('.ap')){
+      if (row.classList.contains('here')) continue;
+      row.addEventListener('click', e => {
+        e.stopPropagation();
+        const idx = parseInt(row.dataset.idx, 10);
+        if (!Number.isFinite(idx)) return;
+        const ap = AIRPORTS[idx];
+        if (!ap) return;
+        closePanel();
+        teleportTo(ap);
+        showStatus('JUMPED TO ' + ap.id, ap.name + ' · throttle 30%', 'good');
+        pushATC('Repositioning to ' + ap.id + ', taxi at your discretion.', { tag:'TOWER', now:true });
+      });
+    }
+  }
+
+  function canOpen(){
+    // Free flight only. Scored modes have objectives that a teleport would
+    // break; replay/photo/pause/intro own their own UI; crashed is a wreck
+    // (use R to restart). Keeps the feature tightly scoped.
+    if (state.mode !== 'free') return false;
+    if (state.introOpen) return false;
+    if (state.replayActive) return false;
+    if (state.photoMode) return false;
+    if (state.paused) return false;
+    if (state.crashed) return false;
+    return true;
+  }
+  function openPanel(){
+    if (state.jumpOpen) return;
+    state.jumpOpen = true;
+    renderList();
+    panel.classList.add('show');
+  }
+  function closePanel(){
+    if (!state.jumpOpen) return;
+    state.jumpOpen = false;
+    panel.classList.remove('show');
+  }
+
+  // Click background to dismiss; click on a row teleports (handled above).
+  panel.addEventListener('click', e => {
+    if (e.target === panel) closePanel();
+  });
+
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'KeyJ'){
+      if (state.jumpOpen){ e.preventDefault(); closePanel(); return; }
+      if (!canOpen()) return;
+      e.preventDefault();
+      openPanel();
+      return;
+    }
+    if (!state.jumpOpen) return;
+    if (e.code === 'Escape'){ e.preventDefault(); closePanel(); return; }
+    // Digit1…Digit9 (top-row) and Numpad1…Numpad9 both teleport.
+    let n = -1;
+    if (e.code.startsWith('Digit'))  n = parseInt(e.code.slice(5), 10);
+    if (e.code.startsWith('Numpad')) n = parseInt(e.code.slice(6), 10);
+    if (!Number.isFinite(n) || n < 1 || n > AIRPORTS.length) return;
+    e.preventDefault();
+    const ap = AIRPORTS[n - 1];
+    if (!ap) return;
+    closePanel();
+    teleportTo(ap);
+    showStatus('JUMPED TO ' + ap.id, ap.name + ' · throttle 30%', 'good');
+    pushATC('Repositioning to ' + ap.id + ', taxi at your discretion.', { tag:'TOWER', now:true });
   });
 })();
 
