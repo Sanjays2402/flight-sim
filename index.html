@@ -406,6 +406,7 @@
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
   <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
   <div class="gauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
+  <div class="gauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -4021,6 +4022,71 @@ function updateEngineTemp(dt){
   }
 }
 
+// ====== Oil pressure ======
+// Oil pressure is a leading indicator that pairs with the existing engine-fire
+// and engine-temp systems: pressure drops fast when the engine is on fire or
+// the temp latch is cooked, so the player sees "something is wrong" before the
+// airframe damage tick spikes. With a healthy engine it sits steady around
+// cruise PSI; with the engine off / cold-start / fuel-out it bottoms to 0.
+const OIL_PSI_OFF        = 0;     // PSI — engine dead
+const OIL_PSI_IDLE       = 45;    // PSI — idle target
+const OIL_PSI_CRUISE     = 65;    // PSI — healthy cruise / mid-throttle target
+const OIL_PSI_LOW_WARN   = 25;    // PSI — ATC "oil pressure dropping" trigger
+const OIL_PSI_REARM      = 35;    // PSI — hysteresis: above this re-arms the warn
+const OIL_PSI_MAX        = 100;   // PSI — gauge upper limit
+const OIL_RISE_RATE      = 55;    // PSI/s warmup approach toward target
+const OIL_FALL_RATE      = 75;    // PSI/s cooldown approach toward target
+const OIL_DROP_FIRE_PER_SEC      = 22; // PSI/s additional drop while on fire
+const OIL_DROP_OVERHEAT_PER_SEC  = 14; // PSI/s additional drop while latched-overheated
+function updateOilPressure(dt){
+  // Skip while paused / replaying / intro so the gauge doesn't drift while the
+  // sim is frozen — mirrors updateEngineTemp's guard.
+  if (state.paused || state.replayActive || state.introOpen) return;
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  let target;
+  if (!engineLive){
+    target = OIL_PSI_OFF;
+  } else {
+    // Throttle scales pressure between idle and cruise; full-power doesn't go
+    // much above cruise because the relief valve caps it on a real engine.
+    const thr = Math.max(0, Math.min(1, state.throttle));
+    target = OIL_PSI_IDLE + (OIL_PSI_CRUISE - OIL_PSI_IDLE) * thr;
+    // Modest cold-oil penalty so a freshly-started engine reads slightly low
+    // until temp comes off the peg — small flavor, helps explain why pilots
+    // wait for green CHT before pushing throttle on takeoff.
+    if (state.engineTempC < ENG_TEMP_IDLE - 10) target -= 6;
+  }
+  // Engine fire = oil lines cooking, pressure bleeds out fast.
+  if (state.engineFire) target -= 60;
+  // Sustained overheat latch = the bearings are starving, pressure tanks.
+  if (state.engineTempWarnLatch) target -= 35;
+  // Approach the target with asymmetric rates so a drop reads punchy while
+  // recovery (after restart / cooldown) feels reassuring.
+  const cur = state.oilPsi;
+  const dropping = target < cur;
+  // Faster fall when fire / overheat are pulling the target hard negative.
+  let rate = dropping ? OIL_FALL_RATE : OIL_RISE_RATE;
+  if (state.engineFire) rate = Math.max(rate, OIL_DROP_FIRE_PER_SEC * 4);
+  else if (state.engineTempWarnLatch && dropping) rate = Math.max(rate, OIL_DROP_OVERHEAT_PER_SEC * 4);
+  const k = 1 - Math.exp(-rate * dt / 60);
+  state.oilPsi = cur + (target - cur) * k;
+  // Clamp so the gauge stays in range.
+  if (state.oilPsi < 0) state.oilPsi = 0;
+  if (state.oilPsi > OIL_PSI_MAX) state.oilPsi = OIL_PSI_MAX;
+  // One-shot ATC "Oil pressure dropping" the first frame we cross below the
+  // low threshold while the engine is supposed to be running. Hysteresis above
+  // OIL_PSI_REARM clears the latch so a successful recovery rearms the call.
+  // Gated to airborne + alive so a routine engine-kill on the ground doesn't
+  // spam the radio.
+  const armCallEnv = !state.crashed && !state.introOpen && !state.replayActive
+    && !state.onGround && engineLive;
+  if (armCallEnv && !state.oilLowAtcLatch && state.oilPsi < OIL_PSI_LOW_WARN){
+    state.oilLowAtcLatch = true;
+    if (typeof pushATC === 'function') pushATC('Oil pressure dropping.', { tag:'ATC', now:true });
+  }
+  if (state.oilLowAtcLatch && state.oilPsi > OIL_PSI_REARM) state.oilLowAtcLatch = false;
+}
+
 // Flame flicker sprite — single shared sprite that we re-aim at the cowl in
 // world space each frame and scale/jitter to feel like a lick of fire. Way
 // cheaper than spawning a whole pool, and the fire reads fine as a single
@@ -4407,6 +4473,13 @@ const state = {
   engineTempC: 40,
   engineOverheatT: 0,
   engineTempWarnLatch: false,
+  // Oil pressure (PSI). Sits ~65 at cruise on a healthy engine, drops fast
+  // while the engine is on fire or sustained-overheat latched, bottoms to 0
+  // on engine kill / fuel-out / cold start. `oilLowAtcLatch` arms a one-shot
+  // ATC "Oil pressure dropping" call the first frame PSI crosses below the
+  // low threshold, and clears with hysteresis once pressure recovers.
+  oilPsi: 0,
+  oilLowAtcLatch: false,
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
   // fire (or each spawn) so we don't roll the dice every frame for nothing.
   nextFireRollMs: 0,
@@ -5278,6 +5351,11 @@ function resetPlane(){
   state.engineTempC = ENG_TEMP_COLD;
   state.engineOverheatT = 0;
   state.engineTempWarnLatch = false;
+  // Oil pressure: bottom out on reset so the cockpit gauge climbs back during
+  // the cold-start ritual / first idle, and clear the warn latch so the next
+  // sortie re-arms the ATC call.
+  state.oilPsi = 0;
+  state.oilLowAtcLatch = false;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -6731,6 +6809,9 @@ function step(dt){
   // driven target, with sustained-overheat damage and an ATC nag latch. Self-gates
   // on pause/replay/intro so frozen frames don't drift the gauge.
   updateEngineTemp(dt);
+  // Oil pressure tracks engine state and pairs with engine-fire / overheat —
+  // self-gates on pause/replay/intro to match updateEngineTemp().
+  updateOilPressure(dt);
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
@@ -8348,11 +8429,13 @@ const cpAiCv  = document.getElementById('cpAi');
 const cpAltCv = document.getElementById('cpAlt');
 const cpRpmCv = document.getElementById('cpRpm');
 const cpChtCv = document.getElementById('cpCht');
+const cpOilCv = document.getElementById('cpOil');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
 const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
 const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
+const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -8677,6 +8760,71 @@ function drawCockpitCht(tempC){
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(t) + '°', cx, cy + R*0.55);
 }
+function drawCockpitOil(psi){
+  if (!cpOilCtx) return;
+  const W = cpOilCv.width, H = cpOilCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpOilCtx;
+  _cpBezel(ctx, W, H);
+  // Scale 0..OIL_PSI_MAX (100) across the same 240° sweep used by the other
+  // gauges so the cockpit panel keeps its matched-set look.
+  const P_MIN = 0, P_MAX = OIL_PSI_MAX;
+  const P_SPAN = P_MAX - P_MIN;
+  const sweep = Math.PI * 4/3;
+  const startA = -Math.PI - Math.PI/6;
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // Major ticks every 25 PSI with labels; minor every 5 PSI.
+  for (let v = P_MIN; v <= P_MAX; v += 5){
+    const a = startA + ((v - P_MIN) / P_SPAN) * sweep;
+    const major = (v % 25 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Red "danger" arc below the low-warn threshold (0..25 PSI) and a green
+  // "healthy" arc spanning idle..cruise so a clean engine sits squarely in
+  // the band.
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#ff5252';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((P_MIN            - P_MIN) / P_SPAN) * sweep,
+    startA + ((OIL_PSI_LOW_WARN - P_MIN) / P_SPAN) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((OIL_PSI_IDLE   - P_MIN) / P_SPAN) * sweep,
+    startA + ((OIL_PSI_CRUISE - P_MIN) / P_SPAN) * sweep);
+  ctx.stroke();
+  // "PSI" unit label so the gauge reads at a glance next to the °C neighbor.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('PSI', cx, cy - R*0.35);
+  // Needle.
+  const p = Math.max(P_MIN, Math.min(P_MAX, psi));
+  const a = startA + ((p - P_MIN) / P_SPAN) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout below center: red below low-warn, amber in the caution
+  // band just above it, green in the healthy band. Mirrors the RPM/CHT rules
+  // so the whole panel uses a consistent color language.
+  ctx.fillStyle = (p < OIL_PSI_LOW_WARN)
+    ? '#ff5252'
+    : (p < OIL_PSI_IDLE - 5 ? '#ffb020' : '#7ee787');
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(Math.round(p), cx, cy + R*0.55);
+}
 function drawCockpitPanel(speedKmh, altM){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -8686,6 +8834,7 @@ function drawCockpitPanel(speedKmh, altM){
   drawCockpitAlt(altM);
   drawCockpitRpm(speedKmh);
   drawCockpitCht(state.engineTempC);
+  drawCockpitOil(state.oilPsi);
 }
 
 // ====== Camera ======
