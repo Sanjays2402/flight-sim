@@ -2620,10 +2620,31 @@ addEventListener('keydown', e=>{
     }
   }
   if (e.code==='KeyR'){
-    // R is dual-purpose: while a replay is on screen it just dismisses it;
-    // otherwise it does the normal reset-to-runway behavior.
+    // Quick-restart hotkey.
+    //  - During a replay: skip the replay AND restart the current mission so
+    //    the next attempt starts on a clean scoreboard / timer instead of a
+    //    stale post-touchdown state.
+    //  - On the ground / crashed / paused: full mission restart (reset plane
+    //    + re-arm mission timers + close pause overlay if open). Saves a trip
+    //    through the pause menu for repeat practice.
+    //  - Mid-flight (healthy, in the air): keep the legacy reset-to-runway so
+    //    a stray R press doesn't nuke an in-progress sortie.
+    const quickRestart = state.replayActive || state.onGround || state.crashed || state.paused;
     if (state.replayActive) stopReplay();
-    else resetPlane();
+    if (quickRestart){
+      resetPlane();
+      startMission(state.mode);
+      if (state.paused){
+        state.paused = false;
+        const pausePanel = document.getElementById('pause');
+        if (pausePanel) pausePanel.classList.remove('show');
+        // Reset dt baseline so the first unpaused frame doesn't apply the
+        // entire paused wall-clock delta at once.
+        lastT = performance.now();
+      }
+    } else {
+      resetPlane();
+    }
   }
   if (e.code==='KeyH'){
     // Autopilot toggle. Only engages in the air (no point on the ground), and

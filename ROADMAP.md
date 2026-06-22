@@ -53,10 +53,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Loop / roll detector — quietly track pitch and roll over time; when the plane completes a full 360° loop or aileron roll, fire an achievement-style toast ("LOOP!" / "AILERON ROLL!") and bump pilot stats. Tiny LOC, huge "wait, it noticed!" payoff.
 - [x] Airshow smoke on/off button on the HUD — small `~` toggle (and tap target on mobile) that turns on a permanent colored smoke trail in the player's livery accent color. Pairs with the ribbon trail or stands alone.
 - [x] Hot-air balloons drifting over the world — 4 lazy procedural balloons floating between airports, gentle bob, harmless. Pure scenery, makes the world feel less empty between airports.
+- [x] Quick-restart hotkey (R outside replay) — when on the ground / crashed / paused, R restarts the current mission immediately (resetPlane + startMission, closes the pause overlay), and during a replay R also skips it and restarts. Mid-flight (healthy, in the air) keeps the legacy reset-to-runway so a stray R doesn't nuke an active sortie.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-- [ ] Quick-restart hotkey (R outside replay) — when on the ground / crashed / paused, R restarts the current mission immediately instead of going through the menu. Skips replays too. Big quality-of-life win for repeat practice.
 
 
 ## How the ship loop works
