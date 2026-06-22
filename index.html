@@ -251,6 +251,7 @@
 <div id="bino"></div>
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
+  <div class="row"><span class="lbl">G</span><span class="val"><span id="gnow">1.0</span> <span id="gpk" style="color:#6aa;font-weight:500">pk 1.0</span></span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
   <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%</span></div>
   <div class="row"><span class="lbl">FLP</span><span class="val"><span id="flp">0</span>°</span></div>
@@ -2555,6 +2556,9 @@ const state = {
   // lesson instead of just a replay. Cleared on resetPlane / quick-restart.
   peakG: 0,
   peakSink: 0,
+  // Live G-load (1.0 ≈ level flight). Updated each physics step; HUD reads it
+  // for the G-meter. Pinned to 1.0 on the ground so taxi doesn't flicker it.
+  gLoad: 1.0,
   crashReport: null,
   // Aerobatic ribbon trail: Y toggles a colored smoke trail off the tail in
   // the current livery accent color. Off by default; great for loops/rolls
@@ -3172,6 +3176,7 @@ function resetPlane(){
   // prior wreck; click handler also hides it but R/menu can bypass clicks.
   state.peakG = 0;
   state.peakSink = 0;
+  state.gLoad = 1.0;
   state.crashReport = null;
   hideCrashCard();
   state.ap.on = false;
@@ -3950,6 +3955,9 @@ function step(dt){
   // G-load: vertical body-frame accel reaction. Idle ~1 g; pulling >2.5 g spawns visible vortices.
   const gLoad = Math.max(0, (liftMag / MASS) / G);
   const gFactor = Math.max(0, (gLoad - 2.5) / 2.0); // 0 at 2.5 g, 1 at 4.5 g
+  // Stash live G-load on state so the HUD can render it (G-meter readout).
+  // On the ground we pin it to 1.0 so the HUD doesn't twitch from taxi noise.
+  state.gLoad = state.onGround ? 1.0 : gLoad;
   // Peak trackers for the post-crash report card. Only count airborne values
   // so taxi bumps and parked weight don't pollute the readout.
   if (!state.onGround && !state.crashed){
@@ -4209,6 +4217,22 @@ function step(dt){
 
   const spdEl = document.getElementById('spd');
   spdEl.style.color = (speedKmh < 80 && !state.onGround) ? '#ffd166' : (stallActive ? '#ff5252' : '#fff');
+
+  // G-meter: live G + peak tick for the current flight. Amber past 2.5 g
+  // (where vortices kick in), red past 4 g (close to the 4.5 g over-G
+  // damage threshold). peakG resets on resetPlane so it's per-flight.
+  const gnowEl = document.getElementById('gnow');
+  const gpkEl  = document.getElementById('gpk');
+  if (gnowEl){
+    const gNow = state.gLoad || 0;
+    gnowEl.textContent = gNow.toFixed(1) + ' G';
+    gnowEl.style.color = gNow >= 4 ? '#ff5252' : (gNow >= 2.5 ? '#ffb020' : '#fff');
+  }
+  if (gpkEl){
+    const gPk = state.peakG || 0;
+    gpkEl.textContent = 'pk ' + gPk.toFixed(1);
+    gpkEl.style.color = gPk >= 4 ? '#ff5252' : (gPk >= 2.5 ? '#ffb020' : '#6aa');
+  }
 
   // Nearest airport
   let nearest = null, nearestD = 1e9;

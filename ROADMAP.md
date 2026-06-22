@@ -61,11 +61,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Engine RPM gauge in the cockpit panel — fourth small canvas next to airspeed/attitude/altimeter showing prop RPM scaled from throttle (drops with engine-out, climbs with throttle). Finishes the cockpit panel so it doesn't look lopsided.
 - [x] Sunrise / sunset toast — when the time-of-day cycle crosses sunrise or sunset, fire a quick golden-tinted toast ("🌅 Sunrise" / "🌇 Sunset") so the player actually notices the world changing instead of missing it mid-turn.
 - [x] Runway lights flare on touchdown — when the wheels actually kiss the runway, briefly pulse the runway edge/centerline lights brighter (yellow flash that decays over ~600ms). Tiny visual reward that makes every landing feel like a moment instead of just "score popup".
+- [x] G-meter on HUD — live `G: 1.0` readout under SPD with a per-flight peak tick, turns amber past 2.5G and red past 4G. Players now see G-loads live instead of only learning from the crash card, so they can self-limit before snapping a wing.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] G-meter on HUD — small `G: 1.0` readout next to airspeed that turns amber past 2.5G and red past 4G, plus a peak-G tick that resets each flight. Players currently only learn about G-loads from the crash card; this surfaces it live so they can self-limit before snapping a wing.
 - [ ] Quick-jump airport selector (J key) — small overlay listing all airports with a one-key number; press the number to instantly teleport plane to that airport's runway threshold with engine running at 30% throttle. Free-flight only (disabled in scored missions, replay, photo). Massively shortcuts "I want to practice landings at the other field" without restarting the mission.
 - [ ] Wind direction arrow on the mini-map — thin white arrow in the mini-map corner showing wind FROM direction, length scaled to wind speed. The wind sock at the airport is great up close, but pilots planning approaches from 5km out can't see it. This makes runway selection an actual decision.
 - [ ] Smoke trail color picker in settings — dropdown for ribbon/airshow smoke color (white, red, blue, green, yellow, magenta, livery accent), persisted to localStorage. Right now everyone's stuck with whatever the livery accent gives them; letting players pick their own air-show colors is one of those tiny things that makes the sim feel like *theirs*.
