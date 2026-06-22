@@ -127,6 +127,18 @@
   #crashcard .reason { font-size:10px; color:#9bb; margin-top:8px; text-align:center; font-style:italic; }
   #crashcard .hint { font-size:9px; color:#7a8a98; margin-top:8px; text-align:center; letter-spacing:1px; }
   #crashcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
+  #landcard { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); width:300px; padding:14px 16px 12px; border:1px solid #5ee0a0; border-radius:10px; background:rgba(6,14,10,.92); color:#dff5e8; font-size:12px; display:none; z-index:11; box-shadow:0 6px 24px rgba(0,0,0,.45); cursor:pointer; }
+  #landcard h3 { font-size:14px; color:#5ee0a0; margin:0 0 4px; letter-spacing:2px; font-weight:800; text-align:center; }
+  #landcard .verdict { font-size:13px; color:#ffd166; font-weight:700; text-align:center; margin:0 0 10px; letter-spacing:1px; }
+  #landcard .grid { display:grid; grid-template-columns:1fr auto; gap:3px 12px; font-size:11px; }
+  #landcard .grid .lbl { color:#8ab09e; letter-spacing:1px; }
+  #landcard .grid .val { color:#cfe; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
+  #landcard .grid .val.good { color:#5ee0a0; }
+  #landcard .grid .val.warn { color:#ffd166; }
+  #landcard .grid .val.bad { color:#ff5252; }
+  #landcard .reason { font-size:10px; color:#8ab09e; margin-top:8px; text-align:center; font-style:italic; }
+  #landcard .hint { font-size:9px; color:#7a8a98; margin-top:8px; text-align:center; letter-spacing:1px; }
+  #landcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
   /* Mobile touch controls: virtual stick bottom-left (pitch/roll), throttle slider bottom-right.
      Hidden by default; .show class added at runtime on touch-capable devices. A small
      row of tap buttons under the throttle covers gear/flaps/brakes/camera so the sim is
@@ -374,6 +386,19 @@
     <span class="lbl">AOA @ IMPACT</span><span class="val" id="ccAoa">—</span>
   </div>
   <div class="reason" id="ccReason"></div>
+  <div class="hint">click to dismiss · <kbd>R</kbd> restart</div>
+</div>
+<div id="landcard">
+  <h3>LANDING REPORT</h3>
+  <div class="verdict" id="lcVerdict">—</div>
+  <div class="grid">
+    <span class="lbl">TD SPEED</span><span class="val" id="lcSpd">—</span>
+    <span class="lbl">SINK @ TD</span><span class="val" id="lcSink">—</span>
+    <span class="lbl">CENTERLINE</span><span class="val" id="lcCl">—</span>
+    <span class="lbl">G @ TD</span><span class="val" id="lcG">—</span>
+    <span class="lbl">ROLLOUT</span><span class="val" id="lcRoll">—</span>
+  </div>
+  <div class="reason" id="lcReason"></div>
   <div class="hint">click to dismiss · <kbd>R</kbd> restart</div>
 </div>
 <div id="photo">
@@ -2631,6 +2656,11 @@ const state = {
   // for the G-meter. Pinned to 1.0 on the ground so taxi doesn't flicker it.
   gLoad: 1.0,
   crashReport: null,
+  // Twin of crashReport for successful touchdowns. Populated on every landing
+  // (greasers + hard) and rendered into #landcard. Carries the touchdown pose
+  // so updateLandCardRollout() can compute rollout distance live each tick
+  // until the wheels stop. Cleared on resetPlane / quick-restart.
+  landReport: null,
   // Aerobatic ribbon trail: Y toggles a colored smoke trail off the tail in
   // the current livery accent color. Off by default; great for loops/rolls
   // and screenshots, hidden anywhere we wouldn't want a live trail (paused,
@@ -3115,6 +3145,101 @@ if (crashCardEl){
   crashCardEl.addEventListener('click', hideCrashCard);
 }
 
+// ====== LANDING REPORT CARD ======
+// Twin of the crash card for *successful* touchdowns. Every landing (greaser,
+// firm, or hard but survivable) pops a compact panel with the touchdown
+// numbers and a verdict so the player learns from good landings too, not
+// only from wrecks. Rollout distance fills in live as the plane decelerates
+// down the runway; everything else is locked at the moment of wheel-kiss.
+const landCardEl = document.getElementById('landcard');
+const lcVerdictEl = document.getElementById('lcVerdict');
+const lcSpdEl    = document.getElementById('lcSpd');
+const lcSinkEl   = document.getElementById('lcSink');
+const lcClEl     = document.getElementById('lcCl');
+const lcGEl      = document.getElementById('lcG');
+const lcRollEl   = document.getElementById('lcRoll');
+const lcReasonEl = document.getElementById('lcReason');
+function pickLandVerdict(d){
+  // Greaser first, then alignment / speed issues, then firm/hard generic.
+  // Verdicts intentionally overlap human aviation slang so they read at a
+  // glance: GREASED, FIRM, PORPOISED, OFF CENTERLINE, etc.
+  if (d.bounced)                       return 'PORPOISED';
+  if (d.hard && d.sinkRate > 5)        return 'SLAMMED IT';
+  if (d.hard)                          return 'HARD LANDING';
+  if (Math.abs(d.centerOffset) > 12)   return 'OFF CENTERLINE';
+  if (d.speedKmh > 170)                return 'HOT APPROACH';
+  if (d.speedKmh < 80)                 return 'SLOW — NEAR STALL';
+  if (d.sinkRate < 1.0)                return 'GREASED IT';
+  if (d.sinkRate < 2.0)                return 'BUTTER SMOOTH';
+  if (d.sinkRate < 3.5)                return 'FIRM';
+  return 'FIRM TOUCHDOWN';
+}
+function showLandCard(d){
+  if (!landCardEl) return;
+  state.landReport = d;
+  lcVerdictEl.textContent = pickLandVerdict(d);
+  // TD speed — green in the 90–140 km/h sweet spot, amber outside, red way out.
+  lcSpdEl.textContent = Math.round(d.speedKmh) + ' km/h';
+  lcSpdEl.className = 'val' + (d.speedKmh > 200 || d.speedKmh < 70 ? ' bad'
+                              : (d.speedKmh > 150 || d.speedKmh < 90) ? ' warn'
+                              : ' good');
+  // Sink — green under 2 m/s (greaser), amber to 5, red above.
+  lcSinkEl.textContent = d.sinkRate.toFixed(1) + ' m/s';
+  lcSinkEl.className = 'val' + (d.sinkRate >= 5 ? ' bad'
+                               : d.sinkRate >= 2 ? ' warn'
+                               : ' good');
+  // Centerline offset — signed (L/R). Green under 3 m, amber to 10, red beyond.
+  const off = d.centerOffset;
+  const side = off >= 0 ? 'R' : 'L';
+  lcClEl.textContent = Math.abs(off).toFixed(1) + ' m ' + side;
+  const aoff = Math.abs(off);
+  lcClEl.className = 'val' + (aoff >= 15 ? ' bad'
+                              : aoff >= 6 ? ' warn'
+                              : ' good');
+  // G at touchdown — 1.0 is steady, amber over 2.0, red over 3.0.
+  lcGEl.textContent = d.gTd.toFixed(1) + ' G';
+  lcGEl.className = 'val' + (d.gTd >= 3 ? ' bad' : d.gTd >= 2 ? ' warn' : ' good');
+  // Rollout starts as — and fills in as the plane decelerates.
+  lcRollEl.textContent = '—';
+  lcRollEl.className = 'val';
+  lcReasonEl.textContent = d.reason ? d.reason : '';
+  landCardEl.style.display = 'block';
+}
+function updateLandCardRollout(){
+  // Called every physics tick once a landing card is live. Tracks the
+  // distance the wheels travel from the touchdown point until ground speed
+  // drops below ~0.8 m/s (essentially stopped). Color is amber over 1200 m
+  // (long rollout = blew through the runway) and red past 1800.
+  const d = state.landReport;
+  if (!d || d.rollComplete) return;
+  if (!state.onGround || state.crashed){
+    // Lifted off again (touch-and-go) or crashed mid-rollout. Freeze.
+    d.rollComplete = true;
+    return;
+  }
+  const dx = plane.position.x - d.tdX;
+  const dz = plane.position.z - d.tdZ;
+  const m = Math.hypot(dx, dz);
+  if (m > d.rolloutM) d.rolloutM = m;
+  const gs = Math.hypot(state.vel.x, state.vel.z);
+  if (lcRollEl){
+    lcRollEl.textContent = Math.round(d.rolloutM) + ' m';
+    lcRollEl.className = 'val' + (d.rolloutM >= 1800 ? ' bad'
+                                  : d.rolloutM >= 1200 ? ' warn'
+                                  : ' good');
+  }
+  if (gs < 0.8){
+    d.rollComplete = true;
+  }
+}
+function hideLandCard(){
+  if (landCardEl) landCardEl.style.display = 'none';
+}
+if (landCardEl){
+  // Click anywhere on the card to dismiss. Doesn't restart — R still does that.
+  landCardEl.addEventListener('click', hideLandCard);
+}
+
 // ====== ATC CHATTER ======
 // Fake radio strip at the top of the HUD. Two queues:
 //   * eventQueue — high-priority calls fired from game events (gear up, flap
@@ -3255,6 +3380,8 @@ function resetPlane(){
   state.gLoad = 1.0;
   state.crashReport = null;
   hideCrashCard();
+  state.landReport = null;
+  hideLandCard();
   state.ap.on = false;
   state.msgT = 0;
   // Seed a fresh wind on reset so reps feel different.
@@ -3942,6 +4069,22 @@ function step(dt){
           pushATC('Tower copies hard landing, maintenance advised.', { now:true });
           // Wheels still touched the runway — flash the lights even on a rough one.
           if (land && land.ri) flareRunwayLights(land.ri.ap);
+          // Hard landings still count as a touchdown for the landing report
+          // card — the player just got an earful from the tower and ate some
+          // damage, but it's a learning moment, not a crash.
+          showLandCard({
+            speedKmh: fwdKmh,
+            sinkRate,
+            centerOffset: land ? land.lx : 0,
+            gTd: state.gLoad,
+            tdX: plane.position.x,
+            tdZ: plane.position.z,
+            rolloutM: 0,
+            rollComplete: false,
+            hard: true,
+            bounced: false,
+            reason
+          });
           startReplay();
         }
       } else {
@@ -3987,6 +4130,21 @@ function step(dt){
         if (land && land.ri) flareRunwayLights(land.ri.ap);
         state.landed = true;
         onLanding(score);
+        // Pop the landing report so every clean touchdown leaves a record:
+        // sink, speed, centerline, G, and rollout (filled in live as we roll).
+        showLandCard({
+          speedKmh: fwdKmh,
+          sinkRate,
+          centerOffset: land ? land.lx : 0,
+          gTd: state.gLoad,
+          tdX: plane.position.x,
+          tdZ: plane.position.z,
+          rolloutM: 0,
+          rollComplete: false,
+          hard: false,
+          bounced: false,
+          reason: ''
+        });
         startReplay();
       }
     }
@@ -3994,6 +4152,10 @@ function step(dt){
     plane.position.y = minY;
     if (state.vel.y < 0) state.vel.y = 0;
     state.onGround = true;
+
+    // While the landing card is up, keep its rollout readout live until the
+    // wheels stop. Safe to call every frame — it no-ops when no report is set.
+    updateLandCardRollout();
 
     if (!state.crashed){
       const vh = new THREE.Vector3(state.vel.x, 0, state.vel.z);
@@ -5416,7 +5578,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino','crashcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -5892,6 +6054,8 @@ updateCamModeUi();
     state.gLoad = 1.0;
     state.crashReport = null;
     hideCrashCard();
+    state.landReport = null;
+    hideLandCard();
     state.ap.on = false;
     state.msgT = 0;
     state.refueling = false;
