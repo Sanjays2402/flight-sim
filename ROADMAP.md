@@ -134,6 +134,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Wing flex on positive Gs — bend the wingtip geometry slightly upward proportional to current G-load (clamped to a few degrees) so hard turns and pullups visibly flex the airframe. Pure visual, no physics change, but it sells the structural load you already display on the G-meter. Apply via `wingTipMesh.rotation.z` lerp each frame, hide in photo mode? No — keep in photo mode so action shots look the part. Reset to flat on engine-out windmill so a quiet glide looks calm.
+- [ ] Parking brake (`Shift+B`) — toggleable parking brake that locks wheels at zero speed (and is automatically off above 5 km/h so a forgotten parking brake doesn't kill takeoff). Currently sitting at the hold-short line means tap-tapping `B` to stay put while you read the briefing. HUD shows a tiny `🅿 BRK` pill when set, plays a soft ratchet click on toggle. Pairs with the cold-start ritual so the run-up actually feels like a checklist.
+- [ ] Taxiway centerline lights — yellow ground line from each apron to the runway threshold during dawn/dusk/night hours, intensity matching the existing runway-edge dusk gating. Currently taxiing at night means flying half-blind toward a vaguely-lit strip; this turns ground ops into a guided experience and pairs naturally with the existing chevron taxi guidance.
+- [ ] Pitot heat + icing at altitude (`Shift+I`) — above 3000m AGL in rain or cold weather, airspeed indicator slowly freezes (lerps toward 0 over ~25s) unless pitot heat is on. HUD shows a `PITOT ICE` amber pill while iced, ATC fires `"Pitot heat, pitot heat"` once when ice latches. Adds a real weather hazard tied to the existing rain toggle, ~30 LOC, makes the cold-start ritual feel less arbitrary.
+- [ ] Wingman challenge mode — new mission on the intro screen where the AI plane leads a route through 3 random airports and you have to stay within 200 m of its tail for the whole flight. HUD shows a green `FORMATION LOCK` bar that drains when you drift outside the slot; lose the bar and the mission fails. Reuses the existing AI traffic, formation detection, and connecting-line glow. Turns formation flight from an Easter egg into an actual game mode.
+
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
