@@ -293,6 +293,7 @@
   <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl">AIRSPEED km/h</div></div>
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
+  <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -4674,9 +4675,11 @@ function drawMinimap(hdgDeg){
 const cpAsiCv = document.getElementById('cpAsi');
 const cpAiCv  = document.getElementById('cpAi');
 const cpAltCv = document.getElementById('cpAlt');
+const cpRpmCv = document.getElementById('cpRpm');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
+const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -4873,6 +4876,69 @@ function drawCockpitAlt(altM){
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(a) + 'm', cx, cy + R*0.55);
 }
+function drawCockpitRpm(speedKmh){
+  if (!cpRpmCtx) return;
+  const W = cpRpmCv.width, H = cpRpmCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpRpmCtx;
+  _cpBezel(ctx, W, H);
+  // Scale 0..3000 RPM across the same 240° sweep used by the ASI so the panel
+  // reads consistently.
+  const RPM_MAX = 3000;
+  const sweep = Math.PI * 4/3;
+  const startA = -Math.PI - Math.PI/6;
+  // Map engine state to RPM: live engine idles around 600 and climbs to 2800
+  // at full throttle; engine-out just windmills with airspeed.
+  const engineLive = !state.engineOut && state.fuel > 0;
+  let rpm;
+  if (engineLive){
+    rpm = 600 + state.throttle * 2200;
+  } else {
+    rpm = Math.min(900, speedKmh * 4);
+  }
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // Major ticks every 500 RPM with labels (shown in hundreds, so 0..30), minor every 100.
+  for (let v = 0; v <= RPM_MAX; v += 100){
+    const a = startA + (v / RPM_MAX) * sweep;
+    const major = (v % 500 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v / 100), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Green cruise arc 1800..2500, red redline arc 2700..3000.
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA + (1800 / RPM_MAX) * sweep, startA + (2500 / RPM_MAX) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#ff5252';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA + (2700 / RPM_MAX) * sweep, startA + (3000 / RPM_MAX) * sweep);
+  ctx.stroke();
+  // "x100" label so the small numbers (0..30) make sense.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('x100', cx, cy - R*0.35);
+  // Needle.
+  const r = Math.max(0, Math.min(RPM_MAX, rpm));
+  const a = startA + (r / RPM_MAX) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout below center, red when in the redline band or engine out.
+  ctx.fillStyle = (!engineLive) ? '#ff8080' : (r >= 2700 ? '#ff5252' : '#7ee787');
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(Math.round(r), cx, cy + R*0.55);
+}
 function drawCockpitPanel(speedKmh, altM){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -4880,6 +4946,7 @@ function drawCockpitPanel(speedKmh, altM){
   drawCockpitAsi(speedKmh);
   drawCockpitAi(plane.quaternion);
   drawCockpitAlt(altM);
+  drawCockpitRpm(speedKmh);
 }
 
 // ====== Camera ======
