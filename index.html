@@ -135,6 +135,7 @@
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val" id="dmg">0%</span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
+  <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
 </div>
@@ -154,7 +155,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>,</kbd> settings · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>,</kbd> settings · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -1566,6 +1567,11 @@ const state = {
   // Time of day in 0..24 hours; advances with TOD_SPEED. Starts near sunrise
   // so the first frames show off the cycle without waiting.
   todHours: 9.0,
+  // Autopilot: holds current altitude + heading. Toggle with H. Locked targets
+  // are captured at engage time. Any manual stick input (keyboard pitch/roll/yaw
+  // or touch stick) auto-disengages so the pilot can grab control without
+  // hunting for the key. Throttle is left to the pilot.
+  ap: { on:false, alt:0, hdgRad:0, disengageMsgT:0 },
   // Replay system: rolling ~30s ring buffer of plane snapshots. After a
   // landing (good or bad) we rewind and play back so you can watch your
   // touchdown from any camera angle. Live physics is paused while replaying.
@@ -1704,6 +1710,22 @@ addEventListener('keydown', e=>{
     if (state.replayActive) stopReplay();
     else resetPlane();
   }
+  if (e.code==='KeyH'){
+    // Autopilot toggle. Only engages in the air (no point on the ground), and
+    // only if not crashed. Captures the altitude + heading at the moment of
+    // engagement so the AP keeps you exactly where you were.
+    if (state.ap.on){
+      state.ap.on = false;
+      showStatus('AUTOPILOT OFF', null, 'hard');
+    } else if (!state.crashed && !state.onGround){
+      state.ap.alt = plane.position.y;
+      const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+      state.ap.hdgRad = Math.atan2(fwdN.x, -fwdN.z);
+      state.ap.on = true;
+      const hdgDeg = ((state.ap.hdgRad * 180/Math.PI) % 360 + 360) % 360;
+      showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(Math.round(hdgDeg)).padStart(3,'0'), 'good');
+    }
+  }
 });
 
 // ====== MOBILE TOUCH CONTROLS ======
@@ -1839,6 +1861,7 @@ function resetPlane(){
   state.refueling = false;
   state.stall = 0;
   state.vortex = 0;
+  state.ap.on = false;
   state.msgT = 0;
   // Seed a fresh wind on reset so reps feel different.
   pickWindTarget();
@@ -2042,6 +2065,48 @@ function step(dt){
       rIn += touch.stickX;
       pIn = Math.max(-1, Math.min(1, pIn));
       rIn = Math.max(-1, Math.min(1, rIn));
+    }
+  }
+
+  // Autopilot: holds altitude + heading. Engages via H. Any manual stick input
+  // (keyboard or touch) immediately kicks it off so the pilot can take over
+  // without fumbling. Crash and ground touchdown also disengage.
+  if (state.ap.on){
+    const manualStick = (pIn !== 0) || (rIn !== 0) || (yIn !== 0) || (touch.active && (Math.abs(touch.stickX) > 0.05 || Math.abs(touch.stickY) > 0.05));
+    if (manualStick || state.crashed || state.onGround){
+      state.ap.on = false;
+      // Suppress noisy re-trigger if we just disengaged this frame.
+      if (performance.now() - state.ap.disengageMsgT > 500){
+        state.ap.disengageMsgT = performance.now();
+        showStatus('AUTOPILOT OFF', manualStick ? 'manual override' : null, 'hard');
+      }
+    } else {
+      // ---- Heading hold: shortest-arc error, command roll proportional to it,
+      // then null out yaw drift with a tiny rudder term. Bank limited to ~25°.
+      const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+      const curHdg = Math.atan2(fwdN.x, -fwdN.z);
+      let hdgErr = state.ap.hdgRad - curHdg;
+      while (hdgErr >  Math.PI) hdgErr -= 2*Math.PI;
+      while (hdgErr < -Math.PI) hdgErr += 2*Math.PI;
+      const maxBank = 25 * Math.PI/180;
+      const desiredBank = Math.max(-maxBank, Math.min(maxBank, hdgErr * 1.4));
+      const upN = new THREE.Vector3(0,1,0).applyQuaternion(plane.quaternion);
+      const rightN = new THREE.Vector3(1,0,0).applyQuaternion(plane.quaternion);
+      // Bank angle from world up dotted with body right. Positive = right wing down.
+      const curBank = Math.atan2(rightN.y, upN.y);
+      const bankErr = desiredBank - curBank;
+      rIn = Math.max(-1, Math.min(1, bankErr * 2.2));
+      yIn = Math.max(-0.4, Math.min(0.4, hdgErr * 0.3));
+
+      // ---- Altitude hold: target a vertical speed proportional to altitude
+      // error (clamped to ±4 m/s), then drive pitch from the vs error. Wings
+      // level pitch trim term keeps the nose where the AoA needs it.
+      const altErr = state.ap.alt - plane.position.y;
+      const targetVs = Math.max(-4, Math.min(4, altErr * 0.25));
+      const vsErr = targetVs - state.vel.y;
+      // Pitch command: nose-up when we want to climb. Pitch input sign in this
+      // sim is inverted (pIn<0 = pull back), so negate.
+      pIn = -Math.max(-1, Math.min(1, vsErr * 0.35));
     }
   }
 
@@ -2401,6 +2466,19 @@ function step(dt){
   fuelEl.style.color = fuelPct <= 10 ? '#ff5252' : (fuelPct <= 25 ? '#ffd166' : '#7ee787');
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
+
+  // Autopilot HUD row: hidden when off. When on, shows the locked altitude
+  // (meters above ground reference) and locked heading (degrees, 000–359).
+  const apRow = document.getElementById('apRow');
+  if (state.ap.on){
+    apRow.style.display = 'flex';
+    let apHdgDeg = state.ap.hdgRad * 180/Math.PI;
+    apHdgDeg = ((apHdgDeg % 360) + 360) % 360;
+    document.getElementById('apReadout').textContent =
+      'ON · ' + Math.round(state.ap.alt - GEAR_H) + 'm / ' + String(Math.round(apHdgDeg)).padStart(3,'0') + '°';
+  } else {
+    apRow.style.display = 'none';
+  }
 
   // Wind HUD: direction wind is coming FROM (aviation convention) + speed in knots.
   // Our wind vector points the way wind is going TO; flip 180° for the readout.

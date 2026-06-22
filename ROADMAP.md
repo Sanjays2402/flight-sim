@@ -35,10 +35,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Settings panel — sensitivity, FOV, audio volume (persisted to localStorage, opens via ⚙ or `,`).
 - [x] Liveries / paint picker — 5 color schemes (Classic, Navy, Forest, Sunset, Stealth) in settings panel, persisted to localStorage.
 - [x] Ring-chase challenge mode — fly through a chain of 11 glowing rings against the clock, active ring pulses green, best time saved to localStorage.
+- [x] Autopilot altitude + heading hold — press `H` to lock current altitude and heading (A is roll, so H = hold), HUD shows AP ON with locked alt/hdg, any stick input disengages, auto-off on ground or crash.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-- [ ] Autopilot altitude + heading hold — press `A` to lock current altitude and heading, HUD shows AP ON, any stick input disengages.
 - [ ] Persistent pilot stats screen — total flights, landings, best landing score, longest flight time, opens from main menu, stored in localStorage.
 - [ ] Photo mode — press `P` to pause sim, free-orbit camera, hide HUD, one-tap download of a PNG screenshot.
 - [ ] Gear and flaps sound effects + animated flaps — clunk on gear up/down, whoosh on flaps, flap surfaces visibly deflect on the wing.
