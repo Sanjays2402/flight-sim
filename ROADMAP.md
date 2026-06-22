@@ -74,6 +74,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Repair on the apron — when refueling on the ground at an airport, also tick airframe damage back down toward 0 at roughly the same rate as fuel. Currently a hard landing scars the plane for the whole session even after a full pit stop; this turns the apron into an actual reset button and pairs naturally with refuel, no new UI needed beyond the existing fuel/damage HUD.
+- [ ] Sun glare lens flare — when the camera looks roughly toward the sun, draw a soft additive glare disc plus a faint streak across the frame, fading out as the angle widens. Hidden in photo mode so saved PNGs stay clean. Tiny shader-free overlay, makes sunrise/sunset flights feel cinematic instead of just "sky color changed".
+- [ ] Mini-map waypoint — click (or long-press on mobile) anywhere on the mini-map to drop a magenta waypoint pin; HUD shows bearing + distance to it, autopilot heading-hold can lock onto it with a new `K` shortcut, second click clears it. Gives free-flight an actual goal without inventing a whole mission system.
+- [ ] Touchdown skidmarks — when the main wheels first contact the runway with any side slip or hard sink, paint two short dark streaks on the runway surface at the touchdown point that fade over ~30s. Greaser landings leave nothing; firm/crosswind landings leave visible evidence. Free visual feedback loop on every landing.
+- [ ] Cold start sequence — on mission start (and after engine-out restart), the throttle is locked at 0 until the player taps `I` (or an on-screen IGNITION button on mobile); ignition plays a cranking sound, prop spools up, then control returns. Skippable with a settings toggle for impatient pilots. Turns the first 3 seconds of every flight from "already rolling" into a tiny ritual that makes the plane feel like a machine, not a toy.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
