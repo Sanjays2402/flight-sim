@@ -88,6 +88,7 @@
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
   <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
+  <div class="row"><span class="lbl">DMG</span><span class="val" id="dmg">0%</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
@@ -1099,6 +1100,10 @@ const state = {
   onGround: true,
   crashed: false,
   landed: false,
+  // Damage 0..1. Builds on over-G and hard landings; affects control authority,
+  // thrust, and (above 0.5) adds a slow asymmetric trim that makes the plane
+  // want to roll. 1.0 = airframe wrecked, treat as crashed.
+  damage: 0,
   msgT: 0,
   cam: 0,
   flyByPos: new THREE.Vector3(),
@@ -1268,6 +1273,7 @@ function resetPlane(){
   state.onGround = true;
   state.crashed = false;
   state.landed = false;
+  state.damage = 0;
   state.stall = 0;
   state.vortex = 0;
   state.msgT = 0;
@@ -1478,7 +1484,10 @@ function step(dt){
   const liftDir = up.clone();
   const dragDir = speed > 0.01 ? airVel.clone().multiplyScalar(-1/speed) : new THREE.Vector3();
 
-  const thrustMag = state.throttle * MAX_THRUST;
+  // Damage softly degrades thrust (engine bleed) and aero (drag goes up).
+  // dmg 0 = no effect; dmg 1 = ~50% thrust, +25% drag, ~60% control authority.
+  const dmg = state.damage;
+  const thrustMag = state.throttle * MAX_THRUST * (1 - 0.5 * dmg);
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
@@ -1491,9 +1500,18 @@ function step(dt){
   state.vel.addScaledVector(accel, dt);
 
   const qFactor = Math.min(1, (speed*speed) / (60*60));
-  plane.rotateX(-pIn * PITCH_AUTH * qFactor * dt);
-  plane.rotateZ(-rIn * ROLL_AUTH  * qFactor * dt);
-  plane.rotateY(-yIn * YAW_AUTH   * qFactor * dt);
+  // Control authority drops with damage (busted hinges, broken cables, etc.).
+  const ctrlMul = 1 - 0.4 * dmg;
+  plane.rotateX(-pIn * PITCH_AUTH * qFactor * ctrlMul * dt);
+  plane.rotateZ(-rIn * ROLL_AUTH  * qFactor * ctrlMul * dt);
+  plane.rotateY(-yIn * YAW_AUTH   * qFactor * ctrlMul * dt);
+
+  // Damage trim: above ~50% damage the plane wants to roll on its own (busted
+  // aileron / drooping wing). Small, but enough to make the player work for it.
+  if (dmg > 0.5 && !state.onGround && speed > 25){
+    const trim = (dmg - 0.5) * 0.6;
+    plane.rotateZ(trim * dt);
+  }
 
   if (speed > 8){
     // Weathervane: align nose with airflow, not ground track. This lets the
@@ -1537,12 +1555,16 @@ function step(dt){
       else if (fwdKmh > 260) { ok=false; reason='Too fast'; }
 
       if (!ok){
+        // Damage from a bad touchdown scales with sink rate. Any landing >3 m/s adds %.
+        const dmgAdd = Math.max(0, (sinkRate - 3) / 8);
+        if (dmgAdd > 0) state.damage = Math.min(1, state.damage + dmgAdd);
         if (sinkRate > 10 || !state.gearDown || !onRunway){
+          state.damage = 1;
           showStatus('CRASHED', reason, 'bad');
           state.crashed = true;
           startReplay();
         } else {
-          showStatus('HARD LANDING', reason, 'hard');
+          showStatus('HARD LANDING', reason + ' · +' + Math.round(dmgAdd*100) + '% dmg', 'hard');
           startReplay();
         }
       } else {
@@ -1626,6 +1648,18 @@ function step(dt){
   // G-load: vertical body-frame accel reaction. Idle ~1 g; pulling >2.5 g spawns visible vortices.
   const gLoad = Math.max(0, (liftMag / MASS) / G);
   const gFactor = Math.max(0, (gLoad - 2.5) / 2.0); // 0 at 2.5 g, 1 at 4.5 g
+  // Over-G damage: above 4.5 g, airframe starts breaking. Accumulates slowly so
+  // brief peaks are forgivable; sustained 6+ g rips the wings off fast.
+  if (!state.onGround && gLoad > 4.5 && !state.crashed){
+    const overG = gLoad - 4.5;
+    state.damage = Math.min(1, state.damage + overG * 0.025 * dt);
+  }
+  // Hitting 100% damage in the air = catastrophic. Trip the crash branch.
+  if (state.damage >= 0.999 && !state.crashed && !state.onGround){
+    showStatus('AIRFRAME FAILURE', 'damage 100%', 'bad');
+    state.crashed = true;
+    startReplay();
+  }
   const vortexTarget = Math.max(0, Math.min(1, Math.max(gFactor, state.stall * 1.1)))
                        * (speed > 25 && !state.onGround ? 1 : 0);
   state.vortex = (state.vortex || 0) * 0.8 + vortexTarget * 0.2;
@@ -1636,7 +1670,10 @@ function step(dt){
   const altMSL = plane.position.y;
   const altGate = Math.max(0, Math.min(1, (altMSL - CONTRAIL_MIN_ALT) / (CONTRAIL_FULL_ALT - CONTRAIL_MIN_ALT)));
   const thrGate = Math.max(0, (state.throttle - 0.3) / 0.7);
-  const contrailStrength = altGate * thrGate * (state.onGround ? 0 : 1);
+  // Damaged planes smoke regardless of altitude. Above 30% damage you start
+  // streaming, scaling up to a full plume at 100%.
+  const dmgSmoke = Math.max(0, (state.damage - 0.3) / 0.7);
+  const contrailStrength = Math.max(altGate * thrGate, dmgSmoke) * (state.onGround ? 0 : 1);
   updateContrails(dt, contrailStrength);
 
   // Animate parts
@@ -1691,6 +1728,12 @@ function step(dt){
   $('#flp').textContent  = flapDeg;
   $('#gear').textContent = state.gearDown ? 'DOWN' : 'UP';
   $('#aoa').textContent  = aoaDeg.toFixed(1);
+
+  // Damage readout: colored green/amber/red as it builds.
+  const dmgPct = Math.round(state.damage * 100);
+  const dmgEl = document.getElementById('dmg');
+  dmgEl.textContent = dmgPct + '%';
+  dmgEl.style.color = dmgPct >= 70 ? '#ff5252' : (dmgPct >= 30 ? '#ffd166' : '#7ee787');
 
   // Wind HUD: direction wind is coming FROM (aviation convention) + speed in knots.
   // Our wind vector points the way wind is going TO; flip 180° for the readout.

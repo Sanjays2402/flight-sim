@@ -27,18 +27,18 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] External chase cam + cockpit cam toggle (C key) — cycles chase/cockpit/flyby/orbit, HUD pill shows active mode, cockpit view hides own airframe.
 - [x] Replay last 30s at the end of each landing — rolling 30s buffer of plane pose plays back after touchdown/crash, banner shows REPLAY, click or press R to skip.
 - [x] Mini-map in HUD corner — top-down with airports, plane, heading line.
+- [x] Damage model — over-G or hard-landing gives damage %, affects handling.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **Damage model** — over-G or hard-landing gives damage %, affects handling.
-2. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
-3. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
-4. **AI traffic** — one other plane doing circuits at the home airport.
-5. **Mobile touch controls** — virtual stick on left, throttle slider on right.
-6. **Settings panel** — sensitivity, FOV, audio volume.
+1. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
+2. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
+3. **AI traffic** — one other plane doing circuits at the home airport.
+4. **Mobile touch controls** — virtual stick on left, throttle slider on right.
+5. **Settings panel** — sensitivity, FOV, audio volume.
+6. **Liveries / paint picker** — 3–5 color schemes for the plane.
 7. **Liveries / paint picker** — 3–5 color schemes for the plane.
-8. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
