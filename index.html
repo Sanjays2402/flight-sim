@@ -1262,6 +1262,16 @@ function makeAirport(a){
     grp.add(mast);
   }
 
+  // Skidmark container — sits in airport-local space (already rotated to
+  // match runway heading), so marks added later use plain (lx, lz) coords.
+  // Y just above the runway surface (0.00) and the centerline dashes (0.04)
+  // so streaks overlay paint like real-world rubber. depthWrite off on the
+  // marks themselves prevents z-fighting with the runway plane.
+  const skidGrp = new THREE.Group();
+  skidGrp.position.y = 0.05;
+  grp.add(skidGrp);
+  a._skidGrp = skidGrp;
+
   const aimX = a.x + Math.sin(a.hdg)*(a.len/2 - 300);
   const aimZ = a.z + Math.cos(a.hdg)*(a.len/2 - 300);
   runwayInfos.push({ ap: a, aimX, aimZ, lights: a._lights });
@@ -1279,6 +1289,79 @@ function tickRunwayFlares(dt){
       e.flareT = Math.max(0, e.flareT - RUNWAY_FLARE_DECAY * dt);
     }
   }
+}
+
+// ====== TOUCHDOWN SKIDMARKS ======
+// Two short dark streaks painted on the runway at the touchdown point when
+// the main wheels first kiss with any meaningful sink or side slip. Greaser
+// landings (low sink, lined up) leave nothing; firm or crosswind landings
+// leave visible evidence that fades over ~30s.
+//
+// Marks are flat quads parented to the airport's _skidGrp (already rotated
+// to runway-local space), so we paint with plain (lx, lz) coords. Each
+// touchdown adds one pair (left wheel + right wheel). Object-pooled at a
+// hard cap so a marathon touch-and-go session can't leak meshes.
+const MAIN_WHEEL_TRACK = 1.1;     // half-spacing of main gear (matches gear model x = ±1.1)
+const SKIDMARK_LIFE = 30;         // seconds before a mark fully fades out
+const SKIDMARK_MAX = 32;          // hard cap on live marks (each touchdown = 2)
+const skidmarks = [];             // [{ mesh, mat, life, max }]
+const skidGeo = new THREE.PlaneGeometry(1, 1);  // unit quad, scaled per-mark
+function paintSkidmarks(ap, lx, lz, sinkRate, lateralMs, hard){
+  if (!ap || !ap._skidGrp) return;
+  // Length scales with sink (firm thump = longer streak) plus any side slip.
+  // Width stays narrow — these are tire prints, not paint.
+  const sinkLen = Math.min(14, 1.5 + sinkRate * 1.4);
+  const slipLen = Math.min(10, Math.abs(lateralMs) * 0.6);
+  const len = Math.max(1.5, sinkLen + slipLen) * (hard ? 1.3 : 1.0);
+  const width = 0.35;
+  // Hard landings burn darker, longer-lasting marks. Greasers were filtered
+  // out upstream, so anything reaching here is at least a firm touch.
+  const startA = hard ? 0.85 : 0.55;
+  const color = hard ? 0x0a0a0a : 0x141414;
+  for (const side of [-1, 1]){
+    if (skidmarks.length >= SKIDMARK_MAX){
+      // Pop the oldest live mark so this fresh one has a slot.
+      const old = skidmarks.shift();
+      if (old.mesh.parent) old.mesh.parent.remove(old.mesh);
+      old.mat.dispose();
+    }
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: startA,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1
+    });
+    const m = new THREE.Mesh(skidGeo, mat);
+    m.rotation.x = -Math.PI/2;
+    // Marks lay along the runway's local +z (rollout direction). Plane width
+    // is across-runway (lx), plane height becomes streak length (lz).
+    m.scale.set(width, len, 1);
+    // Place at touchdown point (slight forward bias since the streak trails
+    // toward the rollout direction the wheels kept moving in).
+    m.position.set(lx + side * MAIN_WHEEL_TRACK, 0, lz + len * 0.5);
+    ap._skidGrp.add(m);
+    skidmarks.push({ mesh: m, mat, life: SKIDMARK_LIFE, max: SKIDMARK_LIFE, startA });
+  }
+}
+function tickSkidmarks(dt){
+  for (let i = skidmarks.length - 1; i >= 0; i--){
+    const s = skidmarks[i];
+    s.life -= dt;
+    if (s.life <= 0){
+      if (s.mesh.parent) s.mesh.parent.remove(s.mesh);
+      s.mat.dispose();
+      skidmarks.splice(i, 1);
+    } else {
+      // Linear fade against starting alpha so darker hard-landing marks
+      // stay darker through their whole life.
+      s.mat.opacity = s.startA * (s.life / s.max);
+    }
+  }
+}
+function clearSkidmarks(){
+  for (const s of skidmarks){
+    if (s.mesh.parent) s.mesh.parent.remove(s.mesh);
+    s.mat.dispose();
+  }
+  skidmarks.length = 0;
 }
 
 for (const a of AIRPORTS) makeAirport(a);
@@ -3776,6 +3859,9 @@ function resetPlane(){
   // Clear any in-flight airshow smoke puffs so reset doesn't leave colored
   // sprites drifting over the runway. The toggle state itself is preserved.
   clearAirshowSmoke();
+  // Wipe touchdown skidmarks so a fresh sortie starts on a clean runway
+  // instead of inheriting marks from the last session's hard landings.
+  clearSkidmarks();
   // Replay buffer also resets so the next session's replay starts clean.
   stopReplay();
   clearReplayBuffer();
@@ -4485,6 +4571,13 @@ function step(dt){
           pushATC('Tower copies hard landing, maintenance advised.', { now:true });
           // Wheels still touched the runway — flash the lights even on a rough one.
           if (land && land.ri) flareRunwayLights(land.ri.ap);
+          // Hard touchdown always paints — firm enough to leave rubber even
+          // when lined up. Lateral velocity = runway-frame side slip.
+          if (land && land.ri){
+            const _cs = Math.cos(-land.ri.ap.hdg), _sn = Math.sin(-land.ri.ap.hdg);
+            const _latMs = state.vel.x*_cs - state.vel.z*_sn;
+            paintSkidmarks(land.ri.ap, land.lx, land.lz, sinkRate, _latMs, true);
+          }
           // Hard landings still count as a touchdown for the landing report
           // card — the player just got an earful from the tower and ate some
           // damage, but it's a learning moment, not a crash.
@@ -4544,6 +4637,16 @@ function step(dt){
         // Pulse the runway lights bright yellow for ~600ms so the touchdown
         // reads as a moment, not just a score popup.
         if (land && land.ri) flareRunwayLights(land.ri.ap);
+        // Skidmarks only when the wheels actually bit — greasers (low sink,
+        // lined up) leave nothing. Firm sinks or crosswind landings leave
+        // visible evidence on the runway that fades over ~30s.
+        if (land && land.ri){
+          const _cs = Math.cos(-land.ri.ap.hdg), _sn = Math.sin(-land.ri.ap.hdg);
+          const _latMs = state.vel.x*_cs - state.vel.z*_sn;
+          if (sinkRate > 1.0 || Math.abs(_latMs) > 1.5){
+            paintSkidmarks(land.ri.ap, land.lx, land.lz, sinkRate, _latMs, false);
+          }
+        }
         state.landed = true;
         onLanding(score);
         // Pop the landing report so every clean touchdown leaves a record:
@@ -4731,6 +4834,7 @@ function step(dt){
   // Touchdown-flare decay runs before applyTimeOfDay so the latter picks up
   // the freshly-decayed flare value when it sets emissive colors.
   tickRunwayFlares(dt);
+  tickSkidmarks(dt);
   applyTimeOfDay(state.todHours);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
