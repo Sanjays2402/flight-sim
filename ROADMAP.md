@@ -58,6 +58,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Wind sock at each airport — a small orange wind sock on a pole near the runway that tilts with the current wind direction and inflates with wind speed. Cheap to draw, makes pre-landing reads way easier than squinting at the HUD wind readout.
+- [ ] Crash report card — when you crash, show a small panel with what went wrong: peak G, sink rate at impact, speed, AoA, and a one-line verdict ("too steep", "stalled", "overspeed"). Turns every crash into a lesson instead of just a replay.
+- [ ] Heading bug on the compass strip — press `[` and `]` to nudge a magenta tick around the compass; autopilot heading hold uses the bug instead of current heading. Real-pilot UX trick that takes ~20 LOC.
+- [ ] Engine RPM gauge in the cockpit panel — fourth small canvas next to airspeed/attitude/altimeter showing prop RPM scaled from throttle (drops with engine-out, climbs with throttle). Finishes the cockpit panel so it doesn't look lopsided.
+- [ ] Sunrise / sunset toast — when the time-of-day cycle crosses sunrise or sunset, fire a quick golden-tinted toast ("🌅 Sunrise" / "🌇 Sunset") so the player actually notices the world changing instead of missing it mid-turn.
+
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
