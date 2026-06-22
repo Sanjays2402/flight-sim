@@ -39,11 +39,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Persistent pilot stats screen — total flights, landings, crashes, best landing score, average score, longest flight, total air time. Opens from main menu via 📊 PILOT STATS button, stored in localStorage, reset with confirm.
 - [x] Photo mode — press `P` to pause sim, free-orbit camera (drag + wheel), hide HUD, one-tap PNG download (`S` or SAVE button).
 - [x] Gear and flaps sound effects + animated flaps — clunk on gear up/down, whoosh on flaps, flap surfaces visibly deflect on the wing.
+- [x] Cockpit instrument panel — airspeed, attitude, and altimeter gauges drawn on small canvases at the bottom-center; only shown in cockpit cam (C key) so the cockpit view actually feels like sitting behind a panel.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Cockpit instrument panel — visible airspeed, altimeter, and attitude gauges rendered inside the cockpit view (only shows in cockpit cam), giving the cockpit cam an actual cockpit feel.
 - [ ] Birds — small flocks of birds drift around low-altitude near airports, gentle flap animation, harmless but adds life to the scene.
 - [ ] Rain weather toggle — settings option for rain, adds streaks across the screen and dims the sky, persisted to localStorage.
 - [ ] Landing gear stress indicator — HUD light flashes amber when sink rate is high enough to risk damage on touchdown, red when guaranteed damage, gives pilots a flare cue.

@@ -154,6 +154,15 @@
   #photo .btn:hover { background:rgba(60,120,75,.95); }
   body.photo-mode { cursor:grab; }
   body.photo-mode.dragging { cursor:grabbing; }
+  /* Cockpit instrument panel: three round analog gauges (ASI / Attitude / Altimeter)
+     centered along the bottom. Only shown in cockpit cam (state.cam===1) so the
+     view actually feels like sitting behind a panel. Drawn on small canvases so
+     needles can sweep smoothly without DOM thrash. */
+  #cockpitPanel { position:fixed; left:50%; bottom:54px; transform:translateX(-50%); display:none; gap:12px; padding:10px 14px; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:10px; backdrop-filter:blur(8px); z-index:7; }
+  #cockpitPanel.show { display:flex; }
+  #cockpitPanel .gauge { display:flex; flex-direction:column; align-items:center; }
+  #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); }
+  #cockpitPanel .glbl { margin-top:4px; font-size:10px; letter-spacing:2px; color:#6aa; font-weight:700; }
 </style>
 </head>
 <body>
@@ -195,6 +204,11 @@
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
+<div id="cockpitPanel">
+  <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl">AIRSPEED km/h</div></div>
+  <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
+  <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
+</div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <div id="settings">
   <div class="card">
@@ -2872,6 +2886,7 @@ function step(dt){
   drawCompass(hdg);
   drawVSI(vs);
   drawMinimap(hdg);
+  drawCockpitPanel(speedKmh, altM);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -3245,6 +3260,221 @@ function drawMinimap(hdgDeg){
   minimapCtx.fillText('N', cx, 2);
 }
 
+// ====== Cockpit instrument panel ======
+// Three round analog gauges (ASI / Attitude / Altimeter) drawn into the small
+// canvases inside #cockpitPanel. Only ticked while the cockpit panel is visible
+// (cockpit cam, not photo mode) so we don't burn CPU when nobody can see them.
+const cpAsiCv = document.getElementById('cpAsi');
+const cpAiCv  = document.getElementById('cpAi');
+const cpAltCv = document.getElementById('cpAlt');
+const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
+const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
+const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
+function _cpBezel(ctx, W, H){
+  // Gauge background + rim. Faces are dark with a slightly lighter inner disc
+  // so the needles read against neutral grey.
+  const cx = W/2, cy = H/2, R = W/2 - 4;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1018';
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#11151c';
+  ctx.beginPath(); ctx.arc(cx, cy, R - 6, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#1e3548';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+}
+function _cpNeedle(ctx, cx, cy, angle, len, color, w){
+  // Pivot a tapered needle from gauge center at given angle (rad, 0 = up).
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -len);
+  ctx.lineTo(-w, 6);
+  ctx.lineTo( w, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#dfe';
+  ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function drawCockpitAsi(speedKmh){
+  if (!cpAsiCtx) return;
+  const W = cpAsiCv.width, H = cpAsiCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpAsiCtx;
+  _cpBezel(ctx, W, H);
+  // Scale: 0..400 km/h sweeps 240° (from -210° to +30° around the dial top).
+  const SPEED_MAX = 400;
+  const sweep = Math.PI * 4/3; // 240°
+  const startA = -Math.PI - Math.PI/6; // start at lower-left
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // Major ticks every 50 km/h with labels, minor every 10.
+  for (let v = 0; v <= SPEED_MAX; v += 10){
+    const a = startA + (v / SPEED_MAX) * sweep;
+    const major = (v % 50 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Red stall arc near the bottom of the dial (0..60 km/h).
+  ctx.strokeStyle = '#ff5252';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA, startA + (60 / SPEED_MAX) * sweep);
+  ctx.stroke();
+  // Green normal-ops band 80..220.
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA + (80 / SPEED_MAX) * sweep, startA + (220 / SPEED_MAX) * sweep);
+  ctx.stroke();
+  // Needle.
+  const s = Math.max(0, Math.min(SPEED_MAX, speedKmh));
+  // Needle is drawn with rotate(angle) where 0 points up; map dial angle a (in
+  // standard math coords measured from +X axis) into a top-up rotation.
+  const a = startA + (s / SPEED_MAX) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout below center.
+  ctx.fillStyle = '#7ee787';
+  ctx.font = 'bold 20px ui-monospace, monospace';
+  ctx.fillText(Math.round(s), cx, cy + R*0.55);
+}
+function drawCockpitAi(qPlane){
+  if (!cpAiCtx) return;
+  const W = cpAiCv.width, H = cpAiCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpAiCtx;
+  _cpBezel(ctx, W, H);
+  const e = new THREE.Euler().setFromQuaternion(qPlane, 'YXZ');
+  const pitch = e.x, roll = e.z;
+  // Inner attitude ball clipped to a smaller circle so it reads like a real AI.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R - 12, 0, Math.PI*2); ctx.clip();
+  ctx.translate(cx, cy);
+  ctx.rotate(roll);
+  const horizonY = pitch * (R * 1.4);
+  ctx.fillStyle = '#3a78c0';
+  ctx.fillRect(-W, -H + horizonY, W*2, H);
+  ctx.fillStyle = '#7a4a25';
+  ctx.fillRect(-W, horizonY, W*2, H);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-W, horizonY); ctx.lineTo(W, horizonY); ctx.stroke();
+  // Pitch ladder.
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.lineWidth = 1;
+  ctx.font = '9px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  for (let p = -30; p <= 30; p += 10){
+    if (p === 0) continue;
+    const yy = horizonY - p * 1.4;
+    const w = (Math.abs(p) % 20 === 0) ? 24 : 14;
+    ctx.beginPath(); ctx.moveTo(-w, yy); ctx.lineTo(w, yy); ctx.stroke();
+    ctx.fillText(String(p), w + 9, yy + 3);
+  }
+  ctx.restore();
+  // Aircraft symbol (fixed).
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(cx - 24, cy); ctx.lineTo(cx - 6, cy);
+  ctx.moveTo(cx + 6,  cy); ctx.lineTo(cx + 24, cy);
+  ctx.moveTo(cx, cy - 3);  ctx.lineTo(cx, cy + 3);
+  ctx.stroke();
+  // Bank pointer + tick ring (outside the horizon ball).
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = '#dfe';
+  for (const ang of [-60,-45,-30,-20,-10,10,20,30,45,60]){
+    const a = ang * Math.PI/180 - Math.PI/2;
+    const r1 = R - 4, r2 = (Math.abs(ang) % 30 === 0) ? R - 11 : R - 7;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+    ctx.stroke();
+  }
+  // Roll pointer rotates with the airframe.
+  ctx.rotate(roll);
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.moveTo(0, -R + 4);
+  ctx.lineTo(-4, -R + 12);
+  ctx.lineTo( 4, -R + 12);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = '#1e3548';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+}
+function drawCockpitAlt(altM){
+  if (!cpAltCtx) return;
+  const W = cpAltCv.width, H = cpAltCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpAltCtx;
+  _cpBezel(ctx, W, H);
+  // Two-needle altimeter: short needle = thousands (0..10), long needle = hundreds
+  // within the current thousand. Same trick as a real 3-pointer altimeter but
+  // simplified to two for legibility on a small canvas.
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // 10 major ticks around the full dial, labeled 0..9 (each = 1000 m for short
+  // needle, 100 m for long needle).
+  for (let i = 0; i < 10; i++){
+    const a = (i / 10) * Math.PI * 2 - Math.PI/2;
+    const r1 = R - 6, r2 = R - 22;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    const rt = R - 36;
+    ctx.fillText(String(i), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+  }
+  // Minor ticks every 100 m worth (10 minors per major).
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 100; i++){
+    if (i % 10 === 0) continue;
+    const a = (i / 100) * Math.PI * 2 - Math.PI/2;
+    const r1 = R - 6, r2 = R - 12;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+  }
+  // Needles: long = hundreds within current thousand, short = thousands.
+  const a = Math.max(0, altM);
+  const hundreds = (a % 1000) / 1000; // 0..1 around full circle
+  const thousands = (a / 10000); // 0..1 across 10k m
+  _cpNeedle(ctx, cx, cy, hundreds * Math.PI * 2,  R - 10, '#ffd166', 4);
+  _cpNeedle(ctx, cx, cy, thousands * Math.PI * 2, R - 30, '#7ee787', 5);
+  // Digital readout below center.
+  ctx.fillStyle = '#7ee787';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(Math.round(a) + 'm', cx, cy + R*0.55);
+}
+function drawCockpitPanel(speedKmh, altM){
+  // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
+  const cpEl = document.getElementById('cockpitPanel');
+  if (!cpEl || !cpEl.classList.contains('show')) return;
+  drawCockpitAsi(speedKmh);
+  drawCockpitAi(plane.quaternion);
+  drawCockpitAlt(altM);
+}
+
 // ====== Camera ======
 const CAM_NAMES = ['CHASE', 'COCKPIT', 'FLYBY', 'ORBIT'];
 const cmNameEl = document.getElementById('cmName');
@@ -3266,6 +3496,10 @@ function updateCamModeUi(){
     if (child === propGroup) continue;
     child.visible = !cockpit;
   }
+  // Cockpit instrument panel only shows in cockpit cam. Photo mode hides it via
+  // PHOTO_HIDE_IDS, so we don't fight that here.
+  const cpEl = document.getElementById('cockpitPanel');
+  if (cpEl) cpEl.classList.toggle('show', cockpit);
 }
 function updateCamera(dt){
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
@@ -3365,7 +3599,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status'];
+const PHOTO_HIDE_IDS = ['hud','compass','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
