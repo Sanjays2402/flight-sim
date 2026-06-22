@@ -54,11 +54,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Airshow smoke on/off button on the HUD — small `~` toggle (and tap target on mobile) that turns on a permanent colored smoke trail in the player's livery accent color. Pairs with the ribbon trail or stands alone.
 - [x] Hot-air balloons drifting over the world — 4 lazy procedural balloons floating between airports, gentle bob, harmless. Pure scenery, makes the world feel less empty between airports.
 - [x] Quick-restart hotkey (R outside replay) — when on the ground / crashed / paused, R restarts the current mission immediately (resetPlane + startMission, closes the pause overlay), and during a replay R also skips it and restarts. Mid-flight (healthy, in the air) keeps the legacy reset-to-runway so a stray R doesn't nuke an active sortie.
+- [x] Wind sock at each airport — a small orange wind sock on a pole near the runway that tilts with the current wind direction and inflates with wind speed. Cheap to draw, makes pre-landing reads way easier than squinting at the HUD wind readout.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Wind sock at each airport — a small orange wind sock on a pole near the runway that tilts with the current wind direction and inflates with wind speed. Cheap to draw, makes pre-landing reads way easier than squinting at the HUD wind readout.
 - [ ] Crash report card — when you crash, show a small panel with what went wrong: peak G, sink rate at impact, speed, AoA, and a one-line verdict ("too steep", "stalled", "overspeed"). Turns every crash into a lesson instead of just a replay.
 - [ ] Heading bug on the compass strip — press `[` and `]` to nudge a magenta tick around the compass; autopilot heading hold uses the bug instead of current heading. Real-pilot UX trick that takes ~20 LOC.
 - [ ] Engine RPM gauge in the cockpit panel — fourth small canvas next to airspeed/attitude/altimeter showing prop RPM scaled from throttle (drops with engine-out, climbs with throttle). Finishes the cockpit panel so it doesn't look lopsided.

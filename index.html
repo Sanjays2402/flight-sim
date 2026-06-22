@@ -1208,6 +1208,95 @@ function updateTaxiArrows(dt){
 }
 let taxiArrowPhase = 0;
 
+// ====== WIND SOCKS ======
+// One bright orange wind sock on a short pole near each runway. The sock
+// pivots to point downwind (real socks blow away from the pole, tail in
+// the direction the wind is going TO) and droops when there's no wind,
+// lifting toward horizontal as wind speed picks up. Cheap pre-landing read
+// — way easier than squinting at the HUD wind readout on short final.
+const WINDSOCK_LIFT_FULL = 10; // m/s — wind speed at which the sock sits horizontal
+const windSocks = []; // [{ yawGrp, tiltMesh }]
+function makeWindSock(a){
+  const grp = new THREE.Group();
+  // Place on the left side of the runway (local -x = pilot's left when taking
+  // off in the -z direction), at the approach-end threshold so it's the first
+  // thing you see on final. Pole height ~5m so it pokes above ground clutter.
+  const stripX = -(a.w/2 + 9);
+  const poleZ  =   a.len/2 - 18;   // near approach threshold (local +z end)
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Pole + small mounting cap.
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0xdddddd });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 5, 6), poleMat);
+  pole.position.set(stripX, 2.5, poleZ);
+  grp.add(pole);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), poleMat);
+  cap.position.set(stripX, 5.05, poleZ);
+  grp.add(cap);
+  // Mouth hoop — small dark ring at the wide end of the sock so the silhouette
+  // reads as a real sock rather than a floating cone.
+  const hoopMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+  // Pivoting group sits at the top of the pole and yaws with the wind. The
+  // sock mesh inside it tilts up from straight-down toward horizontal.
+  const yawGrp = new THREE.Group();
+  yawGrp.position.set(stripX, 5.0, poleZ);
+  grp.add(yawGrp);
+  // Sock cone: built along +Y (cylinder default), wider at the bottom = mouth,
+  // narrower at the top = tail. We then rotate -90° about Z so the tail points
+  // along +X local (which is the direction the yaw group steers downwind).
+  // Open both ends so we don't see ugly disk caps from the side.
+  const sockMat = new THREE.MeshLambertMaterial({
+    color: 0xff7a1a, side: THREE.DoubleSide, emissive: 0x331400
+  });
+  const sockGeo = new THREE.CylinderGeometry(0.25, 1.1, 4.5, 14, 1, true);
+  const tiltMesh = new THREE.Mesh(sockGeo, sockMat);
+  tiltMesh.rotation.z = -Math.PI/2;     // align cone along +X, mouth at origin
+  tiltMesh.position.x =  4.5/2;         // shift so the mouth sits on the pivot
+  // White accent band near the tail so the sock isn't a solid orange blob.
+  const bandMat = new THREE.MeshLambertMaterial({
+    color: 0xffffff, side: THREE.DoubleSide
+  });
+  const bandGeo = new THREE.CylinderGeometry(0.55, 0.75, 0.9, 14, 1, true);
+  const band = new THREE.Mesh(bandGeo, bandMat);
+  band.position.y =  4.5/2 - 1.4;       // ~1.4m down from the tail end
+  tiltMesh.add(band);
+  // Mouth hoop is a thin torus at y = -length/2 (the wide open end).
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.08, 6, 16), hoopMat);
+  hoop.position.y = -4.5/2;
+  hoop.rotation.x = Math.PI/2;
+  tiltMesh.add(hoop);
+  // Pre-rotate the tilt mesh into the limp-down resting pose so the very
+  // first frame doesn't show it sticking out horizontally. updateWindSocks
+  // overwrites this each step.
+  const tiltGrp = new THREE.Group();
+  tiltGrp.add(tiltMesh);
+  yawGrp.add(tiltGrp);
+  windSocks.push({ yawGrp, tiltGrp });
+}
+for (const a of AIRPORTS) makeWindSock(a);
+function updateWindSocks(){
+  // Wind vector points the way wind is going TO. Sock tail should align with
+  // that direction (real socks blow away from the pole). Heading-style yaw:
+  // local +X aligned with (wx, wz) means rotation.y = atan2(-wz, wx).
+  const wx = state.wind.x, wz = state.wind.z;
+  const spd = Math.hypot(wx, wz);
+  // When there's basically no wind, freeze the yaw so the sock doesn't spin
+  // wildly from tiny numerical jitter — just leave it pointing wherever it
+  // last was, which is fine because it's drooping straight down anyway.
+  let yaw = null;
+  if (spd > 0.3) yaw = Math.atan2(-wz, wx);
+  // Tilt: -π/2 = straight down (limp), 0 = horizontal (full wind). easeOut so
+  // even a light breeze visibly lifts it, but it saturates near horizontal.
+  const tiltLift = Math.min(1, spd / WINDSOCK_LIFT_FULL);
+  const tilt = -Math.PI/2 * (1 - Math.pow(tiltLift, 0.6));
+  for (const ws of windSocks){
+    if (yaw !== null) ws.yawGrp.rotation.y = yaw;
+    ws.tiltGrp.rotation.z = tilt;
+  }
+}
+updateWindSocks(); // prime so first paint matches current wind, not the limp default
+
 // ====== PROCEDURAL CITIES (instanced boxes near each airport) ======
 // Boxy buildings clustered in a ring around every airport, so approaches have
 // visual interest. Taller blocks near the centre form a skyline; lower
@@ -3999,6 +4088,9 @@ function step(dt){
   // Taxi guidance chevrons — only visible on the ground near an airport,
   // points new pilots toward the takeoff threshold.
   updateTaxiArrows(dt);
+  // Wind socks at each airport tilt with wind speed and point downwind so
+  // pilots can read the breeze without staring at the HUD.
+  updateWindSocks();
 
   // Acrobat tracker: watch for completed 360° pitch loops / aileron rolls
   // and bump pilotStats + toast when one lands. Cheap, runs once per step.
