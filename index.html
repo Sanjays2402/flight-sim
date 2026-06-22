@@ -250,6 +250,28 @@
   #stats button.danger { color:#ff8a8a; border-color:#5a2a2a; }
   #stats button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
   #stats button.danger:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
+  /* Flight logbook modal — mirrors #stats but wider and with a scrollable list. */
+  #logbook { position:fixed; inset:0; background:rgba(0,5,12,.86); display:none; align-items:center; justify-content:center; z-index:30; }
+  #logbook.show { display:flex; }
+  #logbook .card { width:560px; max-width:92vw; padding:22px 24px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:12px; }
+  #logbook h2 { font-size:20px; color:#7ee787; margin-bottom:6px; letter-spacing:2px; font-weight:800; }
+  #logbook .sub { font-size:10px; color:#7aa; letter-spacing:1px; margin-bottom:10px; }
+  #logbook .list { max-height:60vh; overflow-y:auto; border:1px solid rgba(30,53,72,.6); border-radius:6px; padding:2px 4px; }
+  #logbook .row { display:grid; grid-template-columns: 1fr auto; gap:4px 12px; padding:8px 6px; border-bottom:1px solid rgba(30,53,72,.4); }
+  #logbook .row:last-child { border-bottom:none; }
+  #logbook .row .hd { color:#cfe; font-weight:700; font-size:12px; letter-spacing:.5px; }
+  #logbook .row .dt { color:#7aa; font-size:10px; text-align:right; letter-spacing:.5px; }
+  #logbook .row .meta { color:#9bb; font-size:10px; letter-spacing:.3px; grid-column:1 / span 2; }
+  #logbook .row .verdict { color:#7ee787; font-size:10px; font-weight:700; letter-spacing:1px; }
+  #logbook .row .verdict.bad { color:#ff8a8a; }
+  #logbook .empty { padding:18px 8px; text-align:center; color:#7aa; font-size:11px; letter-spacing:1px; }
+  #logbook .hint { font-size:10px; color:#9bb; margin:10px 0 4px; line-height:1.4; }
+  #logbook .actions { display:flex; gap:8px; margin-top:8px; }
+  #logbook button { flex:1; padding:8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
+  #logbook button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #logbook button.danger { color:#ff8a8a; border-color:#5a2a2a; }
+  #logbook button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  #logbook button.danger:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
   /* Photo mode: press P to freeze the world, free-orbit the camera around the
      plane, and save a screenshot. The overlay is a small bottom-center pill
      so it stays out of the actual photo; we also hide it for one frame around
@@ -509,6 +531,18 @@
     </div>
   </div>
 </div>
+<div id="logbook">
+  <div class="card">
+    <h2>FLIGHT LOG</h2>
+    <div class="sub">Last 50 flights · most recent first</div>
+    <div class="list" id="logList"></div>
+    <div class="hint">Each completed flight (takeoff to full-stop or crash) writes a row. Saved locally to this browser.</div>
+    <div class="actions">
+      <button id="logReset" class="danger" type="button">CLEAR</button>
+      <button id="logClose" class="primary" type="button">CLOSE</button>
+    </div>
+  </div>
+</div>
 <div id="intro">
   <div class="card">
     <h1>FLIGHT SIM</h1>
@@ -522,6 +556,7 @@
     </div>
     <div class="menurow">
       <button id="introStats" type="button">📊 PILOT STATS</button>
+      <button id="introLog" type="button">📖 LOGBOOK</button>
     </div>
     <div class="ctrls">
       <span>Throttle</span><span><kbd>W</kbd> up / <kbd>S</kbd> down</span>
@@ -660,6 +695,27 @@ function onTakeoff(){
   flightStartMs = performance.now();
   pilotStats.totalFlights += 1;
   savePilotStats();
+  // Capture origin airport for the logbook — nearest field by horizontal distance.
+  // Includes CARRIER so a deck launch reads as "CV01". Falls back to MAIN_AP
+  // if the lookup fails for any reason. Reset on every fresh flight (logbook
+  // append clears it; resetPlane also wipes it for ground-only resets).
+  try {
+    if (typeof plane !== 'undefined' && plane){
+      const px = plane.position.x, pz = plane.position.z;
+      let best = null, bestD = Infinity;
+      for (const ap of AIRPORTS){
+        const dx = ap.x - px, dz = ap.z - pz;
+        const d = dx*dx + dz*dz;
+        if (d < bestD){ bestD = d; best = ap; }
+      }
+      if (typeof CARRIER !== 'undefined' && CARRIER){
+        const dx = CARRIER.x - px, dz = CARRIER.z - pz;
+        const d = dx*dx + dz*dz;
+        if (d < bestD){ bestD = d; best = CARRIER; }
+      }
+      state.flightOrigin = best ? best.id : (MAIN_AP ? MAIN_AP.id : '—');
+    }
+  } catch(e){ state.flightOrigin = MAIN_AP ? MAIN_AP.id : '—'; }
   unlockAchievement('firstFlight');
   // Best-effort ATC call. pushATC may not exist yet at module-load order if
   // the strip DOM is wired later; guard so this never throws.
@@ -715,6 +771,9 @@ function closeFlightTime(){
   return sec;
 }
 function onLanding(score){
+  // Snapshot flight-end facts BEFORE closeFlightTime zeroes flightStartMs so
+  // the logbook row gets accurate duration + origin.
+  const durSec = (flightStartMs != null) ? Math.max(0, (performance.now() - flightStartMs) / 1000) : 0;
   closeFlightTime();
   pilotStats.totalLandings += 1;
   if (typeof score === 'number' && isFinite(score) && score > 0){
@@ -722,14 +781,30 @@ function onLanding(score){
     if (score > pilotStats.bestLandingScore) pilotStats.bestLandingScore = score;
   }
   savePilotStats();
+  appendLogEntry({
+    outcome: 'landed',
+    score: (typeof score === 'number' && isFinite(score)) ? score : 0,
+    durSec,
+    dest: (typeof state !== 'undefined' && state.lastLandingAp) ? state.lastLandingAp : null,
+    verdict: (typeof state !== 'undefined' && state.lastLandingVerdict) ? state.lastLandingVerdict : 'LANDED'
+  });
   unlockAchievement('firstLanding');
   if (pilotStats.totalLandings >= 10) unlockAchievement('tenLandings');
   if (typeof score === 'number' && score >= 300) unlockAchievement('perfectLanding');
 }
 function onCrash(){
+  // Same snapshot pattern as onLanding so the crash row has real duration.
+  const durSec = (flightStartMs != null) ? Math.max(0, (performance.now() - flightStartMs) / 1000) : 0;
   closeFlightTime();
   pilotStats.crashes += 1;
   savePilotStats();
+  appendLogEntry({
+    outcome: 'crashed',
+    score: 0,
+    durSec,
+    dest: null,
+    verdict: (typeof state !== 'undefined' && state.lastCrashVerdict) ? state.lastCrashVerdict : 'CRASHED'
+  });
 }
 function fmtFlightTime(sec){
   sec = Math.max(0, Math.floor(sec));
@@ -739,6 +814,62 @@ function fmtFlightTime(sec){
   if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
   return m + ':' + String(s).padStart(2,'0');
 }
+
+// ====== FLIGHT LOGBOOK ======
+// Per-flight history row keyed by takeoff. Each completed flight (full-stop
+// landing OR crash) writes one entry with: ts, mission, origin→dest, duration,
+// max altitude, landing score, verdict. Capped at 50 (oldest scrolls off).
+// Read-only modal opened from the main menu's LOGBOOK button.
+const LOG_KEY = 'flightsim.log.v1';
+const LOG_MAX = 50;
+let pilotLog = [];
+try {
+  const raw = localStorage.getItem(LOG_KEY);
+  if (raw){
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) pilotLog = arr.filter(e => e && typeof e === 'object').slice(0, LOG_MAX);
+  }
+} catch(e){ /* corrupt — stay empty */ }
+function savePilotLog(){
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(pilotLog)); } catch(e){ /* private mode — skip */ }
+}
+// Append a finished-flight row. Reads origin + peak alt + mission off `state`
+// so callers (onLanding/onCrash) just pass outcome-specific fields. Silently
+// skips when no takeoff was recorded (ground-only sessions don't pollute log).
+function appendLogEntry(d){
+  if (typeof state === 'undefined') return;
+  if (!state.flightOrigin) return;  // never left the ground
+  const entry = {
+    ts: Date.now(),
+    mission: state.mode || 'free',
+    origin: state.flightOrigin || '—',
+    dest: d.dest || (d.outcome === 'crashed' ? '—' : (state.flightOrigin || '—')),
+    durSec: Math.max(0, Math.round(d.durSec || 0)),
+    maxAlt: Math.max(0, Math.round(state.flightMaxAlt || 0)),
+    score: Math.max(0, Math.round(d.score || 0)),
+    verdict: d.verdict || (d.outcome === 'crashed' ? 'CRASHED' : 'LANDED'),
+    outcome: d.outcome
+  };
+  pilotLog.unshift(entry);
+  if (pilotLog.length > LOG_MAX) pilotLog.length = LOG_MAX;
+  savePilotLog();
+  // Origin is a per-flight thing — clear so the next takeoff captures fresh.
+  state.flightOrigin = null;
+}
+// Friendly date label: "Mon 14:32" if today, "Jun 22 14:32" otherwise.
+function fmtLogDate(ts){
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear()
+               && d.getMonth() === now.getMonth()
+               && d.getDate() === now.getDate();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  if (sameDay) return hh + ':' + mm;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + ' ' + d.getDate() + ' ' + hh + ':' + mm;
+}
+const MISSION_LABELS = { free:'FREE', tng:'T&G', hop:'HOP', ring:'RING', carrier:'CV' };
 
 // ====== ACHIEVEMENTS ======
 // Quick toast popups for one-time milestones (first landing, 10 landings,
@@ -4875,6 +5006,14 @@ function resetPlane(){
   state.peakG = 0;
   state.peakSink = 0;
   state.gLoad = 1.0;
+  // Logbook per-flight trackers: peak altitude, captured origin, and the
+  // last-{landing,crash} snapshots used by appendLogEntry(). Wiped here so a
+  // ground-only reset (R on the runway) doesn't pollute the next sortie's row.
+  state.flightMaxAlt = 0;
+  state.flightOrigin = null;
+  state.lastLandingAp = null;
+  state.lastLandingVerdict = null;
+  state.lastCrashVerdict = null;
   // Short-final callouts: fresh sortie re-arms the radalt voice and clears
   // the last-AGL latch so the first descent through 500ft fires cleanly.
   state.approachLastAGL = 9999;
@@ -5927,7 +6066,7 @@ function step(dt){
           pushATC('Crash, crash, crash — rolling the trucks.', { now:true });
           state.crashed = true;
           // Snapshot impact telemetry so the card can show what went wrong.
-          showCrashCard({
+          const crashData = {
             kind: 'impact',
             reason,
             peakG: state.peakG,
@@ -5939,7 +6078,12 @@ function step(dt){
             gearDown: state.gearDown,
             onRunway,
             stalled: Math.abs(aoa) > STALL_AOA * 0.85 || state.stall > 0.4
-          });
+          };
+          showCrashCard(crashData);
+          // Same verdict the card shows — mirrored into the logbook entry
+          // so a glance at the log explains every wreck ("STALLED ON FINAL",
+          // "GEAR-UP LANDING", etc.) without re-opening the crash card.
+          state.lastCrashVerdict = pickCrashVerdict(crashData);
           onCrash();
           startReplay();
         } else {
@@ -6052,6 +6196,18 @@ function step(dt){
           }
         }
         state.landed = true;
+        // Snapshot landing facts for the logbook BEFORE onLanding fires the
+        // appendLogEntry hook. apid is the actual touchdown field (carrier
+        // included via runwayInfos); verdict uses the same pickLandVerdict
+        // helper as the landing report card so log/card stay consistent.
+        state.lastLandingAp = apid || null;
+        state.lastLandingVerdict = pickLandVerdict({
+          bounced: false,
+          hard: false,
+          sinkRate,
+          centerOffset: land ? land.lx : 0,
+          speedKmh: fwdKmh
+        });
         onLanding(score);
         // Pop the landing report so every clean touchdown leaves a record:
         // sink, speed, centerline, G, and rollout (filled in live as we roll).
@@ -6177,6 +6333,8 @@ function step(dt){
     if (gLoad > state.peakG) state.peakG = gLoad;
     const sinkNow = -state.vel.y;
     if (sinkNow > state.peakSink) state.peakSink = sinkNow;
+    // Logbook peak altitude (MSL). Cheap, no extra branches; reset in resetPlane.
+    if (plane.position.y > (state.flightMaxAlt || 0)) state.flightMaxAlt = plane.position.y;
   }
   // Over-G damage: above 4.5 g, airframe starts breaking. Accumulates slowly so
   // brief peaks are forgivable; sustained 6+ g rips the wings off fast.
@@ -6195,7 +6353,7 @@ function step(dt){
     const _failPitchDeg = THREE.MathUtils.radToDeg(tmpE.x);
     const _failRollDeg  = THREE.MathUtils.radToDeg(tmpE.z);
     const _failKmh = Math.max(0, vFwd) * 3.6;
-    showCrashCard({
+    const failData = {
       kind: 'airframe',
       reason: 'Damage hit 100% — structure failed',
       peakG: state.peakG,
@@ -6207,7 +6365,11 @@ function step(dt){
       gearDown: state.gearDown,
       onRunway: false,
       stalled: Math.abs(aoa) > STALL_AOA * 0.85 || state.stall > 0.4
-    });
+    };
+    showCrashCard(failData);
+    // Mirror the card's verdict into the logbook entry so airframe failures
+    // read as "AIRFRAME FAILURE" instead of the generic CRASHED fallback.
+    state.lastCrashVerdict = pickCrashVerdict(failData);
     onCrash();
     startReplay();
   }
@@ -8603,6 +8765,77 @@ addEventListener('keydown', e => {
     if (!confirm('Reset all pilot stats? This cannot be undone.')) return;
     Object.assign(pilotStats, STATS_DEFAULT);
     savePilotStats();
+    refresh();
+  });
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'Escape' && panel.classList.contains('show')){
+      e.preventDefault();
+      closePanel();
+    }
+  });
+})();
+
+// ====== FLIGHT LOGBOOK UI ======
+// Read-only modal opened from the main menu's LOGBOOK button. Renders the
+// `pilotLog` array (newest first, capped at LOG_MAX). Clear button wipes the
+// log (with a confirm) so a player who fat-fingers the wrong button doesn't
+// lose their history. Mirrors setupStatsUi structure intentionally so the two
+// modals behave consistently (Esc closes, backdrop-click closes).
+(function setupLogbookUi(){
+  const panel = document.getElementById('logbook');
+  const btnOpen = document.getElementById('introLog');
+  const btnClose = document.getElementById('logClose');
+  const btnReset = document.getElementById('logReset');
+  const listEl = document.getElementById('logList');
+  if (!panel || !btnOpen || !listEl) return;
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => (
+      c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;'
+      : c === '"' ? '&quot;' : '&#39;'
+    ));
+  }
+  function altLabel(m){
+    if (m >= 1000) return (m/1000).toFixed(1) + 'k m';
+    return Math.round(m) + ' m';
+  }
+  function refresh(){
+    if (!pilotLog || pilotLog.length === 0){
+      listEl.innerHTML = '<div class="empty">No flights logged yet — take off to start your record.</div>';
+      return;
+    }
+    const parts = [];
+    for (const e of pilotLog){
+      const mission = MISSION_LABELS[e.mission] || (e.mission || 'FREE').toUpperCase();
+      const route = (e.origin || '—') + ' → ' + (e.dest || '—');
+      const dur = fmtFlightTime(e.durSec || 0);
+      const alt = altLabel(e.maxAlt || 0);
+      const scoreBit = (e.outcome === 'landed' && e.score > 0) ? (' · +' + e.score) : '';
+      const verdictCls = e.outcome === 'crashed' ? ' bad' : '';
+      parts.push(
+        '<div class="row">' +
+          '<div class="hd">' + escapeHtml(mission) + ' · ' + escapeHtml(route) + '</div>' +
+          '<div class="dt">' + escapeHtml(fmtLogDate(e.ts)) + '</div>' +
+          '<div class="meta">' + escapeHtml(dur) + ' · max ' + escapeHtml(alt) + scoreBit +
+            ' · <span class="verdict' + verdictCls + '">' + escapeHtml(e.verdict || '—') + '</span>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+    listEl.innerHTML = parts.join('');
+    // Scroll to top so the newest flight is always visible first.
+    listEl.scrollTop = 0;
+  }
+  function openPanel(){ refresh(); panel.classList.add('show'); }
+  function closePanel(){ panel.classList.remove('show'); }
+  btnOpen.addEventListener('click', e => { e.stopPropagation(); openPanel(); });
+  btnClose.addEventListener('click', e => { e.stopPropagation(); closePanel(); });
+  panel.addEventListener('click', e => { if (e.target === panel) closePanel(); });
+  btnReset.addEventListener('click', e => {
+    e.stopPropagation();
+    if (!confirm('Clear the entire flight log? This cannot be undone.')) return;
+    pilotLog.length = 0;
+    savePilotLog();
     refresh();
   });
   addEventListener('keydown', e => {
