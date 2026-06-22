@@ -32,13 +32,13 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Refuel on ground at airport — taxi onto the apron, throttle to idle, fuel ticks back up (~30s for a full tank).
 - [x] AI traffic — one other plane doing circuits at the home airport.
 - [x] Mobile touch controls — virtual stick on left, throttle slider on right.
+- [x] Settings panel — sensitivity, FOV, audio volume (persisted to localStorage, opens via ⚙ or `,`).
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **Settings panel** — sensitivity, FOV, audio volume.
+1. **Liveries / paint picker** — 3–5 color schemes for the plane.
 2. **Liveries / paint picker** — 3–5 color schemes for the plane.
-3. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

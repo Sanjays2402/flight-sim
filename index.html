@@ -88,6 +88,24 @@
   #mbtns { position:fixed; right:18px; bottom:230px; display:flex; flex-direction:column; gap:6px; z-index:8; }
   #mbtns button { width:64px; height:36px; border-radius:6px; background:rgba(8,14,22,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:11px; font-weight:700; letter-spacing:1px; cursor:pointer; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
   #mbtns button:active { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  /* Settings panel: small ⚙ button bottom-right (just above cam pill), opens a centered modal.
+     Lets the player tune control sensitivity, FOV, and master audio volume. Stored in localStorage. */
+  #setbtn { position:fixed; bottom:46px; right:12px; padding:4px 9px; font-size:13px; color:#cfe; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; cursor:pointer; font-family:inherit; line-height:1; user-select:none; -webkit-user-select:none; }
+  #setbtn:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  #settings { position:fixed; inset:0; background:rgba(0,5,12,.78); display:none; align-items:center; justify-content:center; z-index:20; }
+  #settings.show { display:flex; }
+  #settings .card { width:340px; padding:20px 24px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; }
+  #settings h2 { font-size:18px; color:#7ee787; margin-bottom:14px; letter-spacing:2px; font-weight:800; }
+  #settings .row { margin-bottom:14px; }
+  #settings .row .top { display:flex; justify-content:space-between; margin-bottom:5px; }
+  #settings .row .name { color:#6aa; font-size:11px; letter-spacing:1px; font-weight:700; }
+  #settings .row .val { color:#fff; font-weight:700; font-size:12px; }
+  #settings input[type=range] { width:100%; accent-color:#7ee787; }
+  #settings .hint { font-size:10px; color:#9bb; margin-top:2px; line-height:1.4; }
+  #settings .actions { display:flex; gap:8px; margin-top:6px; }
+  #settings button { flex:1; padding:8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
+  #settings button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #settings button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
 </style>
 </head>
 <body>
@@ -124,10 +142,35 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>,</kbd> settings · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
+<button id="setbtn" title="Settings ( , )">⚙</button>
+<div id="settings">
+  <div class="card">
+    <h2>SETTINGS</h2>
+    <div class="row">
+      <div class="top"><span class="name">SENSITIVITY</span><span class="val" id="setSensV">1.00×</span></div>
+      <input type="range" id="setSens" min="30" max="200" step="5" value="100">
+      <div class="hint">Pitch / roll / yaw response. Higher = twitchier stick.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">FIELD OF VIEW</span><span class="val" id="setFovV">70°</span></div>
+      <input type="range" id="setFov" min="50" max="110" step="1" value="70">
+      <div class="hint">Camera lens. Wider feels faster; narrower zooms in.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">AUDIO VOLUME</span><span class="val" id="setVolV">100%</span></div>
+      <input type="range" id="setVol" min="0" max="100" step="5" value="100">
+      <div class="hint">Master volume (stall horn, future engine sound).</div>
+    </div>
+    <div class="actions">
+      <button id="setReset">RESET</button>
+      <button id="setClose" class="primary">CLOSE</button>
+    </div>
+  </div>
+</div>
 <div id="replay"><span class="dot"></span>REPLAY · LAST 30s<small>click or press <b>R</b> to skip</small></div>
 <div id="mctrl">
   <div id="mstick"><div class="knob" id="mknob"></div></div>
@@ -193,6 +236,29 @@ scene.background = new THREE.Color(0xc8dcf0);
 scene.fog = new THREE.Fog(0xc8dcf0, 5000, 18000);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.5, 40000);
+
+// ====== SETTINGS ======
+// User-tunable knobs persisted to localStorage. Sensitivity scales control
+// authority, FOV updates the camera lens, volume scales any UI/sim audio gain.
+// Defaults match the values that existed before settings shipped, so opting out
+// (i.e. never touching the panel) gives exactly the same feel as before.
+const SETTINGS_KEY = 'flightsim.settings.v1';
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0 };
+const settings = Object.assign({}, SETTINGS_DEFAULT);
+try {
+  const raw = localStorage.getItem(SETTINGS_KEY);
+  if (raw){
+    const saved = JSON.parse(raw);
+    if (typeof saved.sensitivity === 'number') settings.sensitivity = Math.max(0.3, Math.min(2.0, saved.sensitivity));
+    if (typeof saved.fov === 'number') settings.fov = Math.max(50, Math.min(110, saved.fov));
+    if (typeof saved.volume === 'number') settings.volume = Math.max(0, Math.min(1, saved.volume));
+  }
+} catch(e){ /* corrupt prefs — ignore, use defaults */ }
+camera.fov = settings.fov;
+camera.updateProjectionMatrix();
+function saveSettings(){
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch(e){ /* private mode — skip */ }
+}
 
 // ====== TIME OF DAY ======
 // Sun moves through the sky on a slow loop. Sky colors, ambient/hemi/sun
@@ -1656,7 +1722,7 @@ function setStallAudio(active){
   if (active){
     // pulse on/off ~5 Hz for a classic stall horn feel
     const beat = (performance.now() * 0.005) % 1;
-    const target = beat < 0.5 ? 0.06 : 0.0;
+    const target = beat < 0.5 ? 0.06 * settings.volume : 0.0;
     gain.gain.setTargetAtTime(target, ctx.currentTime, 0.01);
   } else {
     gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
@@ -1865,7 +1931,7 @@ function step(dt){
 
   const qFactor = Math.min(1, (speed*speed) / (60*60));
   // Control authority drops with damage (busted hinges, broken cables, etc.).
-  const ctrlMul = 1 - 0.4 * dmg;
+  const ctrlMul = (1 - 0.4 * dmg) * settings.sensitivity;
   plane.rotateX(-pIn * PITCH_AUTH * qFactor * ctrlMul * dt);
   plane.rotateZ(-rIn * ROLL_AUTH  * qFactor * ctrlMul * dt);
   plane.rotateY(-yIn * YAW_AUTH   * qFactor * ctrlMul * dt);
@@ -2659,6 +2725,76 @@ addEventListener('resize', ()=>{
 
 // Click anywhere on the replay banner to dismiss it.
 replayEl.addEventListener('click', () => stopReplay());
+
+// ====== SETTINGS PANEL UI ======
+// Toggleable modal that exposes the persisted `settings` object. Sliders write
+// straight back into `settings` (live updates) and saveSettings() persists to
+// localStorage on change. Opens via the ⚙ button or the `,` (comma) shortcut.
+(function setupSettingsUi(){
+  const panel = document.getElementById('settings');
+  const btnOpen = document.getElementById('setbtn');
+  const btnClose = document.getElementById('setClose');
+  const btnReset = document.getElementById('setReset');
+  const sens = document.getElementById('setSens');
+  const fov = document.getElementById('setFov');
+  const vol = document.getElementById('setVol');
+  const sensV = document.getElementById('setSensV');
+  const fovV = document.getElementById('setFovV');
+  const volV = document.getElementById('setVolV');
+  if (!panel || !btnOpen) return;
+  function syncInputs(){
+    sens.value = Math.round(settings.sensitivity * 100);
+    fov.value = Math.round(settings.fov);
+    vol.value = Math.round(settings.volume * 100);
+    sensV.textContent = settings.sensitivity.toFixed(2) + '×';
+    fovV.textContent = Math.round(settings.fov) + '°';
+    volV.textContent = Math.round(settings.volume * 100) + '%';
+  }
+  function applyFov(){
+    camera.fov = settings.fov;
+    camera.updateProjectionMatrix();
+  }
+  function openPanel(){ syncInputs(); panel.classList.add('show'); }
+  function closePanel(){ panel.classList.remove('show'); }
+  btnOpen.addEventListener('click', e => { e.stopPropagation(); openPanel(); });
+  btnClose.addEventListener('click', e => { e.stopPropagation(); closePanel(); });
+  panel.addEventListener('click', e => { if (e.target === panel) closePanel(); });
+  sens.addEventListener('input', () => {
+    settings.sensitivity = (+sens.value) / 100;
+    sensV.textContent = settings.sensitivity.toFixed(2) + '×';
+    saveSettings();
+  });
+  fov.addEventListener('input', () => {
+    settings.fov = +fov.value;
+    fovV.textContent = Math.round(settings.fov) + '°';
+    applyFov();
+    saveSettings();
+  });
+  vol.addEventListener('input', () => {
+    settings.volume = (+vol.value) / 100;
+    volV.textContent = Math.round(settings.volume * 100) + '%';
+    saveSettings();
+  });
+  btnReset.addEventListener('click', () => {
+    Object.assign(settings, SETTINGS_DEFAULT);
+    applyFov();
+    syncInputs();
+    saveSettings();
+  });
+  // `,` (comma) toggles the panel. Esc closes it. Skip while typing in inputs
+  // (shouldn't happen here, but defensive) and while the intro modal is up.
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.code === 'Comma'){
+      if (state.introOpen) return;
+      e.preventDefault();
+      if (panel.classList.contains('show')) closePanel(); else openPanel();
+    } else if (e.code === 'Escape'){
+      if (panel.classList.contains('show')){ e.preventDefault(); closePanel(); }
+    }
+  });
+})();
 
 camera.position.set(MAIN_AP.x, MAIN_AP.elev + GEAR_H + 5, MAIN_AP.z + MAIN_AP.len/2 - 80);
 camera.lookAt(plane.position);
