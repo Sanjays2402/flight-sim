@@ -2347,6 +2347,16 @@ const matDark   = new THREE.MeshLambertMaterial({ color: 0x222428 });
 const matGlass  = new THREE.MeshLambertMaterial({ color: 0x223344, transparent:true, opacity:0.75 });
 const matMetal  = new THREE.MeshLambertMaterial({ color: 0x999999 });
 
+// Wingtip flex pivots are assigned inside the airframe-construction block
+// below. We hoist them to module scope so the per-frame update loop can lerp
+// their rotation toward a G-load-driven target (see WING_FLEX_* constants).
+let wingTipPivotL = null;
+let wingTipPivotR = null;
+let wingFlexCurrent = 0;       // current rendered flex angle (rad). 0 = flat.
+const WING_FLEX_MAX_RAD = 0.07;  // ~4° hard clamp so it reads as bend, not break.
+const WING_FLEX_PER_G   = 0.018; // ~1° per +1G above 1G → ~3° at 4G, clamped above.
+const WING_FLEX_RATE    = 4.5;   // rad/sec lerp rate so the bend tracks G but doesn't twitch.
+
 {
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 4.6, 14), matFuse);
   body.rotation.x = Math.PI/2; plane.add(body);
@@ -2361,8 +2371,18 @@ const matMetal  = new THREE.MeshLambertMaterial({ color: 0x999999 });
   const wing = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.12, 1.4), matFuse);
   wing.position.set(0, 0.05, -0.2); plane.add(wing);
   for (const s of [-1,1]){
+    // Wingtips live on a pivot group hinged at the inboard end (~x = s*3.8)
+    // so that rotating the pivot on Z visibly bends the wingtip *upward* under
+    // G-load instead of just spinning the tip block around its own center.
+    // The tip mesh sits at +0.5 inside the pivot so its outboard face stays at
+    // s*4.3 / 0.55 wide — identical silhouette when flex is zero.
+    const pivot = new THREE.Group();
+    pivot.position.set(s*3.8, 0.06, -0.2);
     const tip = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 1.0), matAccent);
-    tip.position.set(s*4.3, 0.06, -0.2); plane.add(tip);
+    tip.position.set(s*0.5, 0, 0);
+    pivot.add(tip);
+    plane.add(pivot);
+    if (s < 0) wingTipPivotL = pivot; else wingTipPivotR = pivot;
     const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.6, 6), matMetal);
     strut.position.set(s*2.2, -0.4, -0.2); strut.rotation.z = s*0.35; plane.add(strut);
   }
@@ -5604,6 +5624,11 @@ function resetPlane(){
   gearGrp.visible = true;
   flapL.rotation.x = 0;
   flapR.rotation.x = 0;
+  // Wingtip flex snaps flat too so a fresh start doesn't inherit a 3° bend
+  // from the last hard pull-up.
+  wingFlexCurrent = 0;
+  if (wingTipPivotL) wingTipPivotL.rotation.z = 0;
+  if (wingTipPivotR) wingTipPivotR.rotation.z = 0;
   state.brakes = false;
   // Reverse thrust resets cleanly so a quick-restart doesn't inherit a
   // half-deployed reverser visual / dust emitter from the prior sortie.
@@ -7296,6 +7321,28 @@ function step(dt){
   flapR.rotation.x = flapAnimRad;
   gearGrp.position.y = -gearAnim * GEAR_LIFT;
   gearGrp.visible = gearAnim < 0.999;
+
+  // Wing flex: bend the wingtip pivots upward proportional to the live G-load
+  // we already compute for the G-meter. Hard 4° clamp so it reads as visible
+  // structural flex without ever looking like a snap. Engine-out windmilling
+  // glides target back to flat so a quiet deadstick looks calm instead of
+  // sagging negative under fractional-G. Kept visible in photo mode — action
+  // shots benefit from the bent wing.
+  if (wingTipPivotL && wingTipPivotR){
+    const gNow = state.gLoad || 1.0;
+    const engineQuiet = !!(state.engineOut || state.coldStart || (state.fuel || 0) <= 0);
+    let target = engineQuiet ? 0 : Math.max(0, (gNow - 1.0)) * WING_FLEX_PER_G;
+    if (target > WING_FLEX_MAX_RAD) target = WING_FLEX_MAX_RAD;
+    const wStep = WING_FLEX_RATE * dt;
+    if (wingFlexCurrent < target) wingFlexCurrent = Math.min(target, wingFlexCurrent + wStep);
+    else if (wingFlexCurrent > target) wingFlexCurrent = Math.max(target, wingFlexCurrent - wStep);
+    // Tip up on both sides. The left pivot's tip mesh sits at local x=-0.5
+    // so a NEGATIVE Z-rotation lifts it toward +Y; the right pivot's tip sits
+    // at local x=+0.5 so a POSITIVE Z-rotation does the same. Result: both
+    // wingtips bend upward toward the cockpit (positive Y in plane-local).
+    wingTipPivotL.rotation.z = -wingFlexCurrent;
+    wingTipPivotR.rotation.z =  wingFlexCurrent;
+  }
 
   // Cloud drift
   for (const p of cloudPuffs){
