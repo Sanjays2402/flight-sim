@@ -54,6 +54,14 @@
   @keyframes atcFlash { 0% { background:rgba(40,90,55,.92); border-color:#7ee787; } 100% { background:rgba(8,14,22,.78); border-color:#1e3548; } }
   #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #vsi canvas { display:block; width:100%; height:100%; }
+  /* Glideslope indicator: vertical "meatball" / PAPI strip pinned to the
+     right edge under the VSI. Only visible when the plane is roughly
+     aligned with the nearest runway and inside ~5 km, so it reads like a
+     real ILS without any radio tuning. Dot floats up when you're above the
+     3° glideslope, down when you're below; centered means on slope. Hidden
+     by default — drawGlideslope() flips display:block when active. */
+  #glide { position:fixed; top:308px; right:162px; width:46px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
+  #glide canvas { display:block; width:100%; height:100%; }
   @keyframes blink { 50% { opacity: 0.25; } }
   #help { bottom:12px; left:12px; max-width:380px; color:#9bb; }
   #help kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:11px; margin:0 1px; border:1px solid #2a4a6a; }
@@ -319,6 +327,7 @@
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
+<div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
 <div id="score">
@@ -4802,6 +4811,7 @@ function step(dt){
   drawAttitude(plane.quaternion);
   drawCompass(hdg, state.ap.hdgBug);
   drawVSI(vs);
+  drawGlideslope(hdg);
   drawMinimap(hdg);
   drawCockpitPanel(speedKmh, altM);
 
@@ -5051,6 +5061,164 @@ function drawVSI(vs){
   vsiCtx.beginPath();
   vsiCtx.arc(cx + 14, cy, 2.5, 0, Math.PI*2);
   vsiCtx.fill();
+}
+
+// ====== Glideslope indicator (ILS-style "meatball") ======
+// Vertical strip pinned to the right side under the VSI. Reads vertical
+// deviation from a 3° glideslope to the threshold of the nearest runway,
+// but only when the plane is roughly lined up with that runway from the
+// approach side and inside ~5 km. The dot floats above center when you're
+// high (descend) and below center when you're low (climb), matching real
+// PAPI conventions (red below, white above) so it pairs with the bottom
+// PAPI lights. Activation gates are intentionally strict so the strip
+// doesn't flash on during random fly-bys.
+const glideEl = document.getElementById('glide');
+const glideCv = document.getElementById('glideCv');
+const glideCtx = glideCv.getContext('2d');
+const GLIDE_TARGET_DEG = 3.0;     // standard ILS / PAPI glideslope angle
+const GLIDE_RANGE_DEG  = 3.0;     // full-scale deflection (±3° around target)
+const GLIDE_MAX_DIST   = 5000;    // metres from threshold
+const GLIDE_ALIGN_LAT  = 800;     // metres laterally off the centerline
+const GLIDE_ALIGN_HDG  = 35;      // degrees of heading off runway course
+function drawGlideslope(hdgDeg){
+  // Find the runway we're best aligned with (closest aim point on the
+  // approach side and pointing toward it). Reuses the same runwayInfos as
+  // the bottom PAPI bar.
+  let best = null, bestScore = 1e9;
+  for (const ri of runwayInfos){
+    const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
+    const dx = plane.position.x - ri.ap.x;
+    const dz = plane.position.z - ri.ap.z;
+    const lx = dx*cs - dz*sn;            // lateral offset (m), 0 = on centerline
+    const lz = dx*sn + dz*cs;            // along-runway (m), +lz = past south end (approach side)
+    const beyondSouth = lz > ri.ap.len/2 - 50;
+    if (!beyondSouth) continue;
+    const dxA = plane.position.x - ri.aimX;
+    const dzA = plane.position.z - ri.aimZ;
+    const horiz = Math.hypot(dxA, dzA);
+    if (horiz < 1 || horiz > GLIDE_MAX_DIST) continue;
+    if (Math.abs(lx) > GLIDE_ALIGN_LAT) continue;
+    // Heading-cone check: plane heading should be close to the runway's
+    // landing course (a.hdg in radians, 0 = +z = north).
+    const rwyHdg = ((ri.ap.hdg * 180/Math.PI) % 360 + 360) % 360;
+    let dh = ((hdgDeg - rwyHdg) + 540) % 360 - 180;
+    if (Math.abs(dh) > GLIDE_ALIGN_HDG) continue;
+    if (plane.position.y < ri.ap.elev + 5) continue;
+    // Score: prefer the runway with the smallest distance to the aim point,
+    // lightly penalising lateral offset and heading error so a closer but
+    // wildly off-axis runway loses to a slightly further well-aligned one.
+    const score = horiz + Math.abs(lx)*1.5 + Math.abs(dh)*40;
+    if (score < bestScore){
+      bestScore = score;
+      const dyA = plane.position.y - ri.ap.elev;
+      const glideAngle = Math.atan2(dyA, horiz) * 180/Math.PI;
+      best = { ri, horiz, glideAngle, lx, dh };
+    }
+  }
+  if (!best){
+    if (glideEl.style.display !== 'none') glideEl.style.display = 'none';
+    return;
+  }
+  if (glideEl.style.display !== 'block') glideEl.style.display = 'block';
+
+  const W = glideCv.width, H = glideCv.height;
+  const cx = W/2, cy = H/2;
+  glideCtx.clearRect(0,0,W,H);
+
+  // Tape background, mirroring the VSI styling for visual consistency.
+  glideCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  glideCtx.fillRect(cx - 16, 8, 32, H - 16);
+  glideCtx.strokeStyle = '#1e3548';
+  glideCtx.lineWidth = 1;
+  glideCtx.strokeRect(cx - 16, 8, 32, H - 16);
+
+  // Center reference line = on slope (3°).
+  glideCtx.strokeStyle = '#7ee787';
+  glideCtx.lineWidth = 2;
+  glideCtx.beginPath();
+  glideCtx.moveTo(cx - 22, cy);
+  glideCtx.lineTo(cx + 22, cy);
+  glideCtx.stroke();
+
+  // Half-deflection ticks at ±1.5°.
+  glideCtx.strokeStyle = '#6aa';
+  glideCtx.lineWidth = 1;
+  for (const d of [-2, -1, 1, 2]){
+    const y = cy + (d / GLIDE_RANGE_DEG) * (H/2 - 14);
+    glideCtx.beginPath();
+    glideCtx.moveTo(cx - 10, y);
+    glideCtx.lineTo(cx + 10, y);
+    glideCtx.stroke();
+  }
+
+  // Label band above/below the strip so a glance reads "high vs low" without
+  // having to think about glideslope math.
+  glideCtx.fillStyle = '#fff';
+  glideCtx.font = '9px ui-monospace, monospace';
+  glideCtx.textAlign = 'center';
+  glideCtx.textBaseline = 'middle';
+  glideCtx.fillText('HIGH', cx, 4);
+  glideCtx.fillStyle = '#ff5252';
+  glideCtx.fillText('LOW',  cx, H - 4);
+
+  // Deviation: positive = above slope (descend), negative = below (climb).
+  const devDeg = best.glideAngle - GLIDE_TARGET_DEG;
+  const clamped = Math.max(-GLIDE_RANGE_DEG, Math.min(GLIDE_RANGE_DEG, devDeg));
+  // PAPI convention: pip near the top when you're high, near the bottom when
+  // you're low. Our y-axis grows downward, so subtract.
+  const dotY = cy - (clamped / GLIDE_RANGE_DEG) * (H/2 - 14);
+
+  // Pip color: green on-slope, amber moderate, red/white at extremes.
+  let pipColor;
+  const adev = Math.abs(devDeg);
+  if (adev < 0.4)      pipColor = '#7ee787';
+  else if (adev < 1.0) pipColor = '#ffd166';
+  else                 pipColor = (devDeg < 0) ? '#ff5252' : '#ffffff';
+
+  // Diamond pip so it stays distinct from the VSI's needle dot.
+  glideCtx.fillStyle = pipColor;
+  glideCtx.beginPath();
+  glideCtx.moveTo(cx,       dotY - 7);
+  glideCtx.lineTo(cx + 8,   dotY);
+  glideCtx.lineTo(cx,       dotY + 7);
+  glideCtx.lineTo(cx - 8,   dotY);
+  glideCtx.closePath();
+  glideCtx.fill();
+  glideCtx.strokeStyle = '#0b1320';
+  glideCtx.lineWidth = 1;
+  glideCtx.stroke();
+
+  // Off-scale chevron when deviation is past full deflection — echoes the
+  // off-edge bug indicator on the compass strip so the pattern feels native.
+  if (devDeg > GLIDE_RANGE_DEG){
+    glideCtx.fillStyle = '#fff';
+    glideCtx.beginPath();
+    glideCtx.moveTo(cx,     14);
+    glideCtx.lineTo(cx - 6, 22);
+    glideCtx.lineTo(cx + 6, 22);
+    glideCtx.closePath();
+    glideCtx.fill();
+  } else if (devDeg < -GLIDE_RANGE_DEG){
+    glideCtx.fillStyle = '#ff5252';
+    glideCtx.beginPath();
+    glideCtx.moveTo(cx,     H - 14);
+    glideCtx.lineTo(cx - 6, H - 22);
+    glideCtx.lineTo(cx + 6, H - 22);
+    glideCtx.closePath();
+    glideCtx.fill();
+  }
+
+  // Bottom readout: runway id + signed deviation in degrees so quantitatively
+  // minded pilots can read the actual error, not just the dot.
+  glideCtx.fillStyle = '#cfe';
+  glideCtx.font = 'bold 10px ui-monospace, monospace';
+  glideCtx.textAlign = 'center';
+  glideCtx.textBaseline = 'bottom';
+  glideCtx.fillText(best.ri.ap.id, cx, H - 18);
+  glideCtx.fillStyle = pipColor;
+  glideCtx.font = '9px ui-monospace, monospace';
+  const sign = devDeg >= 0 ? '+' : '−';
+  glideCtx.fillText(sign + Math.abs(devDeg).toFixed(1) + '°', cx, H - 30);
 }
 
 // ====== Mini-map ======
@@ -5805,7 +5973,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','birdSplat','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','birdSplat','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
