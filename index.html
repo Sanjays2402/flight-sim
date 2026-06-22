@@ -91,6 +91,19 @@
      doesn't nag through rotation. Hidden in photo mode via PHOTO_HIDE_IDS. */
   #xwhint { position:fixed; bottom:62px; left:50%; transform:translateX(-50%); width:180px; height:64px; background:rgba(8,14,22,.78); border:1px solid #e88be8; border-radius:8px; backdrop-filter:blur(8px); padding:4px; display:none; z-index:6; pointer-events:none; box-shadow:0 0 18px rgba(232,139,232,0.25); }
   #xwhint canvas { display:block; width:100%; height:100%; }
+  /* Approach checklist: small right-side panel that fades in when the pilot
+     is within 4 km of any airport with gear up OR flaps still in, and
+     descending. Each row (GEAR / FLAPS / FUEL / SPEED) live-ticks green as
+     the condition is met so the pilot can scan it like a real training
+     cockpit checklist. Auto-hides on touchdown or when the player leaves
+     the cone, so it never nags outside approach. Hidden in photo mode via
+     PHOTO_HIDE_IDS so saved PNGs stay clean. */
+  #checklist { position:fixed; top:328px; right:12px; min-width:172px; padding:6px 10px 7px; font-size:11px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); display:none; z-index:5; pointer-events:none; box-shadow:0 0 12px rgba(0,0,0,.4); }
+  #checklist .ttl { color:#ffd166; font-weight:700; letter-spacing:1px; font-size:10px; margin-bottom:4px; }
+  #checklist .row { display:flex; align-items:center; gap:6px; padding:1px 0; font-family:ui-monospace, monospace; font-size:11px; line-height:1.35; }
+  #checklist .row .box { display:inline-block; width:11px; text-align:center; color:#6aa; }
+  #checklist .row.ok .box { color:#7ee787; }
+  #checklist .row.ok { color:#7ee787; }
   @keyframes blink { 50% { opacity: 0.25; } }
   #help { bottom:12px; left:12px; max-width:380px; color:#9bb; }
   #help kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:11px; margin:0 1px; border:1px solid #2a4a6a; }
@@ -412,6 +425,13 @@
 <div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
 <div id="crab"><canvas id="crabCv" width="480" height="68"></canvas></div>
 <div id="xwhint"><canvas id="xwhintCv" width="360" height="128"></canvas></div>
+<div id="checklist">
+  <div class="ttl">APPROACH CHECK</div>
+  <div class="row" id="clkGear"><span class="box">☐</span><span>GEAR DOWN</span></div>
+  <div class="row" id="clkFlap"><span class="box">☐</span><span>FLAPS</span></div>
+  <div class="row" id="clkFuel"><span class="box">☐</span><span>FUEL &gt;10%</span></div>
+  <div class="row" id="clkSpd"><span class="box">☐</span><span>SPEED &lt;200 km/h</span></div>
+</div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
 <div id="score">
@@ -8399,6 +8419,7 @@ function step(dt){
   drawILSNeedles(hdg);
   drawCrabIndicator(hdg);
   drawXwTakeoffHint();
+  drawChecklist(indicatedKmh);
   drawMinimap(hdg);
   drawWeatherRadar();
   drawCockpitPanel(indicatedKmh, altM, hdg, dt, speedKmh);
@@ -9148,6 +9169,89 @@ function drawCrabIndicator(hdgDeg){
     crabCtx.textBaseline = 'top';
     crabCtx.fillText('— CRAB —', cx, cy + 15);
   }
+}
+
+// ====== Approach checklist ======
+// Within 4 km of any airport, gear up OR flaps still in, and descending: fade
+// in a tiny right-side panel with four live-ticking items (GEAR DOWN, FLAPS,
+// FUEL >10%, SPEED <200 km/h). Each row turns green the moment its condition
+// is met so the pilot can scan it like a real cockpit checklist. Auto-hides
+// on touchdown, when leaving the cone, or when the trigger condition (gear
+// up / flaps up while descending) is no longer present. Pure HUD overlay —
+// no physics, no audio. Hidden in pause/replay/photo/intro/crash and via
+// PHOTO_HIDE_IDS so saved PNGs stay clean.
+const checklistEl = document.getElementById('checklist');
+const checklistRowGear = document.getElementById('clkGear');
+const checklistRowFlap = document.getElementById('clkFlap');
+const checklistRowFuel = document.getElementById('clkFuel');
+const checklistRowSpd  = document.getElementById('clkSpd');
+const CHECKLIST_RANGE_M   = 4000;  // ≤4 km from nearest airport to trigger
+const CHECKLIST_SINK_MIN  = 0.5;   // m/s of descent required to count as approaching
+const CHECKLIST_FUEL_OK   = 0.10;  // ≥10% fuel passes the row
+const CHECKLIST_SPEED_OK  = 200;   // km/h indicated under which speed row passes
+function setChecklistRow(row, ok){
+  if (!row) return;
+  // Class toggle drives the green/grey styling; box glyph swaps to ☑ for
+  // checked so the row reads at a glance even without color.
+  const want = ok ? 'row ok' : 'row';
+  if (row.className !== want) row.className = want;
+  const box = row.firstElementChild;
+  if (box){
+    const glyph = ok ? '☑' : '☐';
+    if (box.textContent !== glyph) box.textContent = glyph;
+  }
+}
+function drawChecklist(indicatedKmh){
+  // Hard-gate the panel in any mode where it would be a distraction or
+  // outright wrong (photo / pause / replay / intro / crash). Mirrors the
+  // gating pattern used by drawCrabIndicator and friends.
+  const live = !state.crashed && !state.paused && !state.replayActive
+               && !state.photoMode && !state.introOpen;
+  if (!live){
+    if (checklistEl.style.display !== 'none') checklistEl.style.display = 'none';
+    return;
+  }
+  // On the ground (rolling out, taxiing, parked) the checklist is irrelevant
+  // — hide it so a successful touchdown doesn't leave the panel sitting
+  // there while the pilot is rolling to a stop.
+  if (state.onGround){
+    if (checklistEl.style.display !== 'none') checklistEl.style.display = 'none';
+    return;
+  }
+  // Find the nearest airport. Carrier deck isn't in AIRPORTS, which is fine
+  // — the checklist is a teaching aid for the three ground fields. Carrier
+  // ops are their own ritual.
+  let nearAp = null, nearD = 1e9;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < nearD){ nearD = d; nearAp = a; }
+  }
+  if (!nearAp || nearD > CHECKLIST_RANGE_M){
+    if (checklistEl.style.display !== 'none') checklistEl.style.display = 'none';
+    return;
+  }
+  // Trigger condition: gear up OR flaps still 0, AND actually descending.
+  // The whole point of the checklist is to flag stuff that should be set
+  // before touchdown, so a clean gear-down/flaps-in cruise shouldn't fire
+  // it. state.vel.y > 0 = climbing (Three.js +y is up).
+  const gearOk = !!state.gearDown;
+  const flapOk = state.flaps > 0;
+  const descending = state.vel.y < -CHECKLIST_SINK_MIN;
+  const triggered = (!gearOk || !flapOk) && descending;
+  if (!triggered){
+    if (checklistEl.style.display !== 'none') checklistEl.style.display = 'none';
+    return;
+  }
+  if (checklistEl.style.display !== 'block') checklistEl.style.display = 'block';
+  // Live per-row ticks. Fuel is normalized 0..1; speed uses the same
+  // indicated airspeed the player reads off the HUD (so a frozen pitot
+  // doesn't trick the checklist into clearing the row).
+  const fuelOk = state.fuel > CHECKLIST_FUEL_OK;
+  const spdOk  = indicatedKmh < CHECKLIST_SPEED_OK;
+  setChecklistRow(checklistRowGear, gearOk);
+  setChecklistRow(checklistRowFlap, flapOk);
+  setChecklistRow(checklistRowFuel, fuelOk);
+  setChecklistRow(checklistRowSpd,  spdOk);
 }
 
 // ====== Crosswind takeoff coaching ======
@@ -10932,7 +11036,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','xwhint','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
