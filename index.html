@@ -3058,6 +3058,14 @@ const state = {
   // overlay fade smoothly rather than snapping. Release to snap back.
   binoActive: false,
   binoT: 0,
+  // Cockpit head-bob: a subtle low-frequency camera wobble in cockpit cam
+  // (state.cam===1) that sells the "I'm sitting in the plane" feeling. headBobT
+  // is a continuous time accumulator driving the sine terms so the motion stays
+  // organic; touchdownJoltT is a 0..1 impulse fired on wheels-down and decayed
+  // over ~0.5s for that satisfying chassis thump on firm landings. Hidden in
+  // photo mode and on pause/replay so saved PNGs stay clean.
+  headBobT: 0,
+  touchdownJoltT: 0,
   flyByPos: new THREE.Vector3(),
   flyByActive: false,
   flyByT: 0,
@@ -3890,6 +3898,9 @@ function resetPlane(){
   state.peakG = 0;
   state.peakSink = 0;
   state.gLoad = 1.0;
+  // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
+  state.headBobT = 0;
+  state.touchdownJoltT = 0;
   state.crashReport = null;
   hideCrashCard();
   state.landReport = null;
@@ -4802,6 +4813,9 @@ function step(dt){
           pushATC('Tower copies hard landing, maintenance advised.', { now:true });
           // Wheels still touched the runway — flash the lights even on a rough one.
           if (land && land.ri) flareRunwayLights(land.ri.ap);
+          // Big chassis thump for the cockpit head-bob. Scales with sink rate
+          // so a barely-firm landing barely jolts and a slammer rattles teeth.
+          state.touchdownJoltT = Math.min(1, sinkRate / 6);
           // Hard touchdown always paints — firm enough to leave rubber even
           // when lined up. Lateral velocity = runway-frame side slip.
           if (land && land.ri){
@@ -4871,6 +4885,9 @@ function step(dt){
         // Pulse the runway lights bright yellow for ~600ms so the touchdown
         // reads as a moment, not just a score popup.
         if (land && land.ri) flareRunwayLights(land.ri.ap);
+        // Head-bob touchdown jolt — same impulse as hard landings but scaled by
+        // sink rate so greasers feel like a kiss and firmer touchdowns thump.
+        state.touchdownJoltT = Math.min(1, sinkRate / 8);
         // Skidmarks only when the wheels actually bit — greasers (low sink,
         // lined up) leave nothing. Firm sinks or crosswind landings leave
         // visible evidence on the runway that fades over ~30s.
@@ -6481,7 +6498,69 @@ function updateCamera(dt){
       .addScaledVector(fwd, -0.4)
       .addScaledVector(up, 0.55);
     camera.position.copy(eye);
-    camera.lookAt(plane.position.clone().addScaledVector(fwd, 20).addScaledVector(up, 0.4));
+    // Head-bob: subtle low-frequency wobble in cockpit cam only. Hidden in
+    // photo / pause / replay / intro so saved PNGs and frozen frames stay
+    // perfectly still. Drives both camera position and look-at by tiny
+    // amounts in the plane's local frame so the cockpit feels lived-in.
+    const bobActive = !state.photoMode && !state.paused && !state.replayActive && !state.introOpen;
+    let _lookUpOff = 0, _lookSideOff = 0;
+    if (bobActive){
+      const gs = Math.hypot(state.vel.x, state.vel.z); // m/s ground speed
+      const right = new THREE.Vector3(1,0,0).applyQuaternion(plane.quaternion);
+      // Time advances faster with engine + speed so bob frequency tracks RPM.
+      const freqHz = 4 + state.throttle * 6 + (gs * 0.02);
+      state.headBobT += dt * freqHz;
+      const tt = state.headBobT;
+      // Base airborne wobble: tiny engine-vibration shimmy. Higher throttle =
+      // more buzz; ribbon-thin amplitude so cruise is barely noticeable but
+      // climb-out at full throttle has a clear hum.
+      let ampUp    = 0.005 + state.throttle * 0.012;
+      let ampSide  = 0.004 + state.throttle * 0.008;
+      let ampFwd   = 0.003 + state.throttle * 0.006;
+      // Ground roughness: taxi over the strip kicks up much more bob, scaled
+      // by ground speed so creeping is smooth and a fast taxi shakes the
+      // panel. Falls off when actually rolling slow on the apron.
+      if (state.onGround){
+        const tax = Math.min(1, gs / 25); // 0 at standstill, 1 at ~25 m/s
+        ampUp   += 0.012 + tax * 0.045;
+        ampSide += 0.008 + tax * 0.030;
+        ampFwd  += 0.006 + tax * 0.020;
+      }
+      // Stall buffet already shakes via the block below — quiet the bob a
+      // touch so the two don't fight each other into mush.
+      const stallDamp = 1 - Math.min(0.7, state.stall);
+      ampUp   *= stallDamp;
+      ampSide *= stallDamp;
+      ampFwd  *= stallDamp;
+      // Touchdown jolt: decaying impulse fired on wheels-down. Drops a sharp
+      // vertical/lateral kick that decays over ~0.5s so the chassis thump
+      // sits on top of the steady bob without lingering.
+      if (state.touchdownJoltT > 0){
+        const j = state.touchdownJoltT;
+        ampUp   += 0.20 * j;
+        ampSide += 0.10 * j;
+        ampFwd  += 0.08 * j;
+        state.touchdownJoltT = Math.max(0, j - dt * 2.0); // ~0.5s to zero
+      }
+      const dUp   = Math.sin(tt) * ampUp;
+      const dSide = Math.sin(tt * 0.73 + 1.3) * ampSide;
+      const dFwd  = Math.sin(tt * 1.31 + 0.7) * ampFwd;
+      camera.position.addScaledVector(up,    dUp);
+      camera.position.addScaledVector(right, dSide);
+      camera.position.addScaledVector(fwd,   dFwd);
+      // Drift the look-at target by an even smaller amount so the view
+      // gently rocks instead of staying perfectly rigid — sells the head
+      // motion. Saved photos are exempt because photoMode gates bobActive.
+      _lookUpOff   = dUp * 0.4;
+      _lookSideOff = dSide * 0.6;
+    }
+    const lookAt = plane.position.clone().addScaledVector(fwd, 20).addScaledVector(up, 0.4);
+    if (bobActive && (_lookUpOff !== 0 || _lookSideOff !== 0)){
+      const right2 = new THREE.Vector3(1,0,0).applyQuaternion(plane.quaternion);
+      lookAt.addScaledVector(up,     _lookUpOff);
+      lookAt.addScaledVector(right2, _lookSideOff);
+    }
+    camera.lookAt(lookAt);
   } else if (state.cam === 2){
     if (!state.flyByActive){
       const off = new THREE.Vector3((Math.random()-0.5)*80, 5 + Math.random()*15, (Math.random()-0.5)*80);
