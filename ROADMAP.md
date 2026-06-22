@@ -37,6 +37,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
+- [ ] Ring-chase challenge mode — fly through a chain of glowing rings against the clock, ring count + best time saved to localStorage.
+- [ ] Autopilot altitude + heading hold — press `A` to lock current altitude and heading, HUD shows AP ON, any stick input disengages.
+- [ ] Persistent pilot stats screen — total flights, landings, best landing score, longest flight time, opens from main menu, stored in localStorage.
+- [ ] Photo mode — press `P` to pause sim, free-orbit camera, hide HUD, one-tap download of a PNG screenshot.
+- [ ] Gear and flaps sound effects + animated flaps — clunk on gear up/down, whoosh on flaps, flap surfaces visibly deflect on the wing.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
