@@ -93,10 +93,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Engine fire emergency — rare random event (or triggered by a bird strike at high throttle) sets the engine on fire: orange flickering sprite at the cowl, black smoke pouring off into a long plume, fast-rising airframe damage at ~6%/sec, ATC "Mayday, engine fire, declaring emergency," and a flashing red 🔥 ENG FIRE banner with a repeating two-pulse chirp. To put it out: cut the engine with `X` and drop throttle to idle — the fire starves over ~10s. Ignore it and the airframe melts through 100% into the existing airframe-failure crash branch. Turns a quiet sortie into a real deadstick scenario you have to handle, and gives the bird-strike system actual teeth.
 
+- [x] Runway condition overlay — when rain is on, every runway, apron, and the carrier deck re-tint toward a darker, slightly mirrored shade (live, no scene rebuild) and braking friction on the runway drops noticeably (brakes ~45% weaker, free-rolling friction ~30% weaker) so rollouts are longer and skids are easier. HUD now shows a blue `RWY WET` pill next to the WIND row so pilots can read the slick before they're on the strip. Carrier deck is exempt from the friction drop (the arrestor wires don't care about a shower) but still tints, so visual + gameplay stay consistent.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Runway condition overlay — when rain is active, the runway surface gets a darker, slightly mirrored tint and braking friction drops noticeably (longer rollout, easier to skid through the threshold). HUD adds a small `RWY WET` pill near the wind readout. Gives the rain setting actual gameplay teeth instead of being pure visual.
 
 - [ ] Quick-look check (`V` key) — in cockpit cam, hold V to swing the head 90° left, release to return; tap-tap toggles to 90° right. Lets you actually clear final for traffic, look at the wing in a turn, or peek down at the runway during a high crosswind crab. Tiny camera change, huge "this feels like a cockpit" payoff.
 

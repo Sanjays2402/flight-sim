@@ -331,7 +331,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -1203,6 +1203,18 @@ const cloudPuffs = [];
 
 // ====== AIRPORTS (runways + buildings near main) ======
 const runwayInfos = [];
+// Surface materials for every runway, apron, and the carrier deck. Tracked so
+// the rain weather toggle can re-tint them darker / slightly glossier to read
+// as wet pavement, and reset back to dry when rain is off.
+const runwayMats = []; // [{ mat, baseColor: THREE.Color, wetTint: THREE.Color, wetK: 0..1 }]
+function registerRunwayMat(mat, wetHex, wetK){
+  runwayMats.push({
+    mat,
+    baseColor: mat.color.clone(),
+    wetTint: new THREE.Color(wetHex),
+    wetK: wetK
+  });
+}
 
 function makeAirport(a){
   const grp = new THREE.Group();
@@ -1217,6 +1229,9 @@ function makeAirport(a){
   apron.rotation.x = -Math.PI/2;
   apron.position.y = -0.02;
   grp.add(apron);
+  // Apron tints a touch darker when wet; runway gets a stronger shift so the
+  // strip itself reads as the most slippery surface.
+  registerRunwayMat(apron.material, 0x14181c, 0.50);
 
   const rwy = new THREE.Mesh(
     new THREE.PlaneGeometry(a.w, a.len),
@@ -1224,6 +1239,7 @@ function makeAirport(a){
   );
   rwy.rotation.x = -Math.PI/2;
   grp.add(rwy);
+  registerRunwayMat(rwy.material, 0x0c0e12, 0.65);
 
   const wMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const dashGeo = new THREE.PlaneGeometry(0.9, 14);
@@ -1451,6 +1467,8 @@ const carrierGroup = (function buildCarrier(){
   deck.rotation.x = -Math.PI/2;
   deck.position.y = a.elev + 0.01;
   g.add(deck);
+  // Carrier steel reads a touch darker / glossier in rain too.
+  registerRunwayMat(deckMat, 0x14171c, 0.50);
   // Centerline dashes (white) so the pilot can line up.
   const wMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const dashGeo = new THREE.PlaneGeometry(0.8, 10);
@@ -5814,7 +5832,13 @@ function step(dt){
       // mission gate, so chasing repeat traps stays satisfying.
       const onCarrier = onRunway && land && land.ri && land.ri.ap === CARRIER;
       const arrestor = onCarrier ? 7.5 : 0;
-      const brakeFric = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
+      // Wet pavement — brakes slip more, free-rolling friction drops a little
+      // too. Only applies on actual runway/apron (onRunway) so taxiing through
+      // grass in the rain stays unchanged. Carrier deck stays dry-tuned
+      // (steel + arrestor wires don't care about a shower).
+      const wetRwy = onRunway && !onCarrier && settings.rain;
+      const brakeFricRaw = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
+      const brakeFric = wetRwy ? brakeFricRaw * (state.brakes ? 0.55 : 0.7) : brakeFricRaw;
       const friction = brakeFric + (revActive ? 2.5 : 0) + arrestor;
       const sp = groundSp;
       if (sp > 0.01){
@@ -6202,6 +6226,11 @@ function step(dt){
   let windFromDeg = Math.atan2(-state.wind.x, -state.wind.z) * 180/Math.PI;
   if (windFromDeg < 0) windFromDeg += 360;
   $('#wind').textContent = String(Math.round(windFromDeg)).padStart(3,'0') + '@' + Math.round(windSpdKt) + 'kt';
+  // RWY WET pill — pairs with the rain weather toggle so pilots know to expect
+  // a longer rollout before they're on the strip. The actual friction drop
+  // lives in the on-ground physics block.
+  const wetEl = document.getElementById('rwyWet');
+  if (wetEl) wetEl.style.display = settings.rain ? 'inline' : 'none';
 
   // Touch-and-go score panel
   document.getElementById('scLast').textContent  = state.scoreLast == null ? '—' : ('+'+state.scoreLast);
@@ -7727,6 +7756,22 @@ function applyRainVisible(){
   if (!rainCanvas) return;
   rainCanvas.classList.toggle('show', !!settings.rain);
   if (settings.rain && !rainDrops.length) seedRainDrops();
+  applyRunwayWetness();
+}
+// Re-tint every registered runway / apron / deck material toward a darker wet
+// shade when rain is on, or snap back to the dry base color when it's off.
+// Cheap LERP between two pre-built colors per material — runs once per toggle
+// (and once on boot), not per frame.
+function applyRunwayWetness(){
+  const wet = !!settings.rain;
+  for (const r of runwayMats){
+    if (wet){
+      r.mat.color.copy(r.baseColor).lerp(r.wetTint, r.wetK);
+    } else {
+      r.mat.color.copy(r.baseColor);
+    }
+    r.mat.needsUpdate = true;
+  }
 }
 applyRainVisible();
 function updateRainOverlay(dt){
