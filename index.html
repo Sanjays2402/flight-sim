@@ -3877,6 +3877,12 @@ function resetPlane(){
   state.engineOut = false;
   state.refueling = false;
   state.repairing = false;
+  // Graded low-fuel warning latches — one-shot ATC calls when fuel first
+  // crosses 20% (amber) or 10% (red). Cleared here so a fresh sortie re-arms
+  // them, and also cleared on the apron once refuel pushes us back above the
+  // respective thresholds (see step()).
+  state.fuelWarnLow = false;
+  state.fuelWarnCrit = false;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -4632,6 +4638,24 @@ function step(dt){
       pushATC('Fuel exhausted, declaring emergency.', { tag:'PILOT', now:true });
     }
   }
+  // Graded low-fuel ATC nudges. The HUD already color-flashes amber/red below
+  // 20%/10%, but pre-this the only audible cue was the eventual engine-out
+  // slam. Fire each line once per sortie so we don't spam during a long
+  // deadstick glide; refuel below clears the latches once we climb back over
+  // each threshold so a fresh leg re-arms them.
+  if (!state.fuelWarnLow && state.fuel > 0 && state.fuel <= 0.20){
+    state.fuelWarnLow = true;
+    pushATC('Fuel state low, recommend divert.', { tag:'ATC' });
+  }
+  if (!state.fuelWarnCrit && state.fuel > 0 && state.fuel <= 0.10){
+    state.fuelWarnCrit = true;
+    pushATC('Fuel critical, land at nearest field.', { tag:'ATC', now:true });
+  }
+  // Re-arm the warnings on refuel so the next leg out gets fresh nudges.
+  // Small hysteresis above the trigger so the latch doesn't chatter right at
+  // the threshold while we're sipping the last drop.
+  if (state.fuelWarnLow && state.fuel >= 0.25) state.fuelWarnLow = false;
+  if (state.fuelWarnCrit && state.fuel >= 0.15) state.fuelWarnCrit = false;
   // Refuel on the ground at an airport apron. Conditions: wheels on the deck,
   // crawling or stopped, throttle pulled to idle, and parked inside an airport's
   // apron rectangle (the wider grey pad around each runway). Refill rate fills
@@ -5093,10 +5117,23 @@ function step(dt){
   document.getElementById('repair').style.display = state.repairing ? 'inline' : 'none';
 
   // Fuel readout: same color ramp — green when topped up, amber when low, red near dry.
+  // Below 20% it also flashes (re-using the existing #hud blink animation) so
+  // the pilot actually notices before the deadstick hits, and below 10% it
+  // flashes red+faster. ATC pushes a paired "fuel state low" call once per
+  // sortie at the same thresholds (see step()).
   const fuelPct = Math.round(state.fuel * 100);
   const fuelEl = document.getElementById('fuel');
   fuelEl.textContent = fuelPct + '%';
-  fuelEl.style.color = fuelPct <= 10 ? '#ff5252' : (fuelPct <= 25 ? '#ffd166' : '#7ee787');
+  if (fuelPct <= 10){
+    fuelEl.style.color = '#ff5252';
+    fuelEl.style.animation = 'blink 0.32s steps(2) infinite';
+  } else if (fuelPct <= 20){
+    fuelEl.style.color = '#ffb020';
+    fuelEl.style.animation = 'blink 0.6s steps(2) infinite';
+  } else {
+    fuelEl.style.color = fuelPct <= 25 ? '#ffd166' : '#7ee787';
+    fuelEl.style.animation = '';
+  }
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
 
