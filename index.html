@@ -1679,6 +1679,94 @@ function updateBirds(dt){
   }
 }
 
+// ====== HOT-AIR BALLOONS ======
+// A handful of lazy hot-air balloons drift between the airports — pure
+// scenery, no collision, no physics. Each balloon = a sphere envelope, a
+// small box basket, and 4 thin cylinder ropes. Motion is a slow figure-8
+// horizontal drift plus a tiny vertical bob, so they look alive without
+// ever wandering off into a mountain. Whole group is culled when the
+// player is far away to keep the draw count flat.
+const BALLOON_VIEW_DIST = 7000;     // m — beyond this, hide the lot
+const BALLOON_DRIFT_SPEED = 0.05;   // rad/sec around the figure-8
+const BALLOON_DRIFT_RX = 350;       // m — half-width of the lazy drift box
+const BALLOON_DRIFT_RZ = 220;       // m — half-depth of the lazy drift box
+const BALLOON_BOB_AMP = 6;          // m — gentle vertical bob amplitude
+const BALLOON_BOB_HZ = 0.08;        // Hz — bob frequency (slow, like real wind)
+const balloons = [];
+function makeBalloon(envColor){
+  // Envelope: a fat sphere, slightly squashed vertically so it reads as a
+  // teardrop balloon shape rather than a perfect ball. Lambert material so
+  // it picks up the sun colour at sunrise/sunset.
+  const g = new THREE.Group();
+  const envGeo = new THREE.SphereGeometry(14, 18, 14);
+  const envMat = new THREE.MeshLambertMaterial({ color: envColor });
+  const env = new THREE.Mesh(envGeo, envMat);
+  env.scale.set(1, 1.25, 1);
+  env.position.y = 14;
+  g.add(env);
+  // Basket: a small dark box hanging below the envelope.
+  const basket = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 3, 4),
+    new THREE.MeshLambertMaterial({ color: 0x3a2410 })
+  );
+  basket.position.y = -4;
+  g.add(basket);
+  // Ropes: four very thin cylinders from the basket corners up to the
+  // bottom of the envelope. Cheap geometry, but they sell the silhouette.
+  const ropeMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+  const ropeGeo = new THREE.CylinderGeometry(0.05, 0.05, 6, 4);
+  const ropeOffsets = [[ 1.6,  1.6], [ 1.6, -1.6], [-1.6,  1.6], [-1.6, -1.6]];
+  for (const [rx, rz] of ropeOffsets){
+    const r = new THREE.Mesh(ropeGeo, ropeMat);
+    r.position.set(rx, 0, rz);
+    g.add(r);
+  }
+  return g;
+}
+// Hand-picked drift centres between the airports so balloons fill the
+// middle of the world instead of clustering on a runway. Colours are
+// classic balloon-fair palette so they read at distance.
+const BALLOON_SPOTS = [
+  { x:  3500, z: -2800, alt: 380, color: 0xe24b3a }, // red — between KSEA and KHIL
+  { x: -3200, z:  4200, alt: 320, color: 0xf2c14e }, // yellow — over the lake area
+  { x:   600, z:  5600, alt: 460, color: 0x4aa3df }, // blue — north of KSEA
+  { x:  4800, z:  2400, alt: 420, color: 0x55b760 }  // green — east of KSEA
+];
+for (let i = 0; i < BALLOON_SPOTS.length; i++){
+  const s = BALLOON_SPOTS[i];
+  const mesh = makeBalloon(s.color);
+  mesh.position.set(s.x, s.alt, s.z);
+  scene.add(mesh);
+  balloons.push({
+    mesh,
+    centre: new THREE.Vector3(s.x, s.alt, s.z),
+    phase: i * 1.37, // de-sync the drift so they don't move in lockstep
+  });
+}
+function updateBalloons(dt){
+  if (dt <= 0) return;
+  const tNow = performance.now() * 0.001;
+  for (const b of balloons){
+    // Cull whole balloon when the player is far away.
+    const distH = Math.hypot(
+      b.centre.x - plane.position.x,
+      b.centre.z - plane.position.z
+    );
+    if (distH > BALLOON_VIEW_DIST){ b.mesh.visible = false; continue; }
+    b.mesh.visible = true;
+    // Figure-8 horizontal drift: x = sin(t), z = sin(2t)/2. Slow speed so
+    // the balloon barely moves in real time but never sits still either.
+    const t = tNow * BALLOON_DRIFT_SPEED + b.phase;
+    const dx = Math.sin(t) * BALLOON_DRIFT_RX;
+    const dz = Math.sin(t * 2) * 0.5 * BALLOON_DRIFT_RZ;
+    const dy = Math.sin(tNow * BALLOON_BOB_HZ * Math.PI * 2 + b.phase) * BALLOON_BOB_AMP;
+    b.mesh.position.set(b.centre.x + dx, b.centre.y + dy, b.centre.z + dz);
+    // Tiny yaw so the balloon visibly turns into its drift direction —
+    // dx' over t is cos(t), so heading ~ atan2(cos(t), cos(2t)).
+    b.mesh.rotation.y = Math.atan2(Math.cos(t), Math.cos(t * 2)) * 0.25;
+  }
+}
+
 // ====== RING-CHASE CHALLENGE ======
 // A chain of glowing torus rings strung in a loose loop around the world.
 // Each ring is oriented so the pilot flies through its hole along a known
@@ -3884,6 +3972,9 @@ function step(dt){
   // Birds drifting low over each airport — same idea, even simpler: no AI,
   // just orbit + flap. Cheap and adds life to approach views.
   updateBirds(dt);
+  // Hot-air balloons drifting between airports — pure scenery, same cull
+  // pattern as birds. Adds life to the empty mid-world between airports.
+  updateBalloons(dt);
   // Taxi guidance chevrons — only visible on the ground near an airport,
   // points new pilots toward the takeoff threshold.
   updateTaxiArrows(dt);
