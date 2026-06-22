@@ -1838,6 +1838,71 @@ function updateTaxiArrows(dt){
 }
 let taxiArrowPhase = 0;
 
+// Taxiway centerline lights — small yellow beads down the middle of the
+// taxi strip alongside each runway, gated by the same dusk window as the
+// runway edge lights so night ops finally have a guided ground path instead
+// of a vaguely-lit strip in the dark. Visibility uses the same on-ground +
+// proximity gate as the chevrons so daytime air views stay clean. Beads
+// share a single emissive material per airport for cheap brightness drive.
+const TAXI_LIGHT_SPACING = 12;       // metres between beads along the strip
+const TAXI_LIGHT_RADIUS = 0.30;      // small dot, reads as a recessed in-ground fixture
+const taxiwayCenterlineLights = []; // [{ ap, mat, base, group }]
+function makeTaxiCenterline(a){
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev + 0.06, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Shared emissive material — dim yellow base so beads still read faintly
+  // at dusk transitions, then driven up by the night gate in applyTimeOfDay.
+  const mat = new THREE.MeshLambertMaterial({ color: 0x2a2a1a, emissive: 0x000000 });
+  const entry = { ap: a, mat, base: new THREE.Color(0x2a2a1a), group: grp };
+  // Mid-line of the +x taxi strip (mirrors the chevron stripX). Run a touch
+  // past either end so beads visibly thread the apron into the runway, not
+  // a row that dies short of the threshold.
+  const stripX = a.w/2 + 9;
+  const startZ =  a.len/2 + 28;    // a bit beyond the rollout-side chevron span
+  const endZ   = -a.len/2 - 6;     // creeps past the takeoff threshold edge
+  const span = startZ - endZ;
+  const count = Math.max(8, Math.floor(span / TAXI_LIGHT_SPACING));
+  const geo = new THREE.SphereGeometry(TAXI_LIGHT_RADIUS, 6, 5);
+  for (let i = 0; i < count; i++){
+    const t = (i + 0.5) / count;
+    const z = startZ - t * span;
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(stripX, 0, z);
+    grp.add(m);
+  }
+  taxiwayCenterlineLights.push(entry);
+}
+for (const a of AIRPORTS) makeTaxiCenterline(a);
+
+function updateTaxiwayLights(dt){
+  // Match the chevron gate — only show when the player is on the ground near
+  // an airport, so the row never floats in the air-side view. Reuse the same
+  // showRange (700m) as the chevrons so the two systems light up together.
+  let near = null, nearD2 = Infinity;
+  for (const a of AIRPORTS){
+    const dx = plane.position.x - a.x, dz = plane.position.z - a.z;
+    const d2 = dx*dx + dz*dz;
+    if (d2 < nearD2){ nearD2 = d2; near = a; }
+  }
+  const showRange = 700;
+  const showAll = !!state.onGround && nearD2 < showRange*showRange;
+  // Dusk gate matches the runway edge lights (sun altitude window). Beads
+  // are essentially dark at noon, full glow at night, lerping at twilight.
+  const dir = sunDirFor(state.todHours);
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / 0.3));
+  for (const tl of taxiwayCenterlineLights){
+    const isNear = (tl.ap === near) && showAll;
+    if (tl.group.visible !== isNear) tl.group.visible = isNear;
+    if (!isNear) continue;
+    // Yellow emissive scaled by nightT — same shape as runway edge lights but
+    // a touch warmer so the strip reads as taxi guidance, not runway edge.
+    const k = nightT;
+    tl.mat.emissive.setRGB(1.05 * k, 0.78 * k, 0.18 * k);
+  }
+}
+
 // ====== WIND SOCKS ======
 // One bright orange wind sock on a short pole near each runway. The sock
 // pivots to point downwind (real socks blow away from the pole, tail in
@@ -7888,6 +7953,7 @@ function step(dt){
   // Taxi guidance chevrons — only visible on the ground near an airport,
   // points new pilots toward the takeoff threshold.
   updateTaxiArrows(dt);
+  updateTaxiwayLights(dt);
   // Wind socks at each airport tilt with wind speed and point downwind so
   // pilots can read the breeze without staring at the HUD.
   updateWindSocks();
