@@ -643,6 +643,105 @@ flapL.position.set(-2.4, 0.04, 0.62);
 flapR.position.set( 2.4, 0.04, 0.62);
 plane.add(flapL); plane.add(flapR);
 
+// ====== WINGTIP VORTEX TRAILS ======
+// Tapered ribbon trail behind each wingtip; visible when pulling Gs or near stall.
+const VORTEX_SEGS = 28;            // ribbon segments (points along the trail)
+const VORTEX_TIP_OFFSET = 4.3;     // wingtip x offset (matches wing tips)
+const VORTEX_TIP_Y = 0.06;
+const VORTEX_TIP_Z = -0.2;
+const VORTEX_HALF_WIDTH = 0.45;    // base half-width of the ribbon
+const vortexTips = [
+  new THREE.Vector3(-VORTEX_TIP_OFFSET, VORTEX_TIP_Y, VORTEX_TIP_Z),
+  new THREE.Vector3( VORTEX_TIP_OFFSET, VORTEX_TIP_Y, VORTEX_TIP_Z)
+];
+const vortexMeshes = [];
+for (let side = 0; side < 2; side++){
+  const geo = new THREE.BufferGeometry();
+  const posArr = new Float32Array(VORTEX_SEGS * 2 * 3); // two verts per segment
+  const alphaArr = new Float32Array(VORTEX_SEGS * 2);
+  const idxArr = new Uint16Array((VORTEX_SEGS - 1) * 6);
+  for (let i = 0; i < VORTEX_SEGS - 1; i++){
+    const a = i*2, b = i*2 + 1, c = (i+1)*2, d = (i+1)*2 + 1;
+    idxArr[i*6+0] = a; idxArr[i*6+1] = b; idxArr[i*6+2] = c;
+    idxArr[i*6+3] = b; idxArr[i*6+4] = d; idxArr[i*6+5] = c;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+  geo.setAttribute('aAlpha', new THREE.BufferAttribute(alphaArr, 1));
+  geo.setIndex(new THREE.BufferAttribute(idxArr, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms: { uStrength: { value: 0 } },
+    vertexShader: `
+      attribute float aAlpha;
+      varying float vAlpha;
+      void main(){
+        vAlpha = aAlpha;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      varying float vAlpha;
+      uniform float uStrength;
+      void main(){
+        float a = vAlpha * uStrength;
+        if (a < 0.005) discard;
+        gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+      }`
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 5;
+  mesh.visible = false;
+  scene.add(mesh);
+  // Pre-seed history with current tip position (filled in initVortexHistory after first frame).
+  const history = new Array(VORTEX_SEGS).fill(null).map(() => new THREE.Vector3());
+  vortexMeshes.push({ geo, mat, mesh, posArr, alphaArr, history, primed: false });
+}
+const _vortexTmpRight = new THREE.Vector3();
+const _vortexTmpTip = new THREE.Vector3();
+function updateVortexTrails(strength){
+  const right = _vortexTmpRight.set(1,0,0).applyQuaternion(plane.quaternion);
+  for (let side = 0; side < 2; side++){
+    const v = vortexMeshes[side];
+    const tipWorld = _vortexTmpTip.copy(vortexTips[side]).applyQuaternion(plane.quaternion).add(plane.position);
+    if (!v.primed){
+      for (let i = 0; i < VORTEX_SEGS; i++) v.history[i].copy(tipWorld);
+      v.primed = true;
+    } else {
+      // shift history: history[0] = newest tip, history[last] = oldest.
+      for (let i = VORTEX_SEGS - 1; i > 0; i--) v.history[i].copy(v.history[i-1]);
+      v.history[0].copy(tipWorld);
+    }
+    // Build ribbon: two verts per history sample, offset along world right by tapered width.
+    for (let i = 0; i < VORTEX_SEGS; i++){
+      const taper = 1 - (i / (VORTEX_SEGS - 1)) * 0.85; // narrows toward tail
+      const w = VORTEX_HALF_WIDTH * taper;
+      const p = v.history[i];
+      const x0 = p.x - right.x * w;
+      const y0 = p.y - right.y * w;
+      const z0 = p.z - right.z * w;
+      const x1 = p.x + right.x * w;
+      const y1 = p.y + right.y * w;
+      const z1 = p.z + right.z * w;
+      const base = i * 6;
+      v.posArr[base+0] = x0; v.posArr[base+1] = y0; v.posArr[base+2] = z0;
+      v.posArr[base+3] = x1; v.posArr[base+4] = y1; v.posArr[base+5] = z1;
+      // alpha: skip the very first sample so the trail starts behind the tip, fade to 0 at tail.
+      const headFade = Math.min(1, i / 2);
+      const tailFade = 1 - (i / (VORTEX_SEGS - 1));
+      const a = headFade * tailFade * tailFade;
+      v.alphaArr[i*2]   = a;
+      v.alphaArr[i*2+1] = a;
+    }
+    v.geo.attributes.position.needsUpdate = true;
+    v.geo.attributes.aAlpha.needsUpdate = true;
+    v.mat.uniforms.uStrength.value = strength;
+    v.mesh.visible = strength > 0.02;
+  }
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -662,7 +761,8 @@ const state = {
   flyByT: 0,
   introOpen: true,
   wind: new THREE.Vector3(2, 0, 1.2),
-  stall: 0
+  stall: 0,
+  vortex: 0
 };
 
 const keys = {};
@@ -702,7 +802,9 @@ function resetPlane(){
   state.crashed = false;
   state.landed = false;
   state.stall = 0;
+  state.vortex = 0;
   state.msgT = 0;
+  for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   hideStatus();
 }
 resetPlane();
@@ -951,6 +1053,15 @@ function step(dt){
   } else {
     state.onGround = false;
   }
+
+  // Wingtip vortex trails — fade in under high-G or near stall.
+  // G-load: vertical body-frame accel reaction. Idle ~1 g; pulling >2.5 g spawns visible vortices.
+  const gLoad = Math.max(0, (liftMag / MASS) / G);
+  const gFactor = Math.max(0, (gLoad - 2.5) / 2.0); // 0 at 2.5 g, 1 at 4.5 g
+  const vortexTarget = Math.max(0, Math.min(1, Math.max(gFactor, state.stall * 1.1)))
+                       * (speed > 25 && !state.onGround ? 1 : 0);
+  state.vortex = (state.vortex || 0) * 0.8 + vortexTarget * 0.2;
+  updateVortexTrails(state.vortex);
 
   // Animate parts
   propSpin += (state.throttle * 60 + 4) * dt;
