@@ -99,10 +99,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Airport beacon lights — each airport now has a slim 8m tower opposite the windsock with a slow-spinning green/white head pair. Heads emit base glow gated by the same dusk window as runway edge lights (off at noon, on at sunset through dawn) and carry additive glare sprites that pulse as each head sweeps toward the camera, so the airport reads from 8+ km out at night without spamming daylight skies. ~4.5s rotation with a per-airport phase offset so the three beacons don't blink in lockstep.
 
+- [x] Departure / arrival callouts — `onTakeoff()` now looks up the departure runway via `landingProj` at threshold cross and fires `"<id>, airborne runway <DD>, contact departure."` (TWR), with a heading-aware `runwayDesignator()` helper so an east-rolling departure off RWY 09 reads "09" and a west rollout off the same strip reads "27". Off-field departures (carrier, grass, taxiway) fall back to the existing generic line so the call always fires. The rollout-complete latch in `updateLandCardRollout()` now fires a matching arrival call (`"<id>, cleared to taxi, welcome in."`) the first frame ground speed drops below 0.8 m/s, gated to crashes-off + onRunway so wreckage and off-strip stops stay quiet.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Departure / arrival callouts — ATC ticker fires a one-shot line when you cross the runway threshold at takeoff ("N1234 airborne, runway 27") and again when you stop on a runway after landing ("Cleared to taxi, welcome in"). Pure flavor on top of the existing ATC line pool, but the moments now feel like events instead of "speed crossed 80 km/h, nothing happened."
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.

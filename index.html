@@ -664,8 +664,47 @@ function onTakeoff(){
   // Best-effort ATC call. pushATC may not exist yet at module-load order if
   // the strip DOM is wired later; guard so this never throws.
   if (typeof pushATC === 'function'){
-    pushATC('Positive climb, contact departure.', { tag:'TWR' });
+    // Departure callout: if we crossed the threshold of a known runway, name
+    // the field + runway designator ("KSFO, airborne runway 27, contact
+    // departure."). Otherwise fall back to the generic line so off-field
+    // departures (carrier, taxiway, takeoff from grass) still get a callout.
+    let dep = null;
+    try {
+      if (typeof landingProj === 'function' && typeof plane !== 'undefined' && plane){
+        const proj = landingProj(plane.position.x, plane.position.z);
+        if (proj && proj.ri && proj.onRunway) dep = proj;
+      }
+    } catch(e){ /* lookup is best-effort — never block takeoff bookkeeping */ }
+    if (dep){
+      const rwy = runwayDesignator(dep.ri.ap.hdg, plane);
+      pushATC(dep.ri.ap.id + ', airborne runway ' + rwy + ', contact departure.', { tag:'TWR' });
+    } else {
+      pushATC('Positive climb, contact departure.', { tag:'TWR' });
+    }
   }
+}
+// Convert runway heading (radians) to a two-digit designator ("27", "09").
+// At takeoff the plane is rolling along the runway in one of two directions;
+// pass the live plane so we can pick the threshold that actually matches the
+// roll heading instead of the canonical orientation.
+function runwayDesignator(hdgRad, planeObj){
+  let hdgDeg = ((hdgRad * 180/Math.PI) % 360 + 360) % 360;
+  if (planeObj && planeObj.quaternion){
+    try {
+      const e = new THREE.Euler().setFromQuaternion(planeObj.quaternion, 'YXZ');
+      // Plane forward is -z in body frame; world heading from yaw e.y is the
+      // direction the nose points. Compare against runway hdg; if we're closer
+      // to the opposite threshold, flip 180° so the designator matches the
+      // way we're rolling (07 vs 25, etc.).
+      const noseDeg = ((-e.y * 180/Math.PI) % 360 + 360) % 360;
+      let dh = ((noseDeg - hdgDeg) + 540) % 360 - 180;
+      if (Math.abs(dh) > 90) hdgDeg = (hdgDeg + 180) % 360;
+    } catch(e){ /* attitude read failed — fall back to canonical heading */ }
+  }
+  const dd = Math.round(hdgDeg / 10);
+  // 360° rolls into "36", 0° rounds to "36" not "00" (matches real ICAO usage).
+  const norm = ((dd - 1 + 36) % 36) + 1;
+  return String(norm).padStart(2, '0');
 }
 function closeFlightTime(){
   if (flightStartMs == null) return 0;
@@ -4642,6 +4681,20 @@ function updateLandCardRollout(){
   }
   if (gs < 0.8){
     d.rollComplete = true;
+    // Arrival callout: tower clears the player to taxi the moment the wheels
+    // actually stop on the runway. Latched by rollComplete so it only fires
+    // once per rollout. Skip crashes (no clearance for wrecks) and skip stops
+    // that ended off the runway (taxiway, grass, off-field).
+    try {
+      if (typeof pushATC === 'function' && !state.crashed){
+        const proj = (typeof landingProj === 'function')
+          ? landingProj(plane.position.x, plane.position.z)
+          : null;
+        if (proj && proj.ri && proj.onRunway){
+          pushATC(proj.ri.ap.id + ', cleared to taxi, welcome in.', { tag:'TWR' });
+        }
+      }
+    } catch(e){ /* arrival call is flavor — never block the land card */ }
   }
 }
 function hideLandCard(){
