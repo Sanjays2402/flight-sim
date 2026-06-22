@@ -9,6 +9,12 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width:100%; height:100%; overflow:hidden; font-family: ui-monospace, "SF Mono", Menlo, monospace; color:#cfe; background:#000; }
   #c { display:block; width:100%; height:100%; }
+  /* Rain overlay: full-screen canvas drawn above the 3D world but below HUD.
+     Streaks are 2D canvas lines that move down + sideways with the wind. Toggle
+     it from Settings; persists in localStorage as settings.rain. Pointer-events
+     off so it never eats clicks; hidden in photo mode via PHOTO_HIDE_IDS. */
+  #rainOverlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
+  #rainOverlay.show { display:block; }
   .panel { position:fixed; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:8px 12px; font-size:12px; line-height:1.55; }
   #hud { top:12px; left:12px; min-width:170px; }
   #hud .row { display:flex; justify-content:space-between; gap:18px; }
@@ -167,6 +173,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<canvas id="rainOverlay"></canvas>
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
@@ -232,6 +239,11 @@
       <div class="top"><span class="name">LIVERY</span><span class="val" id="setLivV">CLASSIC</span></div>
       <div id="setLiveries"></div>
       <div class="hint">Paint scheme for your plane. Saved between flights.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">RAIN</span><span class="val" id="setRainV">OFF</span></div>
+      <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
+      <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
     </div>
     <div class="actions">
       <button id="setReset">RESET</button>
@@ -347,7 +359,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0 };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false };
 const settings = Object.assign({}, SETTINGS_DEFAULT);
 try {
   const raw = localStorage.getItem(SETTINGS_KEY);
@@ -357,6 +369,7 @@ try {
     if (typeof saved.fov === 'number') settings.fov = Math.max(50, Math.min(110, saved.fov));
     if (typeof saved.volume === 'number') settings.volume = Math.max(0, Math.min(1, saved.volume));
     if (Number.isInteger(saved.livery) && saved.livery >= 0 && saved.livery < LIVERIES.length) settings.livery = saved.livery;
+    if (typeof saved.rain === 'boolean') settings.rain = saved.rain;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -467,6 +480,7 @@ const SKY_KEYS = [
 const _todTop = new THREE.Color(), _todMid = new THREE.Color(), _todBot = new THREE.Color();
 const _todSunCol = new THREE.Color(), _todHemiSky = new THREE.Color(), _todHemiGnd = new THREE.Color();
 const _todAmb = new THREE.Color(), _todFog = new THREE.Color();
+const RAIN_GRAY = new THREE.Color(0x747a82);
 function lerpKey(h){
   // Find the two keys this hour sits between and return a blended sample.
   let a = SKY_KEYS[0], b = SKY_KEYS[SKY_KEYS.length-1];
@@ -508,6 +522,17 @@ function sunDirFor(h){
 function applyTimeOfDay(h){
   const k = lerpKey(h);
   const dir = sunDirFor(h);
+  // Rain mood: dim the sun, mute the sky a bit toward gray, push fog grayer.
+  // Subtle so day/night still reads; we just nudge things overcast.
+  if (settings.rain){
+    k.sunI *= 0.55;
+    k.hemiI *= 0.85;
+    k.top.lerp(RAIN_GRAY, 0.35);
+    k.mid.lerp(RAIN_GRAY, 0.35);
+    k.bot.lerp(RAIN_GRAY, 0.25);
+    k.fog.lerp(RAIN_GRAY, 0.45);
+    k.hemiSky.lerp(RAIN_GRAY, 0.3);
+  }
   sun.position.copy(dir).multiplyScalar(8000);
   sun.color.copy(k.sunCol);
   sun.intensity = k.sunI;
@@ -3651,7 +3676,79 @@ function updateCamera(dt){
   }
 }
 
-// ====== Main loop ======
+// ====== RAIN OVERLAY ======
+// 2D streaks drawn on a fullscreen overlay canvas above the 3D world but below
+// the HUD. Toggled by settings.rain (persisted). When active we also dim the
+// sky/fog/sun a touch inside applyTimeOfDay so the world reads as overcast.
+// Hidden in photo mode via PHOTO_HIDE_IDS so saved screenshots stay clean.
+const rainCanvas = document.getElementById('rainOverlay');
+const rainCtx = rainCanvas && rainCanvas.getContext('2d');
+const rainDrops = [];
+const RAIN_COUNT = 240;
+function sizeRainCanvas(){
+  if (!rainCanvas) return;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio, 2);
+  rainCanvas.width = Math.max(1, Math.floor(w * dpr));
+  rainCanvas.height = Math.max(1, Math.floor(h * dpr));
+  rainCanvas.style.width = w + 'px';
+  rainCanvas.style.height = h + 'px';
+  if (rainCtx) rainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function seedRainDrops(){
+  rainDrops.length = 0;
+  for (let i = 0; i < RAIN_COUNT; i++){
+    rainDrops.push({
+      x: Math.random() * innerWidth,
+      y: Math.random() * innerHeight,
+      // Length, speed, alpha vary so the rain has depth — short faint drops
+      // read as far away, long bright ones feel close to the camera.
+      len: 8 + Math.random() * 16,
+      spd: 600 + Math.random() * 700,
+      a: 0.25 + Math.random() * 0.5
+    });
+  }
+}
+sizeRainCanvas();
+seedRainDrops();
+function applyRainVisible(){
+  if (!rainCanvas) return;
+  rainCanvas.classList.toggle('show', !!settings.rain);
+  if (settings.rain && !rainDrops.length) seedRainDrops();
+}
+applyRainVisible();
+function updateRainOverlay(dt){
+  if (!settings.rain || !rainCtx || state.photoMode) return;
+  const w = innerWidth, h = innerHeight;
+  // Tilt with the wind so streaks line up with the prevailing breeze on the
+  // ground; in the air we add a chunk of the plane's lateral velocity so the
+  // streaks rake past the cockpit at speed.
+  let tiltX = state.wind.x * 0.6;
+  if (!state.onGround){
+    // Plane-relative left/right component of velocity (rough enough for a 2D overlay).
+    tiltX += state.vel.x * 0.05;
+  }
+  tiltX = Math.max(-280, Math.min(280, tiltX));
+  rainCtx.clearRect(0, 0, w, h);
+  rainCtx.strokeStyle = 'rgba(180, 200, 220, 0.55)';
+  rainCtx.lineWidth = 1.2;
+  rainCtx.lineCap = 'round';
+  for (const d of rainDrops){
+    d.y += d.spd * dt;
+    d.x += tiltX * dt;
+    if (d.y > h + 20 || d.x < -40 || d.x > w + 40){
+      d.x = Math.random() * w;
+      d.y = -20 - Math.random() * 40;
+    }
+    rainCtx.globalAlpha = d.a;
+    rainCtx.beginPath();
+    rainCtx.moveTo(d.x, d.y);
+    rainCtx.lineTo(d.x - tiltX * 0.012, d.y - d.len);
+    rainCtx.stroke();
+  }
+  rainCtx.globalAlpha = 1.0;
+}
+
 function loop(now){
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - lastT)/1000);
@@ -3677,6 +3774,7 @@ function loop(now){
   if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed){
     hideStatus();
   }
+  updateRainOverlay(dt);
   renderer.render(scene, camera);
 }
 
@@ -3684,6 +3782,7 @@ addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  sizeRainCanvas();
 });
 
 // Click anywhere on the replay banner to dismiss it.
@@ -3703,7 +3802,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel'];
+const PHOTO_HIDE_IDS = ['hud','compass','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel','rainOverlay'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -3918,6 +4017,8 @@ addEventListener('keydown', e => {
   const volV = document.getElementById('setVolV');
   const livRow = document.getElementById('setLiveries');
   const livV = document.getElementById('setLivV');
+  const rainBtn = document.getElementById('setRainBtn');
+  const rainV = document.getElementById('setRainV');
   if (!panel || !btnOpen) return;
   // Build the livery chip row once. Each chip stores its index and repaints the
   // plane on click via applyLivery(); selection state is reflected on syncInputs.
@@ -3955,6 +4056,11 @@ addEventListener('keydown', e => {
       }
     }
     if (livV) livV.textContent = (LIVERIES[settings.livery] || LIVERIES[0]).name;
+    if (rainV) rainV.textContent = settings.rain ? 'ON' : 'OFF';
+    if (rainBtn){
+      rainBtn.textContent = settings.rain ? 'RAIN: ON' : 'RAIN: OFF';
+      rainBtn.classList.toggle('primary', settings.rain);
+    }
   }
   function applyFov(){
     camera.fov = settings.fov;
@@ -3981,10 +4087,20 @@ addEventListener('keydown', e => {
     volV.textContent = Math.round(settings.volume * 100) + '%';
     saveSettings();
   });
+  if (rainBtn){
+    rainBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.rain = !settings.rain;
+      applyRainVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
   btnReset.addEventListener('click', () => {
     Object.assign(settings, SETTINGS_DEFAULT);
     applyFov();
     applyLivery(settings.livery);
+    applyRainVisible();
     syncInputs();
     saveSettings();
   });
