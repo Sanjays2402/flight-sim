@@ -10,11 +10,15 @@
   html, body { width:100%; height:100%; overflow:hidden; font-family: ui-monospace, "SF Mono", Menlo, monospace; color:#cfe; background:#000; }
   #c { display:block; width:100%; height:100%; }
   .panel { position:fixed; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:8px 12px; font-size:12px; line-height:1.55; }
-  #hud { top:12px; left:12px; min-width:230px; }
+  #hud { top:12px; left:12px; min-width:170px; }
   #hud .row { display:flex; justify-content:space-between; gap:18px; }
   #hud .lbl { color:#6aa; }
   #hud .val { color:#fff; font-weight:600; }
   #hud .warn { color:#ff5252; font-weight:700; animation:blink 0.6s steps(2) infinite; }
+  #compass { position:fixed; top:12px; left:50%; transform:translateX(-50%); width:360px; height:42px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
+  #compass canvas { display:block; width:100%; height:100%; }
+  #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
+  #vsi canvas { display:block; width:100%; height:100%; }
   @keyframes blink { 50% { opacity: 0.25; } }
   #help { bottom:12px; left:12px; max-width:380px; color:#9bb; }
   #help kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:11px; margin:0 1px; border:1px solid #2a4a6a; }
@@ -46,14 +50,16 @@
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
-  <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
-  <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
   <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%</span></div>
   <div class="row"><span class="lbl">FLP</span><span class="val"><span id="flp">0</span>°</span></div>
   <div class="row"><span class="lbl">GEAR</span><span class="val" id="gear">DOWN</span></div>
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
+  <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
+  <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
 </div>
+<div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
+<div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
 <div id="papi">
@@ -992,6 +998,8 @@ function step(dt){
   }
 
   drawAttitude(plane.quaternion);
+  drawCompass(hdg);
+  drawVSI(vs);
 
   const altFrac = Math.min(1, altM/2500);
   scene.background.setRGB(
@@ -1008,8 +1016,11 @@ const aiCanvas = document.getElementById('ai');
 const aiCtx = aiCanvas.getContext('2d');
 function drawAttitude(qPlane){
   const W = aiCanvas.width, H = aiCanvas.height, cx = W/2, cy = H/2;
+  const R = W/2 - 2;
   aiCtx.save();
   aiCtx.clearRect(0,0,W,H);
+  // clip to circle
+  aiCtx.beginPath(); aiCtx.arc(cx, cy, R, 0, Math.PI*2); aiCtx.clip();
   const e = new THREE.Euler().setFromQuaternion(qPlane, 'YXZ');
   const pitch = e.x, roll = e.z;
   aiCtx.translate(cx, cy);
@@ -1040,6 +1051,41 @@ function drawAttitude(qPlane){
     aiCtx.fillText(String(p), w+10, yy+3);
   }
   aiCtx.restore();
+  // roll bank markers (fixed, outer ring)
+  aiCtx.save();
+  aiCtx.translate(cx, cy);
+  aiCtx.strokeStyle = '#dfe';
+  aiCtx.fillStyle = '#dfe';
+  aiCtx.lineWidth = 1;
+  for (const ang of [-60,-45,-30,-20,-10,10,20,30,45,60]){
+    const a = ang * Math.PI/180 - Math.PI/2;
+    const r1 = R - 2, r2 = (Math.abs(ang) % 30 === 0) ? R - 10 : R - 6;
+    aiCtx.beginPath();
+    aiCtx.moveTo(Math.cos(a)*r1, Math.sin(a)*r1);
+    aiCtx.lineTo(Math.cos(a)*r2, Math.sin(a)*r2);
+    aiCtx.stroke();
+  }
+  // roll pointer (rotates with aircraft)
+  aiCtx.save();
+  aiCtx.rotate(roll);
+  aiCtx.fillStyle = '#ffd166';
+  aiCtx.beginPath();
+  aiCtx.moveTo(0, -R + 2);
+  aiCtx.lineTo(-5, -R + 11);
+  aiCtx.lineTo( 5, -R + 11);
+  aiCtx.closePath();
+  aiCtx.fill();
+  aiCtx.restore();
+  // sky-pointing reference triangle (fixed at top)
+  aiCtx.strokeStyle = '#dfe';
+  aiCtx.beginPath();
+  aiCtx.moveTo(0, -R + 12);
+  aiCtx.lineTo(-4, -R + 18);
+  aiCtx.lineTo( 4, -R + 18);
+  aiCtx.closePath();
+  aiCtx.stroke();
+  aiCtx.restore();
+  // wing-bars (aircraft symbol, fixed)
   aiCtx.strokeStyle = '#ffd166';
   aiCtx.lineWidth = 2;
   aiCtx.beginPath();
@@ -1049,7 +1095,125 @@ function drawAttitude(qPlane){
   aiCtx.stroke();
   aiCtx.strokeStyle = '#1e3548';
   aiCtx.lineWidth = 3;
-  aiCtx.beginPath(); aiCtx.arc(cx, cy, W/2-2, 0, Math.PI*2); aiCtx.stroke();
+  aiCtx.beginPath(); aiCtx.arc(cx, cy, R, 0, Math.PI*2); aiCtx.stroke();
+}
+
+// ====== Compass strip ======
+const compassCv = document.getElementById('compassCv');
+const compassCtx = compassCv.getContext('2d');
+function drawCompass(hdgDeg){
+  const W = compassCv.width, H = compassCv.height;
+  const cx = W/2;
+  // 6 px per degree -> ~60° visible across 360 px logical
+  const PX_PER_DEG = 6;
+  compassCtx.clearRect(0,0,W,H);
+  compassCtx.fillStyle = '#dfe';
+  compassCtx.font = 'bold 14px ui-monospace, monospace';
+  compassCtx.textAlign = 'center';
+  compassCtx.textBaseline = 'middle';
+  const labelFor = (d) => {
+    d = ((d % 360) + 360) % 360;
+    if (d === 0)   return 'N';
+    if (d === 90)  return 'E';
+    if (d === 180) return 'S';
+    if (d === 270) return 'W';
+    return String(d/10|0);
+  };
+  for (let d = -90; d <= 90; d += 5){
+    const tickHdg = hdgDeg + d;
+    const x = cx + d * PX_PER_DEG;
+    if (x < 4 || x > W-4) continue;
+    const norm = ((Math.round(tickHdg) % 360) + 360) % 360;
+    const isMajor = norm % 30 === 0;
+    const isMid = norm % 10 === 0;
+    compassCtx.strokeStyle = isMajor ? '#dfe' : '#6aa';
+    compassCtx.lineWidth = isMajor ? 2 : 1;
+    compassCtx.beginPath();
+    compassCtx.moveTo(x, H - 4);
+    compassCtx.lineTo(x, H - (isMajor ? 26 : (isMid ? 18 : 12)));
+    compassCtx.stroke();
+    if (isMajor){
+      const lbl = labelFor(norm);
+      compassCtx.fillStyle = (lbl === 'N') ? '#ff5252' : '#dfe';
+      compassCtx.fillText(lbl, x, 14);
+    }
+  }
+  // center caret
+  compassCtx.fillStyle = '#ffd166';
+  compassCtx.beginPath();
+  compassCtx.moveTo(cx, H - 2);
+  compassCtx.lineTo(cx - 6, H - 14);
+  compassCtx.lineTo(cx + 6, H - 14);
+  compassCtx.closePath();
+  compassCtx.fill();
+  // current heading readout box at top-center
+  compassCtx.fillStyle = 'rgba(0,0,0,0.55)';
+  compassCtx.fillRect(cx - 26, 0, 52, 22);
+  compassCtx.strokeStyle = '#ffd166';
+  compassCtx.lineWidth = 1;
+  compassCtx.strokeRect(cx - 26, 0, 52, 22);
+  compassCtx.fillStyle = '#ffd166';
+  compassCtx.font = 'bold 13px ui-monospace, monospace';
+  compassCtx.fillText(String(Math.round(hdgDeg)%360).padStart(3,'0') + '°', cx, 11);
+}
+
+// ====== Vertical-speed needle ======
+const vsiCv = document.getElementById('vsiCv');
+const vsiCtx = vsiCv.getContext('2d');
+function drawVSI(vs){
+  const W = vsiCv.width, H = vsiCv.height;
+  const cx = W/2, cy = H/2;
+  const RANGE = 20; // m/s full deflection
+  vsiCtx.clearRect(0,0,W,H);
+  // tape background
+  vsiCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  vsiCtx.fillRect(W/2 - 14, 8, 28, H - 16);
+  vsiCtx.strokeStyle = '#1e3548';
+  vsiCtx.lineWidth = 1;
+  vsiCtx.strokeRect(W/2 - 14, 8, 28, H - 16);
+  // center line (0)
+  vsiCtx.strokeStyle = '#6aa';
+  vsiCtx.lineWidth = 1;
+  vsiCtx.beginPath(); vsiCtx.moveTo(cx - 18, cy); vsiCtx.lineTo(cx + 18, cy); vsiCtx.stroke();
+  // ticks + labels (±5, ±10, ±15, ±20)
+  vsiCtx.fillStyle = '#dfe';
+  vsiCtx.font = '10px ui-monospace, monospace';
+  vsiCtx.textAlign = 'right';
+  vsiCtx.textBaseline = 'middle';
+  for (const v of [-20,-15,-10,-5,5,10,15,20]){
+    const y = cy - (v / RANGE) * (H/2 - 14);
+    const major = (Math.abs(v) % 10 === 0);
+    vsiCtx.strokeStyle = major ? '#dfe' : '#6aa';
+    vsiCtx.lineWidth = major ? 1.5 : 1;
+    vsiCtx.beginPath();
+    vsiCtx.moveTo(cx + (major ? 6 : 9), y); vsiCtx.lineTo(cx + 14, y);
+    vsiCtx.stroke();
+    if (major) vsiCtx.fillText(String(Math.abs(v)), cx + 4, y);
+  }
+  // up/down arrows for context
+  vsiCtx.fillStyle = '#6aa';
+  vsiCtx.textAlign = 'center';
+  vsiCtx.font = '9px ui-monospace, monospace';
+  vsiCtx.fillText('UP',   cx, 4);
+  vsiCtx.fillText('DOWN', cx, H - 4);
+  // needle
+  const clamped = Math.max(-RANGE, Math.min(RANGE, vs));
+  const ny = cy - (clamped / RANGE) * (H/2 - 14);
+  vsiCtx.strokeStyle = Math.abs(vs) > 8 ? '#ff5252' : '#ffd166';
+  vsiCtx.lineWidth = 2.5;
+  vsiCtx.beginPath();
+  vsiCtx.moveTo(cx + 14, cy);
+  vsiCtx.lineTo(cx - 14, ny);
+  vsiCtx.stroke();
+  vsiCtx.fillStyle = vsiCtx.strokeStyle;
+  vsiCtx.beginPath();
+  vsiCtx.arc(cx - 14, ny, 3, 0, Math.PI*2);
+  vsiCtx.fill();
+  // pivot
+  vsiCtx.fillStyle = '#dfe';
+  vsiCtx.beginPath();
+  vsiCtx.arc(cx + 14, cy, 2.5, 0, Math.PI*2);
+  vsiCtx.fill();
 }
 
 // ====== Camera ======
