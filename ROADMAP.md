@@ -23,22 +23,22 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Procedural cities near airports — boxy buildings for visual interest on approach.
 - [x] Time of day cycle — sun moves, sky color, lights on runways at night.
 - [x] Weather: wind + crosswind on approach — variable wind affects rudder.
+- [x] Smoke / contrails behind plane at high alt or when damaged.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **Smoke / contrails behind plane** at high alt or when damaged.
-2. **External chase cam + cockpit cam toggle** (C key).
-3. **Replay last 30s** at the end of each landing.
-4. **Mini-map in HUD corner** — top-down with airports, plane, heading line.
-5. **Damage model** — over-G or hard-landing gives damage %, affects handling.
-6. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
-7. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
-8. **AI traffic** — one other plane doing circuits at the home airport.
-9. **Mobile touch controls** — virtual stick on left, throttle slider on right.
-10. **Settings panel** — sensitivity, FOV, audio volume.
+1. **External chase cam + cockpit cam toggle** (C key).
+2. **Replay last 30s** at the end of each landing.
+3. **Mini-map in HUD corner** — top-down with airports, plane, heading line.
+4. **Damage model** — over-G or hard-landing gives damage %, affects handling.
+5. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
+6. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
+7. **AI traffic** — one other plane doing circuits at the home airport.
+8. **Mobile touch controls** — virtual stick on left, throttle slider on right.
+9. **Settings panel** — sensitivity, FOV, audio volume.
+10. **Liveries / paint picker** — 3–5 color schemes for the plane.
 11. **Liveries / paint picker** — 3–5 color schemes for the plane.
-12. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

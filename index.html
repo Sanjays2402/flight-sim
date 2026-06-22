@@ -977,6 +977,102 @@ function updateVortexTrails(strength){
   }
 }
 
+// ====== CONTRAILS ======
+// Puffy white particle trail emitted from two engine-ish points behind the plane.
+// Visible at high altitude with throttle (jet-style contrails). Each puff drifts
+// with the wind, expands, then fades. Pool is fixed-size so we never allocate at runtime.
+const CONTRAIL_MAX = 140;             // pool size — enough for ~7s of trail at peak emit
+const CONTRAIL_LIFE = 7.0;            // seconds before a puff fully fades out
+const CONTRAIL_START_R = 0.55;        // initial puff radius (m)
+const CONTRAIL_GROW = 1.6;            // additional radius growth over lifetime (m)
+const CONTRAIL_MIN_ALT = 1500;        // altitude (m) before contrails start forming
+const CONTRAIL_FULL_ALT = 3500;       // altitude (m) where contrails reach full opacity
+const CONTRAIL_EMIT_OFFSETS = [
+  new THREE.Vector3(-1.6, 0.08, 0.6), // left engine-ish, just behind the wing
+  new THREE.Vector3( 1.6, 0.08, 0.6)  // right
+];
+const contrailTex = (() => {
+  // Soft round alpha disc baked into a canvas — cheap puff sprite.
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const cx = cv.getContext('2d');
+  const g = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  cx.fillStyle = g; cx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const contrailPool = [];
+let contrailHead = 0;
+for (let i = 0; i < CONTRAIL_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: contrailTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xffffff
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(CONTRAIL_START_R);
+  spr.visible = false;
+  spr.renderOrder = 4;
+  scene.add(spr);
+  contrailPool.push({ spr, mat, age: CONTRAIL_LIFE + 1, life: CONTRAIL_LIFE });
+}
+let contrailAccum = 0;
+function spawnContrailAt(world){
+  const p = contrailPool[contrailHead];
+  contrailHead = (contrailHead + 1) % CONTRAIL_MAX;
+  p.spr.position.copy(world);
+  p.spr.scale.setScalar(CONTRAIL_START_R);
+  p.age = 0;
+  p.spr.visible = true;
+}
+const _ctTmpOff = new THREE.Vector3();
+const _ctTmpWorld = new THREE.Vector3();
+function updateContrails(dt, strength){
+  // Emit while strength is high; particles already alive keep drifting either way.
+  if (strength > 0.02){
+    // Emission rate scales with strength + airspeed proxy (throttle handled in caller).
+    const emitPerSec = 22 * strength;
+    contrailAccum += emitPerSec * dt;
+    while (contrailAccum >= 1){
+      contrailAccum -= 1;
+      for (let s = 0; s < CONTRAIL_EMIT_OFFSETS.length; s++){
+        _ctTmpWorld.copy(_ctTmpOff.copy(CONTRAIL_EMIT_OFFSETS[s]))
+          .applyQuaternion(plane.quaternion).add(plane.position);
+        spawnContrailAt(_ctTmpWorld);
+      }
+    }
+  } else {
+    contrailAccum = 0;
+  }
+  // Age every puff, drift with wind, grow, fade.
+  for (const p of contrailPool){
+    if (!p.spr.visible) continue;
+    p.age += dt;
+    if (p.age >= p.life){
+      p.spr.visible = false;
+      p.mat.opacity = 0;
+      continue;
+    }
+    const t = p.age / p.life;
+    // Slow drift with prevailing wind so trails smear correctly behind the plane.
+    p.spr.position.x += state.wind.x * 0.3 * dt;
+    p.spr.position.z += state.wind.z * 0.3 * dt;
+    // Gentle puff growth + ease-in/ease-out alpha.
+    const r = CONTRAIL_START_R + CONTRAIL_GROW * t;
+    p.spr.scale.setScalar(r);
+    // Fade in quickly, hold, fade out long.
+    const fadeIn = Math.min(1, t / 0.08);
+    const fadeOut = 1 - Math.min(1, Math.max(0, (t - 0.25) / 0.75));
+    p.mat.opacity = 0.85 * fadeIn * fadeOut;
+  }
+}
+function clearContrails(){
+  for (const p of contrailPool){ p.spr.visible = false; p.mat.opacity = 0; p.age = p.life + 1; }
+  contrailAccum = 0;
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -1061,6 +1157,7 @@ function resetPlane(){
   pickWindTarget();
   state.wind.copy(state.windTarget);
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
+  clearContrails();
   hideStatus();
 }
 resetPlane();
@@ -1409,6 +1506,14 @@ function step(dt){
                        * (speed > 25 && !state.onGround ? 1 : 0);
   state.vortex = (state.vortex || 0) * 0.8 + vortexTarget * 0.2;
   updateVortexTrails(state.vortex);
+
+  // High-altitude contrails — gated on altitude + throttle. Damage model TBD;
+  // when it lands it can drive a separate strength boost into this call.
+  const altMSL = plane.position.y;
+  const altGate = Math.max(0, Math.min(1, (altMSL - CONTRAIL_MIN_ALT) / (CONTRAIL_FULL_ALT - CONTRAIL_MIN_ALT)));
+  const thrGate = Math.max(0, (state.throttle - 0.3) / 0.7);
+  const contrailStrength = altGate * thrGate * (state.onGround ? 0 : 1);
+  updateContrails(dt, contrailStrength);
 
   // Animate parts
   propSpin += (state.throttle * 60 + 4) * dt;
