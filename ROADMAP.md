@@ -79,12 +79,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Fuel gauge warning at 20% — fuel HUD now flashes amber below 20% with a one-shot ATC "Fuel state low, recommend divert" call, flashes red below 10% with a second "Fuel critical, land at nearest field" call, and the latch clears with a small hysteresis once you refuel above each threshold so the next sortie re-arms.
 - [x] Cockpit head-bob — in cockpit cam only, the camera now picks up a subtle low-frequency wobble: tiny engine-vibration shimmy that scales with throttle in the air, much rougher bump scaled by ground speed during taxi, and a sharp decaying jolt on every wheels-down (scaled by sink rate, so greasers feel like a kiss and slammers thump the chassis). Stall buffet damps the bob so the two don't fight each other. Hidden in photo/pause/replay/intro so saved PNGs and frozen frames stay perfectly still.
+- [x] Wind sock at airports — NEXT entry was a duplicate of the already-shipped "Wind sock at each airport" item above; closed out without re-implementation so the same feature doesn't ship twice.
+- [x] Reverse thrust on landing — hold `Z` on the runway after touchdown to engage reverse thrust: prop disc visibly tilts ~0.35 rad to read as inverted pitch, a one-shot whoosh + low rumble plays on engagement, friction jumps hard (stacks with `B` brakes) so rollouts shorten dramatically, and tan dust puffs spawn at the main wheels and fade over ~0.9s. Disengages below ~30 km/h ground speed and outside the runway so the reverser can't shove the plane backwards or fire in a field. HUD shows a ◀ REV pill that eases in/out with the visual lerp.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Wind sock at airports — a small textured pole + cone sock at each airport apron that points away from the wind and inflates/deflates with wind magnitude. Currently the wind direction is only readable from the HUD crosswind tape; a physical sock gives the player a visual cue from the cockpit on final approach. ~50 LOC of geometry + a tiny per-frame quaternion update.
-- [ ] Reverse thrust on landing — hold `Z` on the runway after touchdown to engage reverse thrust: prop blades visually invert pitch, engine note pitches down, decel kicks in hard, dust kicks up briefly from the wheels. Shortens rollout dramatically and gives the player something to do post-touchdown other than just braking. Disengages above ~80 km/h taxi speed so it can't be cheesed for negative-airspeed shenanigans.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

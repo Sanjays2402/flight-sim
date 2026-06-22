@@ -334,6 +334,7 @@
   <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
+  <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
 </div>
@@ -355,7 +356,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -521,6 +522,7 @@
       <span>Gear up/down</span><span><kbd>G</kbd></span>
       <span>Flaps cycle</span><span><kbd>F</kbd></span>
       <span>Brakes (ground)</span><span><kbd>B</kbd></span>
+      <span>Reverse thrust (ground)</span><span><kbd>Z</kbd></span>
       <span>Camera cycle</span><span><kbd>C</kbd></span>
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
@@ -3021,6 +3023,17 @@ const state = {
   flapDeg: [0, 20, 40],
   gearDown: true,
   brakes: false,
+  // Reverse thrust (Z key, runway only). reverser = held-input intent for
+  // this frame; reverserActive = post-gate (on ground + on runway + ground
+  // speed above the cutoff so we can't shove the plane backwards). reverserT
+  // is the visual lerp 0..1 the prop blade tilt + HUD pill use so engage /
+  // disengage feels mechanical instead of snapping. dustT cools the wheel
+  // dust puff emitter so a steady REV doesn't spam sprites every frame.
+  reverser: false,
+  reverserActive: false,
+  reverserT: 0,
+  reverserPrevActive: false,
+  reverserDustT: 0,
   vel: new THREE.Vector3(0,0,0),
   onGround: true,
   crashed: false,
@@ -3877,6 +3890,14 @@ function resetPlane(){
   flapL.rotation.x = 0;
   flapR.rotation.x = 0;
   state.brakes = false;
+  // Reverse thrust resets cleanly so a quick-restart doesn't inherit a
+  // half-deployed reverser visual / dust emitter from the prior sortie.
+  state.reverser = false;
+  state.reverserActive = false;
+  state.reverserT = 0;
+  state.reverserPrevActive = false;
+  state.reverserDustT = 0;
+  clearReverseDust();
   state.onGround = true;
   state.crashed = false;
   state.landed = false;
@@ -4293,6 +4314,116 @@ function playIgnitionCrank(){
   pop.stop(t0 + dur + 0.24);
 }
 
+// Reverse-thrust whoosh: one-shot bandpassed noise sweep with a low rumble
+// underneath, fired the frame the reverser actually engages (not just the frame
+// the player presses Z). Mirrors the flap whoosh pattern so we reuse the same
+// audio path style — no new long-lived nodes. Volume scales with master.
+function playReverserWhoosh(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.32 * settings.volume;
+  if (vol <= 0) return;
+  // Airflow component: filtered noise that sweeps DOWN in pitch, the opposite
+  // direction of the flap whoosh, so it reads as "thrust reversing" not
+  // "flaps deploying".
+  const dur = 0.55;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(560, t0);
+  bp.frequency.exponentialRampToValueAtTime(220, t0 + dur);
+  bp.Q.value = 0.6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol * 0.9, t0 + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Low rumble underneath: a short sine that drops from 110→60Hz to give the
+  // engagement some chest-thump weight. Pitches down to sell “engine note
+  // dropping” the way real reversers sound.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(110, t0);
+  osc.frequency.exponentialRampToValueAtTime(60, t0 + 0.35);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0, t0);
+  og.gain.linearRampToValueAtTime(vol * 0.5, t0 + 0.04);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.42);
+}
+
+// Wheel dust kicked up the moment reverse thrust grabs. Tiny fixed-pool sprite
+// system (no runtime allocation) reusing the airshow puff texture so we don't
+// bake another canvas. Sprites spawn in world space at the main-gear positions
+// (±1.1 X local) so they sit on the ground and fade in place while the plane
+// rolls past. Pool stays inert until step() actually emits; cleared on
+// resetPlane / mission change so a fresh sortie starts dust-free.
+const REV_DUST_MAX = 12;
+const REV_DUST_LIFE = 0.9;     // seconds before a puff fully fades
+const REV_DUST_START_R = 0.7;  // initial radius (m)
+const REV_DUST_GROW = 2.4;     // additional radius growth over lifetime (m)
+const revDustPool = [];
+let revDustHead = 0;
+for (let i = 0; i < REV_DUST_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xc8b896
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(REV_DUST_START_R);
+  spr.visible = false;
+  scene.add(spr);
+  revDustPool.push({ spr, mat, life: 0 });
+}
+function emitReverseDust(){
+  // Spawn one puff at each main wheel. Position is in plane-local (±1.1 X,
+  // y=0 ground level, z=-0.1) then transformed to world so the puffs stay
+  // on the runway as the plane rolls past them.
+  const offs = [new THREE.Vector3(-1.1, 0.1, -0.1), new THREE.Vector3(1.1, 0.1, -0.1)];
+  for (const o of offs){
+    const p = revDustPool[revDustHead];
+    revDustHead = (revDustHead + 1) % REV_DUST_MAX;
+    const world = o.clone().applyMatrix4(plane.matrixWorld);
+    // Pin to the ground so puffs don't levitate if the plane bounces.
+    world.y = Math.max(0, world.y);
+    p.spr.position.copy(world);
+    p.spr.scale.setScalar(REV_DUST_START_R);
+    p.mat.opacity = 0.55;
+    p.spr.visible = true;
+    p.life = REV_DUST_LIFE;
+  }
+}
+function updateReverseDust(dt){
+  for (const p of revDustPool){
+    if (p.life <= 0){ if (p.spr.visible) p.spr.visible = false; continue; }
+    p.life -= dt;
+    const t = Math.max(0, p.life / REV_DUST_LIFE); // 1 → 0
+    p.mat.opacity = 0.55 * t;
+    p.spr.scale.setScalar(REV_DUST_START_R + REV_DUST_GROW * (1 - t));
+    // Drift upward and back slightly so the puff looks like settling dust.
+    p.spr.position.y += 0.6 * dt;
+    if (p.life <= 0) p.spr.visible = false;
+  }
+}
+function clearReverseDust(){
+  // Try/catch guard — the dust pool is declared with `const` further down so
+  // it's in TDZ during the very first resetPlane() call at script load. After
+  // that this is a normal pool wipe.
+  try {
+    for (const p of revDustPool){ p.life = 0; p.mat.opacity = 0; p.spr.visible = false; }
+    revDustHead = 0;
+  } catch (_e) { /* pool not initialized yet — nothing to clear */ }
+}
+
 // ====== PHYSICS ======
 const G = 9.81;
 const RHO = 1.225;
@@ -4499,6 +4630,11 @@ function step(dt){
     state.throttle = Math.max(0, state.throttle - 1.0*dt);
   }
   state.brakes = !!keys['KeyB'] || !!touch.brake;
+  // Reverse thrust input: held Z asks for reverse. Gating to "actually applies
+  // a force" happens in the on-ground physics block below (we need onRunway
+  // and ground speed, which are computed there). Mid-air this is a no-op so
+  // the visual lerp + HUD pill bleed back to off naturally.
+  state.reverser = !!keys['KeyZ'];
 
   let pIn = 0, rIn = 0, yIn = 0;
   if (!state.crashed){
@@ -4929,12 +5065,44 @@ function step(dt){
 
     if (!state.crashed){
       const vh = new THREE.Vector3(state.vel.x, 0, state.vel.z);
-      const friction = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
-      const sp = vh.length();
+      // Reverse thrust gating. Effective only on the runway with the engine
+      // actually running (no reverse on a dead engine — the prop has to bite),
+      // and only while ground speed is above ~30 km/h (~8.3 m/s) so the
+      // reverser can't shove the plane backwards once it's nearly stopped.
+      // That cutoff is what real airliners do — stow reversers around 60–80 kt
+      // and let wheel brakes finish the job.
+      const groundSp = vh.length();
+      const engineLiveForRev = !state.engineOut && state.fuel > 0 && !state.coldStart;
+      const revActive = state.reverser && onRunway && groundSp > 8.3 && engineLiveForRev;
+      state.reverserActive = revActive;
+      // Rising edge — fire the whoosh once and kick a puff of dust at the wheels
+      // so engagement reads as a single mechanical event, not a continuous loop.
+      if (revActive && !state.reverserPrevActive){
+        playReverserWhoosh();
+        emitReverseDust();
+        state.reverserDustT = 0.12;
+        showStatus('REVERSE THRUST', null, 'good');
+      }
+      state.reverserPrevActive = revActive;
+      // Wheel-brake friction. Reverser doubles as a strong decel by raising the
+      // effective friction coefficient — stacks with wheel brakes (real pilots
+      // use both) so holding B + Z together shortens rollout dramatically.
+      const brakeFric = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
+      const friction = brakeFric + (revActive ? 2.5 : 0);
+      const sp = groundSp;
       if (sp > 0.01){
         const newSp = Math.max(0, sp - friction*dt*Math.max(2, sp*0.1));
         vh.multiplyScalar(newSp/sp);
         state.vel.x = vh.x; state.vel.z = vh.z;
+      }
+      // Dribble a fresh dust puff every ~0.15s while reversed and still rolling,
+      // so the trail of dust matches the rollout instead of being a one-shot.
+      if (revActive){
+        state.reverserDustT -= dt;
+        if (state.reverserDustT <= 0){
+          emitReverseDust();
+          state.reverserDustT = 0.15;
+        }
       }
       tmpE.setFromQuaternion(plane.quaternion, 'YXZ');
       const eaY = tmpE.y;
@@ -4953,9 +5121,17 @@ function step(dt){
       }
     } else {
       state.vel.multiplyScalar(Math.exp(-3*dt));
+      // Crashed: kill the reverser so the visual lerp + dust emitter quietly
+      // bleed back to off while the wreck settles.
+      state.reverserActive = false;
+      state.reverserPrevActive = false;
     }
   } else {
     state.onGround = false;
+    // Airborne: reverser only operates on the runway, so force-disengage here
+    // so the visual + HUD pill ease back to off if the player keeps Z held.
+    state.reverserActive = false;
+    state.reverserPrevActive = false;
     onTakeoff();
   }
 
@@ -5039,6 +5215,17 @@ function step(dt){
     propSpin += Math.min(8, speed * 0.06) * dt;
   }
   propGroup.rotation.z = propSpin;
+  // Reverse-thrust visuals: ease reverserT toward active (1) / off (0) over
+  // ~120ms each way and tilt the prop disc by ~0.35 rad so the blades visibly
+  // “flip pitch” the way a real variable-pitch prop or thrust-reverser does.
+  // Dust puffs are ticked here too so the trail lives even if the player
+  // releases Z (puffs already in flight finish their fade-out gracefully).
+  const revTarget = state.reverserActive ? 1 : 0;
+  const revRate = 8.0; // ~0.12s ease both directions
+  if (state.reverserT < revTarget) state.reverserT = Math.min(revTarget, state.reverserT + revRate*dt);
+  else if (state.reverserT > revTarget) state.reverserT = Math.max(revTarget, state.reverserT - revRate*dt);
+  propGroup.rotation.x = state.reverserT * 0.35;
+  updateReverseDust(dt);
   // Ease flaps + gear toward target. flapAnimRad chases flapRad at FLAP_RATE,
   // gearAnim chases 0/1 at GEAR_RATE so the gear hauls up and tucks into the
   // belly instead of popping out of existence. gearGrp.visible stays true
@@ -5153,6 +5340,9 @@ function step(dt){
   }
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
+  // Reverse-thrust HUD pill: visible while the visual lerp is non-zero so it
+  // tracks the ease-in/out rather than snapping when the player releases Z.
+  document.getElementById('reverser').style.display = (state.reverserT > 0.05) ? 'inline' : 'none';
 
   // Landing-gear stress indicator: when low + descending fast, warn the pilot
   // to flare. Amber once sink rate would start adding damage on touchdown
