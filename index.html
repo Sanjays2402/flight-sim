@@ -472,6 +472,7 @@
     <div class="row"><span class="name">TOTAL AIR TIME</span><span class="val" id="stTotalTime">0:00</span></div>
     <div class="row"><span class="name">LOOPS</span><span class="val" id="stLoops">0</span></div>
     <div class="row"><span class="name">AILERON ROLLS</span><span class="val" id="stRolls">0</span></div>
+    <div class="row"><span class="name">FORMATIONS</span><span class="val" id="stFormations">0</span></div>
     <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
     <div class="actions">
       <button id="stReset" class="danger" type="button">RESET</button>
@@ -604,7 +605,8 @@ const STATS_DEFAULT = {
   longestFlightSec: 0,
   totalAirSec: 0,          // cumulative seconds in the air
   loops: 0,                // 360° pitch loops completed (acrobat tracker)
-  rolls: 0                 // 360° aileron rolls completed (acrobat tracker)
+  rolls: 0,                // 360° aileron rolls completed (acrobat tracker)
+  formations: 0            // formation-flight sessions with AI traffic (5s+ in close parallel)
 };
 const pilotStats = Object.assign({}, STATS_DEFAULT);
 try {
@@ -680,7 +682,8 @@ const ACHIEVEMENTS = {
   tenLandings:    { icon:'\u{1F396}', title:'Frequent Flyer',  desc:'10 successful landings logged.' },
   perfectLanding: { icon:'\u2B50',  title:'Perfect Landing', desc:'Scored 300+ on a single landing.' },
   ringUnder60:    { icon:'\u{1F3C1}', title:'Ring Master',     desc:'Ring chase complete in under 60 seconds.' },
-  highFlyer:      { icon:'\u{1F30C}', title:'High Flyer',      desc:'Climbed above 1000m for the first time.' }
+  highFlyer:      { icon:'\u{1F30C}', title:'High Flyer',      desc:'Climbed above 1000m for the first time.' },
+  formationFlight:{ icon:'\u{1F6E9}',  title:'Wingman',         desc:'Held formation with the AI traffic for 5 seconds.' }
 };
 const unlockedAch = new Set();
 try {
@@ -1820,6 +1823,121 @@ function updateAITraffic(dt){
   // Cull if absurdly far (shouldn't happen, but safe).
   const distToPlayer = aiPlane.position.distanceTo(plane.position);
   aiPlane.visible = distToPlayer < 12000;
+}
+
+// ====== FORMATION TRACKER ======
+// Reward the pilot for actually flying next to the AI traffic. When the
+// player is close, level-ish, and roughly parallel with the AI plane for
+// FORMATION_HOLD_SEC, fire a "FORMATION!" toast + achievement, briefly
+// show a thin connecting line between the two planes, and bump pilotStats.
+// Pure visual reward, no physics. Cooldown after a successful hold so
+// long parallel cruises don't spam the popup.
+const FORMATION_HORIZ_M     = 120;   // m — max horizontal distance to count
+const FORMATION_VERT_M      = 40;    // m — max altitude difference to count
+const FORMATION_HDG_DEG     = 25;    // deg — max heading delta to count as parallel
+const FORMATION_HOLD_SEC    = 5;     // sustained seconds required
+const FORMATION_COOLDOWN_SEC= 15;    // wait before another formation can fire
+const FORMATION_LINE_FADE   = 2.0;   // s — connecting line fade-out duration after a fire
+// Thin cylinder used as the connecting line between player and AI plane.
+// Built lying along +Z (length 1) and we rescale + reorient each frame.
+const formationLineGeo = new THREE.CylinderGeometry(0.6, 0.6, 1, 8, 1, true);
+formationLineGeo.translate(0, 0.5, 0);     // pivot at base so scale on the length axis stretches the geometry
+formationLineGeo.rotateX(Math.PI / 2);     // align length along +Z; Object3D.lookAt(target) orients local +Z toward the target so the cylinder extends from this object to the target
+const formationLineMat = new THREE.MeshBasicMaterial({
+  color: 0x7ee787, transparent: true, opacity: 0, depthWrite: false
+});
+const formationLine = new THREE.Mesh(formationLineGeo, formationLineMat);
+formationLine.visible = false;
+scene.add(formationLine);
+const formationState = {
+  holdSec: 0,        // current sustained-formation seconds
+  cooldownSec: 0,    // remaining cooldown before another fire is allowed
+  lineGlow: 0,       // 0..1 — current line opacity bias (charges while holding, then decays)
+  fadeT: 0           // remaining fade-out seconds after a successful fire
+};
+const _formFwd = new THREE.Vector3();
+const _formMid = new THREE.Vector3();
+function updateFormation(dt){
+  if (dt <= 0) return;
+  // Reset state if any sim-pause / non-flight condition is active. The line
+  // is hidden too so it doesn't ghost into pause or replay overlays.
+  if (state.onGround || state.crashed || state.paused || state.replayActive
+      || state.photoMode || state.introOpen || !aiPlane.visible){
+    formationState.holdSec = 0;
+    formationState.lineGlow = Math.max(0, formationState.lineGlow - dt * 2);
+    formationState.fadeT = Math.max(0, formationState.fadeT - dt);
+    if (formationState.cooldownSec > 0) formationState.cooldownSec = Math.max(0, formationState.cooldownSec - dt);
+    if (formationState.lineGlow <= 0.01 && formationState.fadeT <= 0){
+      formationLine.visible = false;
+      formationLineMat.opacity = 0;
+    }
+    return;
+  }
+  if (formationState.cooldownSec > 0){
+    formationState.cooldownSec = Math.max(0, formationState.cooldownSec - dt);
+  }
+  // Geometry check: horizontal distance, vertical separation, heading delta.
+  const dx = aiPlane.position.x - plane.position.x;
+  const dy = aiPlane.position.y - plane.position.y;
+  const dz = aiPlane.position.z - plane.position.z;
+  const horiz = Math.hypot(dx, dz);
+  const vert  = Math.abs(dy);
+  // Player heading from current forward vector, same convention as the HUD.
+  _formFwd.set(0, 0, -1).applyQuaternion(plane.quaternion);
+  const playerHdg = Math.atan2(_formFwd.x, -_formFwd.z);
+  let dh = playerHdg - aiState.heading;
+  while (dh >  Math.PI) dh -= 2 * Math.PI;
+  while (dh < -Math.PI) dh += 2 * Math.PI;
+  const hdgDeg = Math.abs(dh) * 180 / Math.PI;
+  const inFormation = horiz < FORMATION_HORIZ_M
+                   && vert  < FORMATION_VERT_M
+                   && hdgDeg < FORMATION_HDG_DEG
+                   && formationState.cooldownSec <= 0;
+  if (inFormation){
+    formationState.holdSec += dt;
+    // Build line opacity as the hold progresses so the cue gets stronger
+    // right before it earns the toast.
+    const charge = Math.min(1, formationState.holdSec / FORMATION_HOLD_SEC);
+    formationState.lineGlow = Math.max(formationState.lineGlow, 0.15 + 0.55 * charge);
+    if (formationState.holdSec >= FORMATION_HOLD_SEC){
+      pilotStats.formations += 1;
+      savePilotStats();
+      unlockAchievement('formationFlight');
+      showToast('\u{1F6E9}', 'FORMATION!', 'Tight wing on the AI plane \u2014 nice flying.');
+      if (typeof pushATC === 'function') pushATC('Nice formation, hold position.', { tag:'TWR' });
+      formationState.holdSec = 0;
+      formationState.cooldownSec = FORMATION_COOLDOWN_SEC;
+      formationState.fadeT = FORMATION_LINE_FADE;
+      formationState.lineGlow = 1.0;
+    }
+  } else {
+    // Bleed the hold timer when conditions break so a momentary drift doesn't
+    // hard-reset progress, but a real break-off zeroes it within ~1s.
+    formationState.holdSec = Math.max(0, formationState.holdSec - dt * 1.5);
+    formationState.lineGlow = Math.max(0, formationState.lineGlow - dt * 1.2);
+  }
+  if (formationState.fadeT > 0){
+    formationState.fadeT = Math.max(0, formationState.fadeT - dt);
+  }
+  // Draw the connecting line between player and AI plane when there's any
+  // glow to show. Position at player, orient toward AI plane, scale Z to the
+  // distance between them so the cylinder spans exactly to the AI plane.
+  const fadeBoost = formationState.fadeT > 0 ? (formationState.fadeT / FORMATION_LINE_FADE) : 0;
+  const opacity = Math.min(0.85, formationState.lineGlow * 0.55 + fadeBoost * 0.45);
+  if (opacity > 0.02){
+    const dist3 = Math.hypot(dx, dy, dz);
+    if (dist3 > 0.5){
+      formationLine.visible = true;
+      formationLine.position.copy(plane.position);
+      _formMid.copy(aiPlane.position);
+      formationLine.lookAt(_formMid);
+      formationLine.scale.set(1, 1, dist3);
+      formationLineMat.opacity = opacity;
+    }
+  } else {
+    formationLine.visible = false;
+    formationLineMat.opacity = 0;
+  }
 }
 
 // ====== BIRDS ======
@@ -4791,6 +4909,9 @@ function step(dt){
 
   // AI traffic update (visual only, runs alongside player physics).
   updateAITraffic(dt);
+  // Formation tracker — watch for sustained close + parallel flight next to
+  // the AI plane; fires a toast + bumps pilotStats + flashes a connecting line.
+  updateFormation(dt);
   // Birds drifting low over each airport — same idea, even simpler: no AI,
   // just orbit + flap. Cheap and adds life to approach views.
   updateBirds(dt);
@@ -6138,7 +6259,8 @@ addEventListener('keydown', e => {
     longest:  document.getElementById('stLongest'),
     total:    document.getElementById('stTotalTime'),
     loops:    document.getElementById('stLoops'),
-    rolls:    document.getElementById('stRolls')
+    rolls:    document.getElementById('stRolls'),
+    formations: document.getElementById('stFormations')
   };
   function refresh(){
     cells.flights.textContent  = pilotStats.totalFlights;
@@ -6153,6 +6275,7 @@ addEventListener('keydown', e => {
     cells.total.textContent    = fmtFlightTime(pilotStats.totalAirSec);
     if (cells.loops) cells.loops.textContent = pilotStats.loops || 0;
     if (cells.rolls) cells.rolls.textContent = pilotStats.rolls || 0;
+    if (cells.formations) cells.formations.textContent = pilotStats.formations || 0;
   }
   function openPanel(){ refresh(); panel.classList.add('show'); }
   function closePanel(){ panel.classList.remove('show'); }
