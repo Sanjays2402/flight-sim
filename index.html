@@ -271,6 +271,11 @@
   #intro .menurow { display:flex; gap:8px; margin-bottom:14px; }
   #intro .menurow button { flex:1; padding:8px 10px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; border-radius:8px; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; transition:all .15s ease; }
   #intro .menurow button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; transform:translateY(-1px); }
+  /* Pilot rank pill — sits just under the PILOT STATS / LOGBOOK buttons on the
+     main menu, derived from existing lifetime counters via currentRank(). */
+  #intro .rankpill { display:flex; align-items:center; justify-content:center; gap:8px; margin:-4px 0 14px; padding:6px 10px; background:rgba(20,40,60,.55); border:1px solid #2a4a6a; border-radius:8px; font-size:11px; letter-spacing:1px; color:#9bb; font-weight:700; }
+  #intro .rankpill .lbl { color:#6aa; }
+  #intro .rankpill .nm  { color:#7ee787; font-size:13px; letter-spacing:2px; }
   #stats { position:fixed; inset:0; background:rgba(0,5,12,.86); display:none; align-items:center; justify-content:center; z-index:30; }
   #stats.show { display:flex; }
   #stats .card { width:380px; padding:22px 28px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; }
@@ -598,6 +603,8 @@
     <div class="row"><span class="name">AILERON ROLLS</span><span class="val" id="stRolls">0</span></div>
     <div class="row"><span class="name">FORMATIONS</span><span class="val" id="stFormations">0</span></div>
     <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
+    <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
+    <div class="row"><span class="name">🎖️ RANK</span><span class="val hi" id="stRank">CADET</span></div>
     <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
     <div class="actions">
       <button id="stReset" class="danger" type="button">RESET</button>
@@ -633,6 +640,7 @@
       <button id="introStats" type="button">📊 PILOT STATS</button>
       <button id="introLog" type="button">📖 LOGBOOK</button>
     </div>
+    <div class="rankpill" id="introRank"><span class="lbl">RANK</span><span class="nm" id="introRankNm">CADET</span><span class="lbl" id="introRankNext"></span></div>
     <div class="ctrls">
       <span>Throttle</span><span><kbd>W</kbd> up / <kbd>S</kbd> down</span>
       <span>Pitch</span><span><kbd>I</kbd> nose up / <kbd>K</kbd> nose down</span>
@@ -752,7 +760,8 @@ const STATS_DEFAULT = {
   loops: 0,                // 360° pitch loops completed (acrobat tracker)
   rolls: 0,                // 360° aileron rolls completed (acrobat tracker)
   formations: 0,           // formation-flight sessions with AI traffic (5s+ in close parallel)
-  burgers: 0               // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
+  burgers: 0,              // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
+  perfectLandings: 0       // count of landings scored 300+ (used by rank progression)
 };
 const pilotStats = Object.assign({}, STATS_DEFAULT);
 try {
@@ -796,6 +805,8 @@ function onTakeoff(){
     }
   } catch(e){ state.flightOrigin = MAIN_AP ? MAIN_AP.id : '—'; }
   unlockAchievement('firstFlight');
+  // Rank check after a new flight is tallied — takeoffs can cross rank gates.
+  checkRankPromotion();
   // Best-effort ATC call. pushATC may not exist yet at module-load order if
   // the strip DOM is wired later; guard so this never throws.
   if (typeof pushATC === 'function'){
@@ -869,7 +880,14 @@ function onLanding(score){
   });
   unlockAchievement('firstLanding');
   if (pilotStats.totalLandings >= 10) unlockAchievement('tenLandings');
-  if (typeof score === 'number' && score >= 300) unlockAchievement('perfectLanding');
+  if (typeof score === 'number' && score >= 300){
+    pilotStats.perfectLandings = (pilotStats.perfectLandings || 0) + 1;
+    savePilotStats();
+    unlockAchievement('perfectLanding');
+  }
+  // Rank check after every landing — promotion toast fires the first time a
+  // new threshold is crossed (tracked in localStorage so we don't re-fire).
+  checkRankPromotion();
 }
 function onCrash(){
   // Same snapshot pattern as onLanding so the crash row has real duration.
@@ -1004,6 +1022,110 @@ function showToast(icon, title, desc){
   el.innerHTML = '<span class="ic">' + (icon||'') + '</span><span class="ttl">' + (title||'') + '</span>' + (desc ? '<span class="desc">' + desc + '</span>' : '');
   host.appendChild(el);
   setTimeout(function(){ if (el && el.parentNode) el.parentNode.removeChild(el); }, 4400);
+}
+
+// ====== PILOT RANK ======
+// Plain-English progression derived from existing pilot-stat counters and the
+// ring-chase best time. Each rank requires ALL of its thresholds at once, so a
+// pilot doesn't get promoted just by spamming takeoffs without nailing landings.
+// Order matters — currentRank() walks from top to bottom and picks the first
+// rank whose gates are all cleared.
+const RANKS = [
+  { id:'ACE',         flights:300, landings:200, perfect:25, ringMs: 45000 },
+  { id:'INSTRUCTOR',  flights:200, landings:120, perfect:15, ringMs: 55000 },
+  { id:'ATP',         flights:120, landings: 70, perfect: 8, ringMs: 70000 },
+  { id:'COMMERCIAL',  flights: 60, landings: 35, perfect: 3, ringMs: 90000 },
+  { id:'PRIVATE',     flights: 25, landings: 12, perfect: 0, ringMs:120000 },
+  { id:'STUDENT',     flights:  5, landings:  1, perfect: 0, ringMs:      0 },
+  { id:'CADET',       flights:  0, landings:  0, perfect: 0, ringMs:      0 }
+];
+function currentRank(){
+  const flights  = pilotStats.totalFlights || 0;
+  const landings = pilotStats.totalLandings || 0;
+  const perfect  = pilotStats.perfectLandings || 0;
+  // state.ringBestMs is the only ring metric persisted; lower is better, 0 = unset.
+  const ringMs = (typeof state !== 'undefined' && state.ringBestMs > 0) ? state.ringBestMs : Infinity;
+  for (const r of RANKS){
+    if (flights >= r.flights && landings >= r.landings && perfect >= r.perfect && ringMs <= (r.ringMs || Infinity)){
+      return r;
+    }
+  }
+  return RANKS[RANKS.length - 1];
+}
+// Return the next-rank requirement summary so the menu pill can show what's
+// left to unlock ("next: PRIVATE · 7 lands"). Returns null at the top rank.
+function nextRankHint(){
+  const cur = currentRank();
+  const idx = RANKS.indexOf(cur);
+  if (idx <= 0) return null;
+  const nxt = RANKS[idx - 1];
+  const flights  = pilotStats.totalFlights || 0;
+  const landings = pilotStats.totalLandings || 0;
+  const perfect  = pilotStats.perfectLandings || 0;
+  const ringMs = (typeof state !== 'undefined' && state.ringBestMs > 0) ? state.ringBestMs : Infinity;
+  const gaps = [];
+  if (flights < nxt.flights)   gaps.push((nxt.flights - flights) + ' flights');
+  if (landings < nxt.landings) gaps.push((nxt.landings - landings) + ' lands');
+  if (perfect < nxt.perfect)   gaps.push((nxt.perfect - perfect) + ' perfect');
+  if (nxt.ringMs > 0 && ringMs > nxt.ringMs){
+    const need = (nxt.ringMs / 1000).toFixed(0);
+    gaps.push('ring sub-' + need + 's');
+  }
+  return { id: nxt.id, gaps };
+}
+const RANK_KEY = 'flightsim.rank.v1';
+let lastSeenRankId = null;
+try {
+  const raw = localStorage.getItem(RANK_KEY);
+  if (raw){
+    const v = JSON.parse(raw);
+    if (v && typeof v.id === 'string') lastSeenRankId = v.id;
+  }
+} catch(e){ /* corrupt — stay unset */ }
+// Fire the promotion toast at most once per fresh-cross. Bootstrap: if there's
+// no record yet, just seed lastSeenRankId silently so a returning veteran
+// doesn't get spammed with promotions for ranks they already "have".
+function checkRankPromotion(){
+  const cur = currentRank();
+  if (!cur) return;
+  if (lastSeenRankId == null){
+    lastSeenRankId = cur.id;
+    try { localStorage.setItem(RANK_KEY, JSON.stringify({ id: cur.id })); } catch(e){}
+    return;
+  }
+  if (cur.id === lastSeenRankId) return;
+  // Only treat upward moves as promotions (RANKS is ordered top→bottom, so a
+  // lower index = higher rank). Defensive against a future stat-reset path.
+  const prevIdx = RANKS.findIndex(r => r.id === lastSeenRankId);
+  const curIdx = RANKS.findIndex(r => r.id === cur.id);
+  if (prevIdx >= 0 && curIdx >= 0 && curIdx < prevIdx){
+    showToast('\u{1F396}\uFE0F', 'PROMOTION!', 'Promoted to ' + cur.id + ' — nice flying.');
+  }
+  lastSeenRankId = cur.id;
+  try { localStorage.setItem(RANK_KEY, JSON.stringify({ id: cur.id })); } catch(e){}
+  // Refresh the menu pill if it's mounted so a Back-to-Menu after a promotion
+  // shows the new rank without waiting for the next reload.
+  if (typeof refreshRankPill === 'function') refreshRankPill();
+}
+// Lightweight DOM helper for the menu pill. Reads the current rank and the
+// gap-to-next hint, repaints into the #introRank pill. Safe to call before
+// the DOM is attached (returns silently when the element isn't mounted yet).
+function refreshRankPill(){
+  const nm = document.getElementById('introRankNm');
+  const nx = document.getElementById('introRankNext');
+  if (!nm) return;
+  const cur = currentRank();
+  nm.textContent = cur.id;
+  if (nx){
+    const hint = nextRankHint();
+    if (hint && hint.gaps.length){
+      nx.textContent = '· NEXT ' + hint.id + ' · ' + hint.gaps.slice(0, 2).join(', ');
+    } else if (hint){
+      nx.textContent = '· NEXT ' + hint.id;
+    } else {
+      nx.textContent = '· MAX RANK';
+    }
+  }
 }
 
 // ====== TIME OF DAY ======
@@ -3583,6 +3705,8 @@ function updateRingChase(dt){
       state.ringDone = true;
       state.ringElapsedMs = tNow - state.ringStartMs;
       if (state.ringElapsedMs < 60000) unlockAchievement('ringUnder60');
+      // A faster ring time can cross a rank gate — check before the toast pops.
+      checkRankPromotion();
       let extra = '';
       if (state.ringBestMs === 0 || state.ringElapsedMs < state.ringBestMs){
         state.ringBestMs = state.ringElapsedMs;
@@ -6299,6 +6423,8 @@ function dismissIntro(){
 intro.addEventListener('click', e => {
   // Don't dismiss when clicking a mission button — let the button handler manage selection.
   if (e.target.closest('.mbtn')) return;
+  // Rank pill is a passive readout; tapping it shouldn't launch the flight.
+  if (e.target.closest('.rankpill')) return;
   dismissIntro();
 });
 for (const btn of document.querySelectorAll('#intro .mbtn')){
@@ -11203,7 +11329,9 @@ addEventListener('keydown', e => {
     loops:    document.getElementById('stLoops'),
     rolls:    document.getElementById('stRolls'),
     formations: document.getElementById('stFormations'),
-    burgers:  document.getElementById('stBurgers')
+    burgers:  document.getElementById('stBurgers'),
+    perfect:  document.getElementById('stPerfect'),
+    rank:     document.getElementById('stRank')
   };
   function refresh(){
     cells.flights.textContent  = pilotStats.totalFlights;
@@ -11220,6 +11348,11 @@ addEventListener('keydown', e => {
     if (cells.rolls) cells.rolls.textContent = pilotStats.rolls || 0;
     if (cells.formations) cells.formations.textContent = pilotStats.formations || 0;
     if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
+    if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
+    if (cells.rank){
+      const cur = currentRank();
+      cells.rank.textContent = cur ? cur.id : 'CADET';
+    }
   }
   function openPanel(){ refresh(); panel.classList.add('show'); }
   function closePanel(){ panel.classList.remove('show'); }
@@ -11231,7 +11364,12 @@ addEventListener('keydown', e => {
     if (!confirm('Reset all pilot stats? This cannot be undone.')) return;
     Object.assign(pilotStats, STATS_DEFAULT);
     savePilotStats();
+    // Wipe the cached promotion latch so a freshly-reset pilot bootstraps as
+    // CADET on the next promotion check instead of holding the old top rank.
+    try { localStorage.removeItem(RANK_KEY); } catch(e){}
+    lastSeenRankId = null;
     refresh();
+    if (typeof refreshRankPill === 'function') refreshRankPill();
   });
   addEventListener('keydown', e => {
     if (e.repeat) return;
@@ -11240,6 +11378,9 @@ addEventListener('keydown', e => {
       closePanel();
     }
   });
+  // First paint of the menu's rank pill once stats are loaded. Cheap and
+  // re-running it later is safe (no DOM churn beyond two textContent writes).
+  if (typeof refreshRankPill === 'function') refreshRankPill();
 })();
 
 // ====== FLIGHT LOGBOOK UI ======
@@ -11598,6 +11739,7 @@ updateCamModeUi();
     if (missionEl) missionEl.style.display = 'none';
     setStallAudio(false);
     if (intro) intro.style.display = 'flex';
+    if (typeof refreshRankPill === 'function') refreshRankPill();
   });
   // Esc toggles the menu. Gate against the modes that already own Esc so
   // we don't double-fire (settings panel, pilot stats panel, photo mode),
