@@ -15,6 +15,13 @@
      off so it never eats clicks; hidden in photo mode via PHOTO_HIDE_IDS. */
   #rainOverlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #rainOverlay.show { display:block; }
+  /* Bird-strike splatter: full-screen canvas that draws blood smears on the
+     windshield for a few seconds after a bird strike. Only shown in cockpit
+     cam (toggled by updateBirdSplat), pointer-events off so it never eats
+     clicks. Sits just above #rainOverlay so the splatter reads over weather.
+     Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #birdSplat { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
+  #birdSplat.show { display:block; }
   /* Binoculars overlay: dark vignette + faint reticle ring that fades in while
      the player holds B in an external cam. Sits above the 3D world and rain but
      below all HUD chrome (z-index:2) so the gauges and minimap stay readable
@@ -286,6 +293,7 @@
 <body>
 <canvas id="c"></canvas>
 <canvas id="rainOverlay"></canvas>
+<canvas id="birdSplat"></canvas>
 <div id="bino"></div>
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
@@ -1902,7 +1910,177 @@ function updateBirds(dt){
       const flap = Math.sin(tNow * BIRD_FLAP_HZ * Math.PI * 2 + b.phaseFlap) * 0.55;
       b.mesh.userData.wingL.rotation.z = -flap;
       b.mesh.userData.wingR.rotation.z =  flap;
+      // Bird-strike collision: cheap squared-distance check against the plane.
+      // Gated by birdStrikeAllowed() so we never trigger during intro / photo /
+      // pause / replay / crashed / on-ground states, and by BIRD_STRIKE_COOLDOWN
+      // so a single fly-through doesn't fire five strikes back-to-back.
+      if (birdStrikeAllowed()){
+        const dxh = b.mesh.position.x - plane.position.x;
+        const dyh = b.mesh.position.y - plane.position.y;
+        const dzh = b.mesh.position.z - plane.position.z;
+        const d2 = dxh*dxh + dyh*dyh + dzh*dzh;
+        if (d2 < BIRD_STRIKE_R2) triggerBirdStrike();
+      }
     }
+  }
+}
+
+// ====== BIRD STRIKES ======
+// Turns the existing flocks from pure scenery into actual risk: fly through a
+// bird and you eat a small damage hit, hear a wet thud, get an ATC call, and
+// (in cockpit cam) see a blood smear on the windshield that fades over 4s.
+// Collision is a single squared-distance test inside updateBirds — no per-frame
+// allocations, no broad-phase needed because the bird positions are already
+// being updated in that same loop.
+const BIRD_STRIKE_RADIUS = 3.5;             // m — generous so wing-tip near-misses still count
+const BIRD_STRIKE_R2 = BIRD_STRIKE_RADIUS * BIRD_STRIKE_RADIUS;
+const BIRD_STRIKE_COOLDOWN_MS = 1500;       // one strike at a time, even through a flock
+const BIRD_STRIKE_DAMAGE = 0.08;            // ~8% airframe hit per strike
+const BIRD_SPLAT_DURATION_MS = 4000;        // smear fades fully over 4 s
+let lastBirdStrikeMs = -Infinity;
+let birdSplatT = 0;                         // 1.0 right after a strike, decays to 0
+const birdSplats = [];                      // active smears: {x, y, r, a, rot}
+function birdStrikeAllowed(){
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
+  if (state.crashed || state.onGround) return false;
+  if (performance.now() - lastBirdStrikeMs < BIRD_STRIKE_COOLDOWN_MS) return false;
+  return true;
+}
+function triggerBirdStrike(){
+  lastBirdStrikeMs = performance.now();
+  // Damage hit — same accumulator the hard-landing and over-G paths use.
+  state.damage = Math.min(1, state.damage + BIRD_STRIKE_DAMAGE);
+  // Audio + ATC + status banner so the strike is unmissable across all cams.
+  playBirdThud();
+  if (typeof pushATC === 'function') pushATC('Bird strike, bird strike.', { tag:'PILOT', now:true });
+  showStatus('BIRD STRIKE', '+' + Math.round(BIRD_STRIKE_DAMAGE * 100) + '% damage', 'bad');
+  // Seed 3-6 splatter blobs at randomized positions across the windshield —
+  // biased toward upper-center where a bird would actually hit on a 3° approach.
+  const w = innerWidth, h = innerHeight;
+  const n = 3 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < n; i++){
+    birdSplats.push({
+      x: w * (0.32 + Math.random() * 0.36),
+      y: h * (0.18 + Math.random() * 0.34),
+      r: 22 + Math.random() * 46,
+      a: 0.55 + Math.random() * 0.35,
+      rot: Math.random() * Math.PI * 2
+    });
+  }
+  birdSplatT = 1.0;
+}
+// Wet-thud SFX: low sine thump layered with a short low-passed noise burst.
+// Re-uses the WebAudio context built by initStallAudio so we don't pile up
+// hardware nodes. Volume tracks settings.volume like the other one-shots.
+function playBirdThud(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.5 * settings.volume;
+  if (vol <= 0) return;
+  // Sine thump — 140Hz drops to 70Hz over ~160ms.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(140, t0);
+  osc.frequency.exponentialRampToValueAtTime(70, t0 + 0.16);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.24);
+  // Wet, splattery noise burst layered on top.
+  const dur = 0.18;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * (1 - i/data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 420;
+  lp.Q.value = 0.7;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(vol * 0.8, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+}
+// Windshield splatter canvas — separate from #rainOverlay so the two effects
+// can layer freely (e.g. flying through birds in the rain). Only visible in
+// cockpit cam; updateBirdSplat both fades the smears and toggles the show
+// class each frame so cycling cams behaves naturally.
+const birdSplatCanvas = document.getElementById('birdSplat');
+const birdSplatCtx = birdSplatCanvas && birdSplatCanvas.getContext('2d');
+function sizeBirdSplatCanvas(){
+  if (!birdSplatCanvas) return;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio, 2);
+  birdSplatCanvas.width = Math.max(1, Math.floor(w * dpr));
+  birdSplatCanvas.height = Math.max(1, Math.floor(h * dpr));
+  birdSplatCanvas.style.width = w + 'px';
+  birdSplatCanvas.style.height = h + 'px';
+  if (birdSplatCtx) birdSplatCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+sizeBirdSplatCanvas();
+function updateBirdSplat(dt){
+  if (!birdSplatCanvas || !birdSplatCtx) return;
+  // Visible only in cockpit cam, never in photo mode (those are the rules
+  // every other windshield overlay follows).
+  const cockpit = state.cam === 1 && !state.photoMode;
+  if (!cockpit || birdSplatT <= 0 || birdSplats.length === 0){
+    birdSplatCanvas.classList.remove('show');
+    if (birdSplatT > 0 && (state.paused || state.replayActive)){
+      // Hold the fade timer during pause/replay so it doesn't all drain in 1 frame on resume.
+      return;
+    }
+    if (birdSplatT > 0){
+      birdSplatT = Math.max(0, birdSplatT - (dt * 1000) / BIRD_SPLAT_DURATION_MS);
+      if (birdSplatT <= 0) birdSplats.length = 0;
+    }
+    return;
+  }
+  birdSplatCanvas.classList.add('show');
+  // Tick the fade.
+  birdSplatT = Math.max(0, birdSplatT - (dt * 1000) / BIRD_SPLAT_DURATION_MS);
+  if (birdSplatT <= 0){ birdSplats.length = 0; birdSplatCanvas.classList.remove('show'); birdSplatCtx.clearRect(0, 0, innerWidth, innerHeight); return; }
+  const w = innerWidth, h = innerHeight;
+  birdSplatCtx.clearRect(0, 0, w, h);
+  // Each smear: irregular blob built from a handful of overlapping radial
+  // gradients, with a couple of streak drips trailing downward to sell the
+  // "wet impact then slides down the glass" look.
+  for (const s of birdSplats){
+    const alpha = s.a * birdSplatT;
+    if (alpha <= 0.001) continue;
+    birdSplatCtx.save();
+    birdSplatCtx.translate(s.x, s.y + (1 - birdSplatT) * 30);   // slow drip downward as it fades
+    birdSplatCtx.rotate(s.rot);
+    // Main blob — dark red core, lighter edge.
+        const grad = birdSplatCtx.createRadialGradient(0, 0, 0, 0, 0, s.r);
+        grad.addColorStop(0,   'rgba(150, 14, 14, ' + alpha.toFixed(3) + ')');
+        grad.addColorStop(0.5, 'rgba(120, 18, 22, ' + (alpha * 0.7).toFixed(3) + ')');
+        grad.addColorStop(1,   'rgba(80, 10, 12, 0)');
+    birdSplatCtx.fillStyle = grad;
+    birdSplatCtx.beginPath();
+    birdSplatCtx.arc(0, 0, s.r, 0, Math.PI * 2);
+    birdSplatCtx.fill();
+    // A couple of streak drips trailing downward (in unrotated screen space).
+    birdSplatCtx.rotate(-s.rot);
+    birdSplatCtx.fillStyle = 'rgba(110, 16, 18, ' + (alpha * 0.55).toFixed(3) + ')';
+    for (let k = 0; k < 3; k++){
+      const off = (k - 1) * s.r * 0.35;
+      const dripLen = s.r * (0.4 + ((k * 13 + (s.r|0)) % 7) * 0.07) * (1.0 + (1 - birdSplatT) * 0.6);
+      birdSplatCtx.beginPath();
+      birdSplatCtx.moveTo(off, 0);
+      birdSplatCtx.quadraticCurveTo(off + s.r * 0.1, dripLen * 0.5, off, dripLen);
+      birdSplatCtx.lineTo(off + s.r * 0.18, dripLen);
+      birdSplatCtx.quadraticCurveTo(off + s.r * 0.28, dripLen * 0.5, off + s.r * 0.18, 0);
+      birdSplatCtx.closePath();
+      birdSplatCtx.fill();
+    }
+    birdSplatCtx.restore();
   }
 }
 
@@ -5597,6 +5775,7 @@ function loop(now){
     tickATC(now);
   }
   updateRainOverlay(dt);
+  updateBirdSplat(dt);
   updateBinoculars(dt);
   renderer.render(scene, camera);
 }
@@ -5606,6 +5785,7 @@ addEventListener('resize', ()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   sizeRainCanvas();
+  sizeBirdSplatCanvas();
 });
 
 // Click anywhere on the replay banner to dismiss it.
@@ -5625,7 +5805,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','birdSplat','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
