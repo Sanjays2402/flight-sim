@@ -21,6 +21,8 @@
   #hud .lbl { color:#6aa; }
   #hud .val { color:#fff; font-weight:600; }
   #hud .warn { color:#ff5252; font-weight:700; animation:blink 0.6s steps(2) infinite; }
+  #hud .warn-amber { color:#ffb020; font-weight:700; animation:blink 0.55s steps(2) infinite; }
+  #hud .warn-red   { color:#ff3030; font-weight:800; animation:blink 0.32s steps(2) infinite; }
   #compass { position:fixed; top:12px; left:50%; transform:translateX(-50%); width:360px; height:42px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #compass canvas { display:block; width:100%; height:100%; }
   #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
@@ -190,6 +192,7 @@
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
+  <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
@@ -2884,6 +2887,26 @@ function step(dt){
   fuelEl.style.color = fuelPct <= 10 ? '#ff5252' : (fuelPct <= 25 ? '#ffd166' : '#7ee787');
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
+
+  // Landing-gear stress indicator: when low + descending fast, warn the pilot
+  // to flare. Amber once sink rate would start adding damage on touchdown
+  // (>2.5 m/s), red once damage is essentially guaranteed (>5 m/s). Only
+  // active when airborne and below ~80 m, so it acts as a flare cue, not a
+  // cruise nag. Engine-out / gear-up cases already have their own warnings.
+  const gsEl = document.getElementById('gearStress');
+  const sinkNow = -vs; // m/s descending (positive when going down)
+  if (!state.crashed && !state.onGround && altM < 80 && sinkNow > 2.5){
+    if (sinkNow > 5){
+      gsEl.textContent = '⚠ GEAR STRESS — FLARE!';
+      gsEl.className = 'warn-red';
+    } else {
+      gsEl.textContent = '⚠ FLARE';
+      gsEl.className = 'warn-amber';
+    }
+    gsEl.style.display = 'block';
+  } else {
+    gsEl.style.display = 'none';
+  }
 
   // Autopilot HUD row: hidden when off. When on, shows the locked altitude
   // (meters above ground reference) and locked heading (degrees, 000–359).
