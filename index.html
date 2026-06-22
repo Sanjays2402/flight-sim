@@ -141,6 +141,19 @@
   #stats button.danger { color:#ff8a8a; border-color:#5a2a2a; }
   #stats button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
   #stats button.danger:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
+  /* Photo mode: press P to freeze the world, free-orbit the camera around the
+     plane, and save a screenshot. The overlay is a small bottom-center pill
+     so it stays out of the actual photo; we also hide it for one frame around
+     the canvas download so the saved PNG is HUD-free. */
+  #photo { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); padding:8px 16px; font-size:12px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #7ee787; border-radius:8px; backdrop-filter:blur(8px); display:none; z-index:9; text-align:center; user-select:none; -webkit-user-select:none; }
+  #photo.show { display:block; }
+  #photo .ttl { color:#7ee787; font-weight:800; letter-spacing:2px; font-size:11px; margin-bottom:3px; }
+  #photo .hint { font-size:11px; color:#9bb; line-height:1.5; }
+  #photo kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; margin:0 2px; border:1px solid #2a4a6a; }
+  #photo .btn { display:inline-block; margin-left:8px; padding:3px 10px; background:rgba(40,90,55,.85); border:1px solid #7ee787; border-radius:5px; color:#7ee787; font-weight:700; cursor:pointer; font-family:inherit; font-size:11px; letter-spacing:1px; }
+  #photo .btn:hover { background:rgba(60,120,75,.95); }
+  body.photo-mode { cursor:grab; }
+  body.photo-mode.dragging { cursor:grabbing; }
 </style>
 </head>
 <body>
@@ -178,7 +191,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>,</kbd> settings · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -213,6 +226,10 @@
   </div>
 </div>
 <div id="replay"><span class="dot"></span>REPLAY · LAST 30s<small>click or press <b>R</b> to skip</small></div>
+<div id="photo">
+  <div class="ttl">📸 PHOTO MODE</div>
+  <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save PNG · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span></div>
+</div>
 <div id="mctrl">
   <div id="mstick"><div class="knob" id="mknob"></div></div>
   <div id="mthr"><div class="lbl">THR</div><div class="fill" id="mthrfill"></div><div class="pct" id="mthrpct">0%</div></div>
@@ -288,7 +305,7 @@
 import * as THREE from 'three';
 
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1693,7 +1710,15 @@ const state = {
   replayT: 0,           // seconds into the replay
   replayHead: 0,        // ring write head (live mode)
   replayCount: 0,       // how many snapshots are populated (capped at REPLAY_MAX)
-  replayLastSampleT: 0  // timestamp of last buffered snapshot (ms)
+  replayLastSampleT: 0,  // timestamp of last buffered snapshot (ms)
+  // Photo mode: P freezes the sim, hides every HUD element, and gives the
+  // player a free-orbit camera around the plane. Mouse drag rotates around
+  // the airframe; wheel zooms in/out. S saves a PNG screenshot of whatever's
+  // on screen right now (HUD hidden, so the file is clean). P or Esc exits.
+  photoMode: false,
+  photoYaw: 0,
+  photoPitch: 0.25,
+  photoDist: 22
 };
 
 // Replay ring buffer. We sample at REPLAY_HZ for REPLAY_SECONDS of history.
@@ -1839,6 +1864,14 @@ addEventListener('keydown', e=>{
       const hdgDeg = ((state.ap.hdgRad * 180/Math.PI) % 360 + 360) % 360;
       showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(Math.round(hdgDeg)).padStart(3,'0'), 'good');
     }
+  }
+  if (e.code==='KeyP'){
+    // Photo mode toggle. Skip while the intro modal is up (no plane in the
+    // world yet) or during replay (the replay banner is already playing back
+    // a fixed segment). Defined globally; the setup function below wires the
+    // overlay, drag-to-orbit, wheel-zoom, and save behavior.
+    if (state.introOpen || state.replayActive) return;
+    setPhotoMode(!state.photoMode);
   }
 });
 
@@ -3159,7 +3192,12 @@ function loop(now){
   const dt = Math.min(0.05, (now - lastT)/1000);
   lastT = now;
   if (!state.introOpen){
-    if (state.replayActive){
+    if (state.photoMode){
+      // Photo mode: physics frozen, free-orbit camera around the plane.
+      // Throttle/control input is ignored, the prop also holds position so
+      // the saved PNG isn't a motion-blurred disc.
+      updatePhotoCamera(dt);
+    } else if (state.replayActive){
       // Replay mode: stop simulating, just play back the buffer.
       updateReplay(dt);
     } else {
@@ -3185,6 +3223,166 @@ addEventListener('resize', ()=>{
 
 // Click anywhere on the replay banner to dismiss it.
 replayEl.addEventListener('click', () => stopReplay());
+
+// ====== PHOTO MODE ======
+// Press P to freeze the world, hide every HUD element, and give the player a
+// free-orbit camera around the plane plus a one-tap PNG save. Mouse drag or
+// touch drag rotates around the airframe; wheel zooms in/out. S saves a
+// screenshot of whatever's currently rendered (with the photo overlay also
+// hidden for that one frame so the file is fully clean). P or Esc exits and
+// restores HUD visibility. While photo mode is on, the main loop skips
+// step() entirely — the world literally pauses where it is.
+const photoEl = document.getElementById('photo');
+// Every HUD-ish overlay we want to hide while taking a photo. Each entry is
+// the element id; visibility is captured on enter so we restore to whatever
+// each element was before (e.g. #mission is normally hidden in free flight,
+// #replay only shows after a landing, etc.). The intro modal isn't in the
+// list because photo mode is gated to post-intro anyway.
+const PHOTO_HIDE_IDS = ['hud','compass','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status'];
+let photoPrevDisplay = {};
+let photoDragId = -1;
+let photoDragLastX = 0, photoDragLastY = 0;
+function setHudHidden(hidden){
+  // Drive the listed overlays into either hidden or restored state. Capture
+  // each element's prior inline display on hide so we can put it back exactly.
+  if (hidden){
+    photoPrevDisplay = {};
+    for (const id of PHOTO_HIDE_IDS){
+      const el = document.getElementById(id);
+      if (!el) continue;
+      photoPrevDisplay[id] = el.style.display;
+      el.style.display = 'none';
+    }
+  } else {
+    for (const id of PHOTO_HIDE_IDS){
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.style.display = (id in photoPrevDisplay) ? photoPrevDisplay[id] : '';
+    }
+    photoPrevDisplay = {};
+  }
+}
+function setPhotoMode(on){
+  if (on === state.photoMode) return;
+  state.photoMode = on;
+  if (on){
+    // Seed the orbit angles from whatever direction the chase camera was
+    // looking from so the entry feels continuous — no jarring snap to a
+    // fixed angle. Distance starts at the chase-cam standoff so we open at
+    // a comfortable framing.
+    const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+    state.photoYaw = Math.atan2(fwdN.x, fwdN.z) + Math.PI;
+    state.photoPitch = 0.22;
+    state.photoDist = 22;
+    setHudHidden(true);
+    if (photoEl) photoEl.classList.add('show');
+    document.body.classList.add('photo-mode');
+  } else {
+    setHudHidden(false);
+    if (photoEl) photoEl.classList.remove('show');
+    document.body.classList.remove('photo-mode');
+    document.body.classList.remove('dragging');
+    photoDragId = -1;
+  }
+}
+function updatePhotoCamera(/*dt*/){
+  // Orbit around the plane at distance photoDist with pitch+yaw controlled
+  // by the player. Clamp pitch so we don't flip upside down through the
+  // poles, and clamp distance so we can't zoom inside the airframe or get
+  // lost out past the fog.
+  state.photoPitch = Math.max(-1.3, Math.min(1.3, state.photoPitch));
+  state.photoDist = Math.max(6, Math.min(220, state.photoDist));
+  const cy = Math.cos(state.photoYaw), sy = Math.sin(state.photoYaw);
+  const cp = Math.cos(state.photoPitch), sp = Math.sin(state.photoPitch);
+  const r = state.photoDist;
+  camera.position.set(
+    plane.position.x + r * cp * sy,
+    plane.position.y + r * sp,
+    plane.position.z + r * cp * cy
+  );
+  camera.lookAt(plane.position);
+}
+function savePhoto(){
+  // Render one extra frame with the photo overlay also hidden so the saved
+  // PNG is fully HUD-free, then call canvas.toBlob. preserveDrawingBuffer is
+  // set on the renderer so the just-rendered framebuffer is still readable.
+  const overlayWasShown = photoEl && photoEl.classList.contains('show');
+  if (overlayWasShown) photoEl.classList.remove('show');
+  // Render immediately so the frame matches the hidden-overlay state.
+  renderer.render(scene, camera);
+  const finish = () => { if (overlayWasShown) photoEl.classList.add('show'); };
+  try {
+    canvas.toBlob(blob => {
+      finish();
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = 'flight-sim-' + ts + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke after a tick so the browser has time to honor the download.
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }, 'image/png');
+  } catch (e){
+    finish();
+  }
+}
+// Mouse + touch drag to orbit. Pointer Events cover both, capturing the
+// pointer on the canvas so drags continue even if the cursor wanders off.
+canvas.addEventListener('pointerdown', e => {
+  if (!state.photoMode) return;
+  if (photoDragId !== -1) return;
+  photoDragId = e.pointerId;
+  photoDragLastX = e.clientX;
+  photoDragLastY = e.clientY;
+  try { canvas.setPointerCapture(e.pointerId); } catch(_){}
+  document.body.classList.add('dragging');
+  e.preventDefault();
+});
+canvas.addEventListener('pointermove', e => {
+  if (!state.photoMode) return;
+  if (e.pointerId !== photoDragId) return;
+  const dx = e.clientX - photoDragLastX;
+  const dy = e.clientY - photoDragLastY;
+  photoDragLastX = e.clientX;
+  photoDragLastY = e.clientY;
+  // 0.005 rad/px keeps the orbit feeling like a touchpad/trackball without
+  // requiring trips across the whole screen.
+  state.photoYaw -= dx * 0.005;
+  state.photoPitch += dy * 0.005;
+  e.preventDefault();
+});
+for (const evt of ['pointerup','pointercancel','pointerleave']){
+  canvas.addEventListener(evt, e => {
+    if (e.pointerId !== photoDragId) return;
+    photoDragId = -1;
+    document.body.classList.remove('dragging');
+  });
+}
+canvas.addEventListener('wheel', e => {
+  if (!state.photoMode) return;
+  // Multiplicative zoom: each wheel notch scales distance by ~10% so far-out
+  // shots and close-ups both feel proportionate.
+  const k = Math.exp(e.deltaY * 0.0015);
+  state.photoDist *= k;
+  e.preventDefault();
+}, { passive:false });
+// Save button on the overlay.
+const photoSaveBtn = document.getElementById('photoSave');
+if (photoSaveBtn){
+  photoSaveBtn.addEventListener('click', e => { e.stopPropagation(); savePhoto(); });
+}
+// S = save (only when in photo mode — S is throttle otherwise). Esc also exits.
+addEventListener('keydown', e => {
+  if (!state.photoMode) return;
+  if (e.repeat) return;
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  if (e.code === 'KeyS'){ e.preventDefault(); savePhoto(); }
+  else if (e.code === 'Escape'){ e.preventDefault(); setPhotoMode(false); }
+});
 
 // ====== PILOT STATS UI ======
 // Read-only modal opened from the main menu's PILOT STATS button. Reflects the
