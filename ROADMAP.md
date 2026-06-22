@@ -43,6 +43,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Cockpit instrument panel — visible airspeed, altimeter, and attitude gauges rendered inside the cockpit view (only shows in cockpit cam), giving the cockpit cam an actual cockpit feel.
+- [ ] Birds — small flocks of birds drift around low-altitude near airports, gentle flap animation, harmless but adds life to the scene.
+- [ ] Rain weather toggle — settings option for rain, adds streaks across the screen and dims the sky, persisted to localStorage.
+- [ ] Landing gear stress indicator — HUD light flashes amber when sink rate is high enough to risk damage on touchdown, red when guaranteed damage, gives pilots a flare cue.
+- [ ] Achievement popups — quick toast in the corner when player hits milestones (first landing, 10 landings, perfect landing score, ring chase under 60s, etc.), stored in localStorage so each only fires once.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
