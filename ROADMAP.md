@@ -28,17 +28,17 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Replay last 30s at the end of each landing — rolling 30s buffer of plane pose plays back after touchdown/crash, banner shows REPLAY, click or press R to skip.
 - [x] Mini-map in HUD corner — top-down with airports, plane, heading line.
 - [x] Damage model — over-G or hard-landing gives damage %, affects handling.
+- [x] Engine-out glide — fuel burns with throttle, X toggles engine kill, prop windmills on deadstick approaches.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
-2. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
-3. **AI traffic** — one other plane doing circuits at the home airport.
-4. **Mobile touch controls** — virtual stick on left, throttle slider on right.
-5. **Settings panel** — sensitivity, FOV, audio volume.
+1. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
+2. **AI traffic** — one other plane doing circuits at the home airport.
+3. **Mobile touch controls** — virtual stick on left, throttle slider on right.
+4. **Settings panel** — sensitivity, FOV, audio volume.
+5. **Liveries / paint picker** — 3–5 color schemes for the plane.
 6. **Liveries / paint picker** — 3–5 color schemes for the plane.
-7. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

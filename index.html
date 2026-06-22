@@ -89,7 +89,9 @@
   <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val" id="dmg">0%</span></div>
+  <div class="row"><span class="lbl">FUEL</span><span class="val" id="fuel">100%</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
+  <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
@@ -107,7 +109,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>T</kbd> +1h · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -136,6 +138,7 @@
       <span>Flaps cycle</span><span><kbd>F</kbd></span>
       <span>Brakes (ground)</span><span><kbd>B</kbd></span>
       <span>Camera cycle</span><span><kbd>C</kbd></span>
+      <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
@@ -1104,6 +1107,10 @@ const state = {
   // thrust, and (above 0.5) adds a slow asymmetric trim that makes the plane
   // want to roll. 1.0 = airframe wrecked, treat as crashed.
   damage: 0,
+  // Fuel 0..1. Burns proportional to throttle. When it hits zero or pilot
+  // kills the engine with X, thrust stops and the prop windmills — deadstick.
+  fuel: 1,
+  engineOut: false,
   msgT: 0,
   cam: 0,
   flyByPos: new THREE.Vector3(),
@@ -1243,6 +1250,20 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyF') state.flaps = (state.flaps + 1) % 3;
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
+  if (e.code==='KeyX'){
+    // Toggle the engine. Lets the pilot deliberately practice deadstick approaches,
+    // and also restart the engine on the ground if there's fuel left.
+    if (state.engineOut){
+      if (state.fuel > 0.001){
+        state.engineOut = false;
+        showStatus('ENGINE RESTARTED', null, 'good');
+      }
+    } else {
+      state.engineOut = true;
+      state.throttle = 0;
+      showStatus('ENGINE OUT', 'Deadstick — glide her in', 'hard');
+    }
+  }
   if (e.code==='KeyR'){
     // R is dual-purpose: while a replay is on screen it just dismisses it;
     // otherwise it does the normal reset-to-runway behavior.
@@ -1274,6 +1295,8 @@ function resetPlane(){
   state.crashed = false;
   state.landed = false;
   state.damage = 0;
+  state.fuel = 1;
+  state.engineOut = false;
   state.stall = 0;
   state.vortex = 0;
   state.msgT = 0;
@@ -1422,8 +1445,13 @@ function landingProj(px, pz){
 
 function step(dt){
   if (!state.crashed){
-    if (keys['KeyW']) state.throttle = Math.min(1, state.throttle + 0.35*dt);
-    if (keys['KeyS']) state.throttle = Math.max(0, state.throttle - 0.5*dt);
+    if (state.engineOut){
+      // Engine out — no throttle response; bleed any commanded throttle to zero.
+      state.throttle = Math.max(0, state.throttle - 1.0*dt);
+    } else {
+      if (keys['KeyW']) state.throttle = Math.min(1, state.throttle + 0.35*dt);
+      if (keys['KeyS']) state.throttle = Math.max(0, state.throttle - 0.5*dt);
+    }
   } else {
     state.throttle = Math.max(0, state.throttle - 1.0*dt);
   }
@@ -1487,7 +1515,21 @@ function step(dt){
   // Damage softly degrades thrust (engine bleed) and aero (drag goes up).
   // dmg 0 = no effect; dmg 1 = ~50% thrust, +25% drag, ~60% control authority.
   const dmg = state.damage;
-  const thrustMag = state.throttle * MAX_THRUST * (1 - 0.5 * dmg);
+  // Burn fuel proportional to throttle. Tank size tuned so cruise-throttle is ~6-7 min
+  // — long enough to plan a hop, short enough to make fuel a real consideration.
+  const FUEL_BURN_RATE = 1 / (6 * 60); // 6 minutes of full throttle empties the tank
+  if (!state.engineOut && state.fuel > 0){
+    state.fuel = Math.max(0, state.fuel - state.throttle * FUEL_BURN_RATE * dt);
+    if (state.fuel <= 0 && !state.engineOut){
+      state.engineOut = true;
+      state.throttle = 0;
+      showStatus('FUEL EXHAUSTED', 'Deadstick — glide her in', 'hard');
+    }
+  }
+  // Engine produces no thrust when it's been killed or fuel is dry. Prop windmills
+  // visually slow in the animate-parts block below.
+  const engineLive = !state.engineOut && state.fuel > 0;
+  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
@@ -1677,7 +1719,13 @@ function step(dt){
   updateContrails(dt, contrailStrength);
 
   // Animate parts
-  propSpin += (state.throttle * 60 + 4) * dt;
+  // Engine live: prop spins fast with throttle. Engine out: it just windmills,
+  // speed scaled by airspeed so it ticks over at cruise and crawls at low speed.
+  if (engineLive){
+    propSpin += (state.throttle * 60 + 4) * dt;
+  } else {
+    propSpin += Math.min(8, speed * 0.06) * dt;
+  }
   propGroup.rotation.z = propSpin;
   flapL.rotation.x = flapRad;
   flapR.rotation.x = flapRad;
@@ -1734,6 +1782,13 @@ function step(dt){
   const dmgEl = document.getElementById('dmg');
   dmgEl.textContent = dmgPct + '%';
   dmgEl.style.color = dmgPct >= 70 ? '#ff5252' : (dmgPct >= 30 ? '#ffd166' : '#7ee787');
+
+  // Fuel readout: same color ramp — green when topped up, amber when low, red near dry.
+  const fuelPct = Math.round(state.fuel * 100);
+  const fuelEl = document.getElementById('fuel');
+  fuelEl.textContent = fuelPct + '%';
+  fuelEl.style.color = fuelPct <= 10 ? '#ff5252' : (fuelPct <= 25 ? '#ffd166' : '#7ee787');
+  document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
 
   // Wind HUD: direction wind is coming FROM (aviation convention) + speed in knots.
   // Our wind vector points the way wind is going TO; flip 180° for the readout.
