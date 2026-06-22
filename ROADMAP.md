@@ -119,10 +119,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Wind shear on short final — randomly (15% chance per approach) below 60m AGL within 1 km of a runway threshold, inject a brief 4-6 second wind-direction flip + speed surge (one of two patterns: a ~180° flip with a +4-8 m/s bump for a sudden headwind drop / tailwind kick, or a 60° crosswind swing with a +6 m/s surge). HUD flashes a yellow `⚠ WIND SHEAR` pill in the WIND row and ATC fires a one-shot "Wind shear on final, RWY <DD>" call using the existing `runwayDesignator()` helper so the named runway matches the threshold the plane is actually shooting for. Triggered latches per approach and re-arms once AGL climbs back above 200m (mirrors the radalt callout pattern). Pairs naturally with the existing crosswind crab indicator so the magenta arrow goes wild and the pilot has to react.
 
+- [x] Airport restaurant / "100-dollar hamburger" mini-objective — one of the three ground airports is designated OPEN FOR LUNCH each session with a pulsing 🍔 next to its mini-map label (and a tiny 🍔 glyph next to its rim tick when off-map). Full-stop a landing there (any mode, any runway) to score a one-shot "🍔 100-DOLLAR HAMBURGER!" toast + bump a permanent `BURGERS EATEN` counter in pilot stats. Designation rotates to a different field after each eat so there's always a fresh destination. Piggybacks the existing rollout-stop latch so no new physics, no new UI plumbing — just a soft goal hook for free-flight pilots and the joke name every real pilot will instantly recognize.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Airport restaurant / "100-dollar hamburger" mini-objective — randomly designate one of the 4 airports per session as "OPEN FOR LUNCH" with a small 🍔 icon on its mini-map dot. Land + full-stop there to earn a one-shot "🍔 100-DOLLAR HAMBURGER!" achievement toast + a permanent counter in pilot stats ("Burgers eaten: N"). Designation rotates each time you eat one so there's always a fresh destination. Gives free-flight a soft goal hook without inventing a whole campaign, and the name is the joke pilots will instantly recognize.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

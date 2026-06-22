@@ -541,6 +541,7 @@
     <div class="row"><span class="name">LOOPS</span><span class="val" id="stLoops">0</span></div>
     <div class="row"><span class="name">AILERON ROLLS</span><span class="val" id="stRolls">0</span></div>
     <div class="row"><span class="name">FORMATIONS</span><span class="val" id="stFormations">0</span></div>
+    <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
     <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
     <div class="actions">
       <button id="stReset" class="danger" type="button">RESET</button>
@@ -691,7 +692,8 @@ const STATS_DEFAULT = {
   totalAirSec: 0,          // cumulative seconds in the air
   loops: 0,                // 360° pitch loops completed (acrobat tracker)
   rolls: 0,                // 360° aileron rolls completed (acrobat tracker)
-  formations: 0            // formation-flight sessions with AI traffic (5s+ in close parallel)
+  formations: 0,           // formation-flight sessions with AI traffic (5s+ in close parallel)
+  burgers: 0               // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
 };
 const pilotStats = Object.assign({}, STATS_DEFAULT);
 try {
@@ -4625,8 +4627,28 @@ const state = {
   // diving straight at the strip. Tracked per-airport-id so each field gets
   // its own one-shot toast; the Set survives mission resets but resets on
   // page reload (no localStorage — this is a teaching cue, not a stat).
+  // Airport restaurant / "100-dollar hamburger" mini-objective. One of the
+  // ground airports is designated "OPEN FOR LUNCH" at session start; a 🍔
+  // marker shows next to it on the mini-map. Land + full-stop there to score
+  // a one-shot toast + bump pilotStats.burgers, then the designation rotates
+  // to a different airport so there's always a fresh destination. Carrier is
+  // never picked (you fly to a deck, not a diner). Survives the session in
+  // memory; not persisted to localStorage since it should rotate each run.
+  burgerAp: null,
   patternHinted: Object.create(null)
 };
+
+// Pick a fresh "OPEN FOR LUNCH" airport id from the AIRPORTS list, optionally
+// excluding the current one so the burger destination actually rotates after
+// each eat. Returns null if no eligible field exists (shouldn't happen — we
+// ship with 3 airports). Carrier is intentionally excluded (it's not in
+// AIRPORTS to begin with, but be explicit if that changes later).
+function pickBurgerAirport(excludeId){
+  const pool = AIRPORTS.filter(a => a && a.id && a.id !== excludeId);
+  if (!pool.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)].id;
+}
+state.burgerAp = pickBurgerAirport(null);
 (function setupAirshowSmokeBtn(){
   // Wire the on-screen `~` HUD button to the same toggle the keyboard uses.
   // Click works on desktop; touch devices also trigger click on tap. The
@@ -5242,6 +5264,24 @@ function updateLandCardRollout(){
           : null;
         if (proj && proj.ri && proj.onRunway){
           pushATC(proj.ri.ap.id + ', cleared to taxi, welcome in.', { tag:'TWR' });
+          // 100-dollar hamburger: did we full-stop at the open-for-lunch
+          // airport? Toast + bump stats + rotate the designation so the next
+          // sortie has a fresh destination. Carrier landings can't trigger
+          // this since the carrier id isn't in AIRPORTS.
+          if (state.burgerAp && proj.ri.ap.id === state.burgerAp){
+            const apName = proj.ri.ap.name || proj.ri.ap.id;
+            pilotStats.burgers = (pilotStats.burgers || 0) + 1;
+            savePilotStats();
+            if (typeof showToast === 'function'){
+              showToast('\u{1F354}', '100-DOLLAR HAMBURGER!',
+                'Full-stop at ' + apName + '. Worth every drop of avgas.');
+            }
+            // Rotate to a different airport so there's always somewhere new
+            // to fly for lunch. Falls back to keeping the current id if the
+            // pool is empty (single-airport configs).
+            const next = pickBurgerAirport(state.burgerAp);
+            if (next) state.burgerAp = next;
+          }
         }
       }
     } catch(e){ /* arrival call is flavor — never block the land card */ }
@@ -8177,6 +8217,7 @@ function drawMinimap(hdgDeg){
     const dz = a.z - plane.position.z;
     const px = cx + dx * scale;
     const py = cy + dz * scale;
+    const isBurger = (state.burgerAp && a.id === state.burgerAp);
     if (px < 4 || px > W-4 || py < 4 || py > H-4){
       // Off-map: draw a tick on the rim pointing at the airport.
       const ang = Math.atan2(dz, dx);
@@ -8186,6 +8227,16 @@ function drawMinimap(hdgDeg){
       minimapCtx.beginPath();
       minimapCtx.arc(ex, ey, 2.5, 0, Math.PI*2);
       minimapCtx.fill();
+      if (isBurger){
+        // Tiny burger glyph pinned just inside the rim so distant lunch
+        // destinations still read "there's a burger out there".
+        const bx = cx + Math.cos(ang) * (R - 14);
+        const by = cy + Math.sin(ang) * (R - 14);
+        minimapCtx.font = '10px ui-monospace, monospace';
+        minimapCtx.textAlign = 'center';
+        minimapCtx.textBaseline = 'middle';
+        minimapCtx.fillText('\u{1F354}', bx, by);
+      }
       continue;
     }
     // Runway line oriented by airport heading; length scaled from runway length.
@@ -8202,6 +8253,19 @@ function drawMinimap(hdgDeg){
     minimapCtx.textAlign = 'left';
     minimapCtx.textBaseline = 'top';
     minimapCtx.fillText(a.id, px + 5, py + 4);
+    if (isBurger){
+      // Small 🍔 glyph next to the airport id so the open-for-lunch field
+      // pops at a glance. Slight gentle pulse so it doesn't get lost against
+      // bright runway colors. Drawn after the label so it overlays cleanly.
+      const pulse = 0.75 + 0.25 * Math.sin(performance.now() * 0.006);
+      minimapCtx.save();
+      minimapCtx.globalAlpha = pulse;
+      minimapCtx.font = '12px ui-monospace, monospace';
+      minimapCtx.textAlign = 'left';
+      minimapCtx.textBaseline = 'middle';
+      minimapCtx.fillText('\u{1F354}', px + 6, py - 6);
+      minimapCtx.restore();
+    }
   }
   // Carrier deck: thin gray rectangle oriented to the deck heading so the
   // pilot can read distance/bearing to the trap target straight off the map.
@@ -9797,7 +9861,8 @@ addEventListener('keydown', e => {
     total:    document.getElementById('stTotalTime'),
     loops:    document.getElementById('stLoops'),
     rolls:    document.getElementById('stRolls'),
-    formations: document.getElementById('stFormations')
+    formations: document.getElementById('stFormations'),
+    burgers:  document.getElementById('stBurgers')
   };
   function refresh(){
     cells.flights.textContent  = pilotStats.totalFlights;
@@ -9813,6 +9878,7 @@ addEventListener('keydown', e => {
     if (cells.loops) cells.loops.textContent = pilotStats.loops || 0;
     if (cells.rolls) cells.rolls.textContent = pilotStats.rolls || 0;
     if (cells.formations) cells.formations.textContent = pilotStats.formations || 0;
+    if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
   }
   function openPanel(){ refresh(); panel.classList.add('show'); }
   function closePanel(){ panel.classList.remove('show'); }
