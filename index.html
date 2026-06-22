@@ -1084,6 +1084,93 @@ const MAIN_AP = AIRPORTS[0];
 // Prime time-of-day so the very first frame matches the starting hour (sky/sun/lights).
 applyTimeOfDay(9.0);
 
+// ====== TAXI GUIDANCE ARROWS ======
+// A row of yellow chevrons on the taxi strip alongside each runway, pointing
+// toward the takeoff threshold (local -z end). Only visible when the player
+// is on the ground and within ~700m of any airport so they don't pollute
+// the air view. A chase animation (rolling brightness) draws the eye toward
+// the threshold, like sequenced approach lights but for ground-side guidance.
+const taxiArrowGroups = []; // [{ ap, group, chevs:[Mesh,...] }]
+function makeTaxiArrows(a){
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev + 0.04, a.z);
+  grp.rotation.y = a.hdg;
+  grp.visible = false;
+  scene.add(grp);
+  // Triangle chevron pointing in -z (toward takeoff threshold). Flat on the
+  // ground (rotated -90° about X). Width spans the taxi strip, length is a
+  // short stub so the row reads as discrete arrows, not a continuous line.
+  const chevGeo = new THREE.BufferGeometry();
+  const cw = 4.0;     // half-width across the taxi strip
+  const cl = 6.0;     // length of the chevron from base to tip
+  chevGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    -cw, 0,  cl/2,    // back-left
+     cw, 0,  cl/2,    // back-right
+      0, 0, -cl/2     // tip (points toward -z = threshold)
+  ]), 3));
+  chevGeo.setIndex([0,2,1]);
+  chevGeo.computeVertexNormals();
+  // Lay chevrons on the +x side of the apron (right of the runway looking
+  // down-runway). Start a bit beyond the rollout end and march toward the
+  // takeoff threshold, stopping just short so we don't overlap the runway.
+  const stripX = a.w/2 + 9;       // mid of the 10m taxi strip outside runway edge
+  const startZ =  a.len/2 + 24;   // beyond the far end (rollout side)
+  const endZ   = -a.len/2 + 6;    // near the takeoff threshold
+  const span = startZ - endZ;
+  const count = Math.max(6, Math.min(14, Math.floor(span / 90)));
+  const chevs = [];
+  for (let i=0;i<count;i++){
+    const t = (i + 0.5) / count;
+    const z = startZ - t * span;
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffd166,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    const m = new THREE.Mesh(chevGeo, mat);
+    m.rotation.x = -Math.PI/2;
+    m.position.set(stripX, 0, z);
+    grp.add(m);
+    chevs.push(m);
+  }
+  taxiArrowGroups.push({ ap: a, group: grp, chevs });
+}
+for (const a of AIRPORTS) makeTaxiArrows(a);
+
+function updateTaxiArrows(dt){
+  // Cheap visibility gate: only on the ground and within range of an airport.
+  // Nearest-airport distance is recomputed every frame in step() but we want
+  // this to also work before that runs (e.g. during pause). Inline the check.
+  let near = null, nearD2 = Infinity;
+  for (const a of AIRPORTS){
+    const dx = plane.position.x - a.x, dz = plane.position.z - a.z;
+    const d2 = dx*dx + dz*dz;
+    if (d2 < nearD2){ nearD2 = d2; near = a; }
+  }
+  const showRange = 700; // m
+  const showAll = !!state.onGround && nearD2 < showRange*showRange;
+  // Phase advances even when hidden, so re-entering the airport zone doesn't
+  // jump to a stale frame. Cheap scalar, ~free.
+  taxiArrowPhase = (taxiArrowPhase + dt * 1.6) % 1;
+  for (const tg of taxiArrowGroups){
+    const isNear = (tg.ap === near) && showAll;
+    if (tg.group.visible !== isNear) tg.group.visible = isNear;
+    if (!isNear) continue;
+    // Rolling brightness: each chevron in the row gets a sin-wave pulse
+    // offset by its index, so the line reads as flowing toward the threshold.
+    const n = tg.chevs.length;
+    for (let i=0;i<n;i++){
+      const phase = (taxiArrowPhase + i / n) % 1;
+      // Bell-shaped pulse: peak around phase 0, falls off either side.
+      const pulse = Math.max(0, 1 - Math.abs(phase - 0.5) * 2);
+      tg.chevs[i].material.opacity = 0.35 + 0.55 * pulse;
+    }
+  }
+}
+let taxiArrowPhase = 0;
+
 // ====== PROCEDURAL CITIES (instanced boxes near each airport) ======
 // Boxy buildings clustered in a ring around every airport, so approaches have
 // visual interest. Taller blocks near the centre form a skyline; lower
@@ -3276,6 +3363,9 @@ function step(dt){
   // Birds drifting low over each airport — same idea, even simpler: no AI,
   // just orbit + flap. Cheap and adds life to approach views.
   updateBirds(dt);
+  // Taxi guidance chevrons — only visible on the ground near an airport,
+  // points new pilots toward the takeoff threshold.
+  updateTaxiArrows(dt);
 
   drawAttitude(plane.quaternion);
   drawCompass(hdg);
