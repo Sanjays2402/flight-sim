@@ -18,27 +18,27 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Stall warning + buffet — visible warning, audio beep, slight screen shake near stall AoA.
 - [x] Wingtip vortex trails when pulling Gs / near stall — short tapered ribbons.
 - [x] Touch-and-go scoring — each successful landing gives points based on sink rate + centerline + speed at touchdown.
+- [x] Free-flight mission picker — start menu with: Free Flight, Touch & Go Challenge, Airport Hop.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **Free-flight mission picker** — start menu with: Free Flight, Touch & Go Challenge, Airport Hop.
-2. **Airport hop mission** — fly to the next airport in a sequence, finish timer.
-3. **Procedural cities near airports** — boxy buildings for visual interest on approach.
-4. **Time of day cycle** — sun moves, sky color, lights on runways at night.
-5. **Weather: wind + crosswind on approach** — variable wind affects rudder.
-6. **Smoke / contrails behind plane** at high alt or when damaged.
-7. **External chase cam + cockpit cam toggle** (C key).
-8. **Replay last 30s** at the end of each landing.
-9. **Mini-map in HUD corner** — top-down with airports, plane, heading line.
-10. **Damage model** — over-G or hard-landing gives damage %, affects handling.
-11. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
-12. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
-13. **AI traffic** — one other plane doing circuits at the home airport.
-14. **Mobile touch controls** — virtual stick on left, throttle slider on right.
-15. **Settings panel** — sensitivity, FOV, audio volume.
+1. **Airport hop mission** — fly to the next airport in a sequence, finish timer.
+2. **Procedural cities near airports** — boxy buildings for visual interest on approach.
+3. **Time of day cycle** — sun moves, sky color, lights on runways at night.
+4. **Weather: wind + crosswind on approach** — variable wind affects rudder.
+5. **Smoke / contrails behind plane** at high alt or when damaged.
+6. **External chase cam + cockpit cam toggle** (C key).
+7. **Replay last 30s** at the end of each landing.
+8. **Mini-map in HUD corner** — top-down with airports, plane, heading line.
+9. **Damage model** — over-G or hard-landing gives damage %, affects handling.
+10. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
+11. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
+12. **AI traffic** — one other plane doing circuits at the home airport.
+13. **Mobile touch controls** — virtual stick on left, throttle slider on right.
+14. **Settings panel** — sensitivity, FOV, audio volume.
+15. **Liveries / paint picker** — 3–5 color schemes for the plane.
 16. **Liveries / paint picker** — 3–5 color schemes for the plane.
-17. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

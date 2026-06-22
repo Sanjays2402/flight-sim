@@ -49,6 +49,19 @@
   #intro .tip { font-size:12px; color:#9bb; line-height:1.6; }
   #intro .go { text-align:center; color:#ffd166; font-size:13px; margin-top:14px; animation:blink 1s steps(2) infinite; }
   #intro kbd { background:#1a2a3a; color:#cfe; padding:1px 6px; border-radius:3px; font-size:12px; border:1px solid #2a4a6a; }
+  #intro .missions { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-bottom:14px; }
+  #intro .mbtn { background:rgba(20,40,60,.7); border:1px solid #2a4a6a; border-radius:8px; padding:10px 8px; text-align:center; cursor:pointer; color:#cfe; transition:all .15s ease; }
+  #intro .mbtn:hover { background:rgba(40,80,110,.85); border-color:#7ee787; transform:translateY(-1px); }
+  #intro .mbtn.sel { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #intro .mbtn .mt { font-weight:700; font-size:13px; letter-spacing:1px; }
+  #intro .mbtn .md { font-size:10px; color:#9bb; margin-top:3px; line-height:1.3; }
+  #intro .mbtn.sel .md { color:#bfe; }
+  #mission { position:fixed; top:228px; right:12px; padding:6px 10px; font-size:11px; color:#9bb; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; min-width:140px; display:none; }
+  #mission .ttl { color:#ffd166; font-weight:700; letter-spacing:1px; font-size:10px; }
+  #mission .row { display:flex; justify-content:space-between; gap:14px; }
+  #mission .lbl { color:#6aa; }
+  #mission .val { color:#cfe; font-weight:600; }
+  #mission .tgt { color:#7ee787; }
 </style>
 </head>
 <body>
@@ -83,10 +96,20 @@
   <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>R</kbd> reset
 </div>
 <div id="status"></div>
+<div id="mission">
+  <div class="ttl" id="msTtl">MISSION</div>
+  <div class="row"><span class="lbl">Target</span><span class="val tgt" id="msTgt">—</span></div>
+  <div class="row"><span class="lbl" id="msLbl">Dist</span><span class="val" id="msVal">—</span></div>
+</div>
 <div id="intro">
   <div class="card">
     <h1>FLIGHT SIM</h1>
     <div class="sub">Procedural browser flight sim · Three.js · 30 km open world</div>
+    <div class="missions">
+      <div class="mbtn sel" data-mode="free"><div class="mt">FREE FLIGHT</div><div class="md">Roam the world<br>no objective</div></div>
+      <div class="mbtn" data-mode="tng"><div class="mt">TOUCH &amp; GO</div><div class="md">Rack up landings<br>chase best score</div></div>
+      <div class="mbtn" data-mode="hop"><div class="mt">AIRPORT HOP</div><div class="md">Visit all 3 fields<br>in sequence</div></div>
+    </div>
     <div class="ctrls">
       <span>Throttle</span><span><kbd>W</kbd> up / <kbd>S</kbd> down</span>
       <span>Pitch</span><span><kbd>I</kbd> nose up / <kbd>K</kbd> nose down</span>
@@ -779,7 +802,11 @@ const state = {
   scoreLast: null,
   scoreBest: 0,
   scoreTotal: 0,
-  scoreCount: 0
+  scoreCount: 0,
+  mode: 'free',
+  hopOrder: [],
+  hopIdx: 0,
+  hopDone: false
 };
 
 const keys = {};
@@ -827,12 +854,43 @@ function resetPlane(){
 resetPlane();
 
 const intro = document.getElementById('intro');
+const missionEl = document.getElementById('mission');
+const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP' };
+function startMission(mode){
+  state.mode = mode;
+  // Reset T&G stats per run so each session has its own scoreboard.
+  if (mode === 'tng' || mode === 'hop'){
+    state.scoreLast = null; state.scoreBest = 0; state.scoreTotal = 0; state.scoreCount = 0;
+  }
+  if (mode === 'hop'){
+    // Start at MAIN_AP, then visit the other two in fixed order.
+    state.hopOrder = AIRPORTS.filter(a => a.id !== MAIN_AP.id).map(a => a.id);
+    state.hopIdx = 0;
+    state.hopDone = false;
+  }
+  document.getElementById('msTtl').textContent = missionTitles[mode] || 'MISSION';
+  missionEl.style.display = (mode === 'free') ? 'none' : 'block';
+}
 function dismissIntro(){
   if (!state.introOpen) return;
   state.introOpen = false; intro.style.display = 'none';
+  startMission(state.mode);
   initStallAudio();
 }
-intro.addEventListener('click', dismissIntro);
+intro.addEventListener('click', e => {
+  // Don't dismiss when clicking a mission button — let the button handler manage selection.
+  if (e.target.closest('.mbtn')) return;
+  dismissIntro();
+});
+for (const btn of document.querySelectorAll('#intro .mbtn')){
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    for (const b of document.querySelectorAll('#intro .mbtn')) b.classList.remove('sel');
+    btn.classList.add('sel');
+    state.mode = btn.dataset.mode;
+  });
+  btn.addEventListener('dblclick', e => { e.stopPropagation(); dismissIntro(); });
+}
 addEventListener('keydown', e=>{ if (state.introOpen && (e.code==='Space' || e.code==='Enter')) dismissIntro(); });
 
 // ====== Stall warning audio (short repeating beep) ======
@@ -1042,8 +1100,24 @@ function step(dt){
         state.scoreTotal += score;
         state.scoreCount += 1;
         if (score > state.scoreBest) state.scoreBest = score;
+        let extra = '';
+        // Airport-hop progression: only count landings at the current target field.
+        if (state.mode === 'hop' && !state.hopDone && land && land.ri){
+          const want = state.hopOrder[state.hopIdx];
+          if (land.ri.ap.id === want){
+            state.hopIdx += 1;
+            if (state.hopIdx >= state.hopOrder.length){
+              state.hopDone = true;
+              extra = ' · HOP COMPLETE';
+            } else {
+              extra = ' · next: ' + state.hopOrder[state.hopIdx];
+            }
+          } else {
+            extra = ' · wrong field, want ' + want;
+          }
+        }
         const title = (sinkRate < 2.5 ? 'GREASED IT' : 'GOOD LANDING') + ' · +' + score;
-        const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid;
+        const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
         showStatus(title, sub, 'good');
         state.landed = true;
       }
@@ -1154,6 +1228,28 @@ function step(dt){
   if (nearest){
     document.getElementById('apnear').textContent = nearest.id;
     document.getElementById('apdist').textContent = (nearestD/1000).toFixed(1) + ' km';
+  }
+
+  // Mission HUD
+  if (state.mode === 'tng'){
+    document.getElementById('msTgt').textContent = 'Any field';
+    document.getElementById('msLbl').textContent = 'Landings';
+    document.getElementById('msVal').textContent = state.scoreCount + ' · best +' + state.scoreBest;
+  } else if (state.mode === 'hop'){
+    if (state.hopDone){
+      document.getElementById('msTgt').textContent = 'DONE';
+      document.getElementById('msLbl').textContent = 'Score';
+      document.getElementById('msVal').textContent = '+' + state.scoreTotal;
+    } else {
+      const wantId = state.hopOrder[state.hopIdx];
+      const wantAp = AIRPORTS.find(a => a.id === wantId);
+      document.getElementById('msTgt').textContent = wantId + ' (' + (state.hopIdx+1) + '/' + state.hopOrder.length + ')';
+      document.getElementById('msLbl').textContent = 'To target';
+      if (wantAp){
+        const dt = Math.hypot(plane.position.x - wantAp.x, plane.position.z - wantAp.z);
+        document.getElementById('msVal').textContent = (dt/1000).toFixed(1) + ' km';
+      }
+    }
   }
 
   // PAPI for nearest runway when on approach
