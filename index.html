@@ -374,6 +374,7 @@
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
   <div class="row"><span id="engfire" class="warn-red" style="display:none">🔥 ENG FIRE — CUT THROTTLE</span></div>
+  <div class="row"><span id="engtemp" class="warn" style="display:none">⚠ ENG TEMP</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
@@ -404,6 +405,7 @@
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
   <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
+  <div class="gauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -3943,6 +3945,82 @@ const FIRE_REROLL_MS = 2000;                // gap between consecutive eligibili
 const FIRE_COWL_OFFSET = new THREE.Vector3(0, 0.15, -3.4); // cowl/nose, plane-local
 const FIRE_BEEP_INTERVAL_MS = 500;          // chirp cadence while burning
 
+// ====== Engine cylinder-head temperature ======
+// Lightweight thermal model: lerp toward a target temperature each frame
+// driven by throttle, climb rate, and whether the engine is actually combusting.
+// Air gets thinner higher up so cooling weakens with altitude. Below 0.5 throttle
+// the target sits in the cruise band; full power + sustained climb pushes the
+// target into the redline so the player has to manage power on long climbs.
+const ENG_TEMP_COLD       = 40;    // °C — engine off / cold-start ambient
+const ENG_TEMP_IDLE       = 95;    // °C — idle target after warmup
+const ENG_TEMP_CRUISE     = 180;   // °C — mid-throttle steady cruise target
+const ENG_TEMP_MAX        = 260;   // °C — firewall (gauge upper limit)
+const ENG_TEMP_REDLINE    = 230;   // °C — warning fires, damage tick arms
+const ENG_TEMP_WARN_HYST  = 10;    // °C — below (redline - hyst) clears the latch
+const ENG_TEMP_OVERHEAT_SECS = 15; // sustained seconds above redline before damage + ATC
+const ENG_TEMP_DAMAGE_PER_SEC = 0.003; // ~0.3% airframe per second while cooked
+const ENG_TEMP_WARMUP_RATE   = 18; // °C/s heating coefficient toward target
+const ENG_TEMP_COOLDOWN_RATE = 22; // °C/s cooling coefficient toward target
+function updateEngineTemp(dt){
+  // Skip thermal sim while paused / replaying / sitting on the intro screen so
+  // the engine doesn't quietly cook itself while the player is reading menus.
+  if (state.paused || state.replayActive || state.introOpen) return;
+  // Engine is producing combustion heat only when it's actually firing. Cold
+  // start, engine-out, or dry tank → the engine cools toward ambient.
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  let target;
+  if (!engineLive){
+    target = ENG_TEMP_COLD;
+  } else {
+    // Throttle 0..1 drives the bulk of the target. Add a climb-rate bonus so
+    // sustained climbs (high power + nose-up) push toward redline faster than
+    // level cruise at the same throttle, which is how real piston engines
+    // actually heat up.
+    const thr = Math.max(0, Math.min(1, state.throttle));
+    target = ENG_TEMP_IDLE + (ENG_TEMP_CRUISE - ENG_TEMP_IDLE) * thr;
+    if (thr >= 0.85) target += (ENG_TEMP_MAX - ENG_TEMP_CRUISE) * (thr - 0.85) / 0.15 * 0.75;
+    // Climb penalty: positive vertical speed at high power drives the target up,
+    // descents pull it down. state.vel.y is m/s vertical.
+    const climb = state.vel.y;
+    if (climb > 0 && thr > 0.5) target += Math.min(28, climb * 1.6);
+    if (climb < 0)              target += Math.max(-22, climb * 0.7);
+    // Density / altitude effect: thinner air cools worse. plane.position.y is m.
+    const alt = Math.max(0, plane.position.y - MAIN_AP.elev);
+    target += Math.min(35, alt * 0.006);
+  }
+  // Cooling is faster than heating so backing off the throttle actually
+  // recovers the gauge in a reasonable window. Asymmetric rates feel right
+  // for a piston engine on the bench.
+  const t = state.engineTempC;
+  const rising = target > t;
+  const rate = rising ? ENG_TEMP_WARMUP_RATE : ENG_TEMP_COOLDOWN_RATE;
+  // Exponential approach so the needle doesn't ping-pong on small changes.
+  const k = 1 - Math.exp(-rate * dt / 60);
+  state.engineTempC = t + (target - t) * k;
+  // Clamp to gauge range; over-redline still ticks the overheat timer below.
+  if (state.engineTempC < ENG_TEMP_COLD - 5) state.engineTempC = ENG_TEMP_COLD - 5;
+  if (state.engineTempC > ENG_TEMP_MAX)      state.engineTempC = ENG_TEMP_MAX;
+  // Overheat accumulator + ATC nag + damage tick. Resets the moment temp
+  // drops back under redline so a brief excursion isn't punished.
+  if (state.engineTempC >= ENG_TEMP_REDLINE && !state.crashed && !state.onGround){
+    state.engineOverheatT += dt;
+    if (!state.engineTempWarnLatch && state.engineOverheatT >= ENG_TEMP_OVERHEAT_SECS){
+      state.engineTempWarnLatch = true;
+      if (typeof pushATC === 'function') pushATC('Engine overheat, reduce power.', { tag:'ATC', now:true });
+    }
+    if (state.engineOverheatT >= ENG_TEMP_OVERHEAT_SECS){
+      state.damage = Math.min(1, state.damage + ENG_TEMP_DAMAGE_PER_SEC * dt);
+    }
+  } else {
+    state.engineOverheatT = 0;
+    // Latch clears with hysteresis so a quick dip-and-rebound doesn't re-fire
+    // the ATC call every couple seconds.
+    if (state.engineTempWarnLatch && state.engineTempC <= ENG_TEMP_REDLINE - ENG_TEMP_WARN_HYST){
+      state.engineTempWarnLatch = false;
+    }
+  }
+}
+
 // Flame flicker sprite — single shared sprite that we re-aim at the cowl in
 // world space each frame and scale/jitter to feel like a lick of fire. Way
 // cheaper than spawning a whole pool, and the fire reads fine as a single
@@ -4318,6 +4396,17 @@ const state = {
   engineFireT: 0,
   engineFireStarvedT: 0,
   engineFireBeepAt: 0,
+  // Engine cylinder-head temperature (°C). Starts cold on the apron (matches the
+  // cold-start ritual flavor), climbs with sustained throttle and climb attitude,
+  // cools with low throttle / descents / dense low-altitude air. Above
+  // ENG_TEMP_REDLINE the cockpit gauge needle hits the red arc and a HUD
+  // "⚠ ENG TEMP" warning flashes. Continuous overheat for ENG_TEMP_OVERHEAT_SECS
+  // pushes a one-shot ATC "reduce power" call and ticks airframe damage. Latch
+  // clears with a small hysteresis once you back off the throttle. Reset on
+  // resetPlane() so a fresh sortie starts cool and gauges read clean.
+  engineTempC: 40,
+  engineOverheatT: 0,
+  engineTempWarnLatch: false,
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
   // fire (or each spawn) so we don't roll the dice every frame for nothing.
   nextFireRollMs: 0,
@@ -5184,6 +5273,11 @@ function resetPlane(){
   state.engineFireBeepAt = 0;
   state.nextFireRollMs = 0;
   clearEngineFireFx();
+  // Engine temperature: a fresh sortie starts cool (matches the cold-start
+  // flavor) and clears the overheat latch so the next leg re-arms the warning.
+  state.engineTempC = ENG_TEMP_COLD;
+  state.engineOverheatT = 0;
+  state.engineTempWarnLatch = false;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -6633,6 +6727,10 @@ function step(dt){
   // visuals). Both calls self-gate so a clean cruise pays nothing.
   maybeRollEngineFire(dt);
   updateEngineFire(dt);
+  // Engine temperature thermal model — cheap lerp toward a throttle/climb/altitude
+  // driven target, with sustained-overheat damage and an ATC nag latch. Self-gates
+  // on pause/replay/intro so frozen frames don't drift the gauge.
+  updateEngineTemp(dt);
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
@@ -6777,6 +6875,24 @@ function step(dt){
     const showFireHud = state.engineFire && !state.crashed && !state.onGround
       && !state.introOpen && !state.replayActive;
     fireEl.style.display = showFireHud ? 'block' : 'none';
+  }
+  // Engine temperature HUD warning: amber flash any time CHT is in the redline
+  // band, and the warning text upgrades to "REDUCE POWER" once the latch fires
+  // (i.e. sustained overheat – we're now ticking damage). Hidden on the ground,
+  // crashed, intro, replay so it doesn't ghost during cleanup states.
+  const etEl = document.getElementById('engtemp');
+  if (etEl){
+    const showEt = state.engineTempC >= ENG_TEMP_REDLINE && !state.crashed
+      && !state.onGround && !state.introOpen && !state.replayActive;
+    if (showEt){
+      etEl.textContent = state.engineTempWarnLatch ? '⚠ ENG TEMP — REDUCE POWER' : '⚠ ENG TEMP';
+      etEl.style.color = state.engineTempWarnLatch ? '#ff5252' : '#ffb020';
+      etEl.style.display = 'block';
+      etEl.style.animation = state.engineTempWarnLatch ? 'blink 0.32s steps(2) infinite' : 'blink 0.6s steps(2) infinite';
+    } else {
+      etEl.style.display = 'none';
+      etEl.style.animation = '';
+    }
   }
   // Reverse-thrust HUD pill: visible while the visual lerp is non-zero so it
   // tracks the ease-in/out rather than snapping when the player releases Z.
@@ -8231,10 +8347,12 @@ const cpAsiCv = document.getElementById('cpAsi');
 const cpAiCv  = document.getElementById('cpAi');
 const cpAltCv = document.getElementById('cpAlt');
 const cpRpmCv = document.getElementById('cpRpm');
+const cpChtCv = document.getElementById('cpCht');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
 const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
+const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -8499,6 +8617,66 @@ function drawCockpitRpm(speedKmh){
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(r), cx, cy + R*0.55);
 }
+function drawCockpitCht(tempC){
+  if (!cpChtCtx) return;
+  const W = cpChtCv.width, H = cpChtCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpChtCtx;
+  _cpBezel(ctx, W, H);
+  // Scale: ENG_TEMP_COLD..ENG_TEMP_MAX across the same 240° sweep used by the
+  // ASI / RPM gauges so the cockpit panel reads as a matched set.
+  const T_MIN = ENG_TEMP_COLD, T_MAX = ENG_TEMP_MAX;
+  const T_SPAN = T_MAX - T_MIN;
+  const sweep = Math.PI * 4/3; // 240°
+  const startA = -Math.PI - Math.PI/6; // start at lower-left
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // Major ticks every 50°C with labels; minor every 10°C.
+  for (let v = T_MIN; v <= T_MAX; v += 10){
+    const a = startA + ((v - T_MIN) / T_SPAN) * sweep;
+    const major = (v % 50 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Green cruise arc (idle..cruise mid-band) and red redline arc.
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((ENG_TEMP_IDLE   - T_MIN) / T_SPAN) * sweep,
+    startA + ((ENG_TEMP_CRUISE - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#ff5252';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((ENG_TEMP_REDLINE - T_MIN) / T_SPAN) * sweep,
+    startA + ((ENG_TEMP_MAX     - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  // "°C" label so the unit is obvious next to the RPM gauge's x100 hint.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('°C', cx, cy - R*0.35);
+  // Needle.
+  const t = Math.max(T_MIN, Math.min(T_MAX, tempC));
+  const a = startA + ((t - T_MIN) / T_SPAN) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout below center; matches RPM color rules so the gauge
+  // shouts when the engine is hot.
+  ctx.fillStyle = (t >= ENG_TEMP_REDLINE) ? '#ff5252' : (t >= ENG_TEMP_CRUISE + 20 ? '#ffb020' : '#7ee787');
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(Math.round(t) + '°', cx, cy + R*0.55);
+}
 function drawCockpitPanel(speedKmh, altM){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -8507,6 +8685,7 @@ function drawCockpitPanel(speedKmh, altM){
   drawCockpitAi(plane.quaternion);
   drawCockpitAlt(altM);
   drawCockpitRpm(speedKmh);
+  drawCockpitCht(state.engineTempC);
 }
 
 // ====== Camera ======
