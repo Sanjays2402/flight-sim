@@ -75,6 +75,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
+  <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
@@ -93,7 +94,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>T</kbd> +1h · <kbd>R</kbd> reset
 </div>
 <div id="status"></div>
 <div id="mission">
@@ -119,6 +120,7 @@
       <span>Flaps cycle</span><span><kbd>F</kbd></span>
       <span>Brakes (ground)</span><span><kbd>B</kbd></span>
       <span>Camera cycle</span><span><kbd>C</kbd></span>
+      <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
     <div class="tip">
@@ -147,12 +149,103 @@ scene.fog = new THREE.Fog(0xc8dcf0, 5000, 18000);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.5, 40000);
 
-scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x4a5a3a, 0.55));
+// ====== TIME OF DAY ======
+// Sun moves through the sky on a slow loop. Sky colors, ambient/hemi/sun
+// intensities, and runway edge lights all key off this single value.
+//   todHours: 0..24 (0 = midnight, 6 = sunrise, 12 = noon, 18 = sunset)
+// Real-time minutes are scaled to in-sim hours by TOD_SPEED.
+const TOD_SPEED = 0.5;        // in-sim hours per real second (full day in ~48s)
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, 0.55).normalize();
+const hemiLight = new THREE.HemisphereLight(0xbfd8ff, 0x4a5a3a, 0.55);
+scene.add(hemiLight);
 const sun = new THREE.DirectionalLight(0xffe6b0, 1.15);
 sun.position.copy(SUN_DIR).multiplyScalar(8000);
 scene.add(sun);
-scene.add(new THREE.AmbientLight(0x35506e, 0.35));
+const ambient = new THREE.AmbientLight(0x35506e, 0.35);
+scene.add(ambient);
+
+// Palette samples through the day. We lerp between adjacent stops based on
+// todHours. Keys cover night → dawn → day → dusk → night so the cycle wraps.
+const SKY_KEYS = [
+  // h, sunDirY (above horizon when >0), top, mid, bot, sunColor, sunIntensity, hemiIntensity, ambientHex, ambientIntensity, fogHex
+  { h:  0, top:0x05080f, mid:0x0a1424, bot:0x0e1a2a, sun:0x000000, sunI:0.00, hemi:0.10, hemiSky:0x1a2840, hemiGnd:0x101820, amb:0x0a1424, ambI:0.18, fog:0x06101c },
+  { h:  5, top:0x1a2a4a, mid:0x4a5a78, bot:0xc88858, sun:0xff8a40, sunI:0.35, hemi:0.30, hemiSky:0x6a86b0, hemiGnd:0x3a4a3a, amb:0x2a3850, ambI:0.30, fog:0xc8a890 },
+  { h:  7, top:0x3068a8, mid:0xa0c0e0, bot:0xffd0a0, sun:0xffbe88, sunI:0.85, hemi:0.45, hemiSky:0x9ec0e0, hemiGnd:0x4a5a3a, amb:0x35506e, ambI:0.32, fog:0xd8c8b0 },
+  { h: 12, top:0x2a5aa0, mid:0x9fc8ee, bot:0xf2d7a8, sun:0xffe6b0, sunI:1.15, hemi:0.55, hemiSky:0xbfd8ff, hemiGnd:0x4a5a3a, amb:0x35506e, ambI:0.35, fog:0xc8dcf0 },
+  { h: 17, top:0x2c548c, mid:0xb0c8e0, bot:0xffc890, sun:0xffd098, sunI:0.95, hemi:0.50, hemiSky:0xb0c8e8, hemiGnd:0x4a5238, amb:0x35506e, ambI:0.32, fog:0xd8c8a8 },
+  { h: 19, top:0x1c3868, mid:0x884858, bot:0xff7038, sun:0xff6028, sunI:0.50, hemi:0.30, hemiSky:0x70688a, hemiGnd:0x3a3828, amb:0x402838, ambI:0.28, fog:0xc88068 },
+  { h: 21, top:0x0a1424, mid:0x1a2238, bot:0x2a2438, sun:0x402030, sunI:0.05, hemi:0.15, hemiSky:0x283040, hemiGnd:0x182028, amb:0x18223a, ambI:0.20, fog:0x141c2c },
+  { h: 24, top:0x05080f, mid:0x0a1424, bot:0x0e1a2a, sun:0x000000, sunI:0.00, hemi:0.10, hemiSky:0x1a2840, hemiGnd:0x101820, amb:0x0a1424, ambI:0.18, fog:0x06101c }
+];
+const _todTop = new THREE.Color(), _todMid = new THREE.Color(), _todBot = new THREE.Color();
+const _todSunCol = new THREE.Color(), _todHemiSky = new THREE.Color(), _todHemiGnd = new THREE.Color();
+const _todAmb = new THREE.Color(), _todFog = new THREE.Color();
+function lerpKey(h){
+  // Find the two keys this hour sits between and return a blended sample.
+  let a = SKY_KEYS[0], b = SKY_KEYS[SKY_KEYS.length-1];
+  for (let i = 0; i < SKY_KEYS.length - 1; i++){
+    if (h >= SKY_KEYS[i].h && h <= SKY_KEYS[i+1].h){ a = SKY_KEYS[i]; b = SKY_KEYS[i+1]; break; }
+  }
+  const span = Math.max(0.0001, b.h - a.h);
+  const t = (h - a.h) / span;
+  _todTop.setHex(a.top).lerp(_todMid.setHex(b.top), t);
+  const top = _todTop.clone();
+  _todMid.setHex(a.mid).lerp(_todTop.setHex(b.mid), t);
+  const mid = _todMid.clone();
+  _todBot.setHex(a.bot).lerp(_todTop.setHex(b.bot), t);
+  const bot = _todBot.clone();
+  _todSunCol.setHex(a.sun).lerp(_todTop.setHex(b.sun), t);
+  const sunCol = _todSunCol.clone();
+  _todHemiSky.setHex(a.hemiSky).lerp(_todTop.setHex(b.hemiSky), t);
+  const hemiSky = _todHemiSky.clone();
+  _todHemiGnd.setHex(a.hemiGnd).lerp(_todTop.setHex(b.hemiGnd), t);
+  const hemiGnd = _todHemiGnd.clone();
+  _todAmb.setHex(a.amb).lerp(_todTop.setHex(b.amb), t);
+  const amb = _todAmb.clone();
+  _todFog.setHex(a.fog).lerp(_todTop.setHex(b.fog), t);
+  const fog = _todFog.clone();
+  return {
+    top, mid, bot, sunCol, hemiSky, hemiGnd, amb, fog,
+    sunI: a.sunI + (b.sunI - a.sunI) * t,
+    hemiI: a.hemi + (b.hemi - a.hemi) * t,
+    ambI: a.ambI + (b.ambI - a.ambI) * t
+  };
+}
+const skyUniforms = { top:null, mid:null, bot:null, sunDir:null, sunColor:null };
+const runwayEdgeLights = []; // populated by makeAirport; emissive material + base color, toggled at dusk
+function sunDirFor(h){
+  // Sun arcs east→up→west: 0h below horizon, 6h on horizon east, 12h overhead, 18h horizon west.
+  const a = ((h - 6) / 12) * Math.PI; // 0 at sunrise, π at sunset
+  return new THREE.Vector3(Math.cos(a), Math.sin(a), 0.25).normalize();
+}
+function applyTimeOfDay(h){
+  const k = lerpKey(h);
+  const dir = sunDirFor(h);
+  sun.position.copy(dir).multiplyScalar(8000);
+  sun.color.copy(k.sunCol);
+  sun.intensity = k.sunI;
+  hemiLight.color.copy(k.hemiSky);
+  hemiLight.groundColor.copy(k.hemiGnd);
+  hemiLight.intensity = k.hemiI;
+  ambient.color.copy(k.amb);
+  ambient.intensity = k.ambI;
+  if (skyUniforms.top){
+    skyUniforms.top.value.copy(k.top);
+    skyUniforms.mid.value.copy(k.mid);
+    skyUniforms.bot.value.copy(k.bot);
+    skyUniforms.sunDir.value.copy(dir);
+    skyUniforms.sunColor.value.copy(k.sunCol);
+  }
+  scene.fog.color.copy(k.fog);
+  // Runway edge lights glow when sun is low (dusk/night/dawn).
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / 0.3));
+  for (const e of runwayEdgeLights){
+    // MeshLambertMaterial has no emissiveIntensity — scale the emissive color directly.
+    const k = nightT;
+    e.mat.emissive.setRGB(1.0 * k, 0.78 * k, 0.32 * k);
+  }
+  return { dir, k, nightT };
+}
 
 // ====== SKY DOME with sun disc + halo ======
 {
@@ -166,6 +259,7 @@ scene.add(new THREE.AmbientLight(0x35506e, 0.35));
       sunDir:{value: SUN_DIR.clone()},
       sunColor:{value:new THREE.Color(0xfff2c8)}
     },
+    // Capture references so applyTimeOfDay can drive the sky shader live.
     vertexShader:`varying vec3 vP; void main(){ vP=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
     fragmentShader:`
       varying vec3 vP;
@@ -183,6 +277,11 @@ scene.add(new THREE.AmbientLight(0x35506e, 0.35));
       }`
   });
   scene.add(new THREE.Mesh(g, m));
+  skyUniforms.top = m.uniforms.top;
+  skyUniforms.mid = m.uniforms.mid;
+  skyUniforms.bot = m.uniforms.bot;
+  skyUniforms.sunDir = m.uniforms.sunDir;
+  skyUniforms.sunColor = m.uniforms.sunColor;
 }
 
 // ====== TERRAIN ======
@@ -486,6 +585,31 @@ function makeAirport(a){
     e.position.set(side*(a.w/2 - 0.5), 0.04, 0);
     grp.add(e);
   }
+  // Runway edge lights — small emissive beads along the strip. Off in day,
+  // glow amber/white at dusk and through the night.
+  const lightMat = new THREE.MeshLambertMaterial({
+    color: 0x333333, emissive: 0x000000
+  });
+  runwayEdgeLights.push({ mat: lightMat, base: new THREE.Color(0x333333) });
+  const lightGeo = new THREE.SphereGeometry(0.55, 6, 5);
+  const lightSpacing = 60;
+  const lightCount = Math.max(2, Math.floor(a.len / lightSpacing));
+  for (let i = 0; i < lightCount; i++){
+    const z = -a.len/2 + (i + 0.5) * (a.len / lightCount);
+    for (const side of [-1, 1]){
+      const lb = new THREE.Mesh(lightGeo, lightMat);
+      lb.position.set(side * (a.w/2 + 1.4), 0.55, z);
+      grp.add(lb);
+    }
+  }
+  // Threshold lights (greener band at both runway ends), share emissive control.
+  for (const end of [-1, 1]){
+    for (let i = -3; i <= 3; i++){
+      const lb = new THREE.Mesh(lightGeo, lightMat);
+      lb.position.set(i * 3.2, 0.45, end * (a.len/2 - 2));
+      grp.add(lb);
+    }
+  }
   for (let i=0;i<4;i++){
     const pl = new THREE.Mesh(
       new THREE.SphereGeometry(0.7, 8, 6),
@@ -535,6 +659,8 @@ function makeAirport(a){
 
 for (const a of AIRPORTS) makeAirport(a);
 const MAIN_AP = AIRPORTS[0];
+// Prime time-of-day so the very first frame matches the starting hour (sky/sun/lights).
+applyTimeOfDay(9.0);
 
 // ====== PROCEDURAL CITIES (instanced boxes near each airport) ======
 // Boxy buildings clustered in a ring around every airport, so approaches have
@@ -879,7 +1005,10 @@ const state = {
   hopIdx: 0,
   hopDone: false,
   hopStartMs: 0,
-  hopElapsedMs: 0
+  hopElapsedMs: 0,
+  // Time of day in 0..24 hours; advances with TOD_SPEED. Starts near sunrise
+  // so the first frames show off the cycle without waiting.
+  todHours: 9.0
 };
 
 const keys = {};
@@ -893,6 +1022,7 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyG') state.gearDown = !state.gearDown;
   if (e.code==='KeyF') state.flaps = (state.flaps + 1) % 3;
   if (e.code==='KeyC') state.cam = (state.cam + 1) % 4;
+  if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyR') resetPlane();
 });
 
@@ -1269,6 +1399,10 @@ function step(dt){
     for (const u of waterUniList) u.t.value = tm;
   }
 
+  // Time of day advances every step.
+  state.todHours = (state.todHours + TOD_SPEED * dt) % 24;
+  applyTimeOfDay(state.todHours);
+
   // HUD
   const speedKmh = speed * 3.6;
   const altM = Math.max(0, plane.position.y - GEAR_H);
@@ -1276,6 +1410,9 @@ function step(dt){
   if (hdg < 0) hdg += 360;
   const vs = state.vel.y;
   const aoaDeg = THREE.MathUtils.radToDeg(aoa);
+  const todH = Math.floor(state.todHours);
+  const todM = Math.floor((state.todHours - todH) * 60);
+  $('#tod').textContent = String(todH).padStart(2,'0') + ':' + String(todM).padStart(2,'0');
 
   $('#spd').textContent  = Math.round(speedKmh);
   $('#alt').textContent  = Math.round(altM);
@@ -1369,12 +1506,8 @@ function step(dt){
   drawCompass(hdg);
   drawVSI(vs);
 
-  const altFrac = Math.min(1, altM/2500);
-  scene.background.setRGB(
-    0.78 - 0.22*altFrac,
-    0.86 - 0.18*altFrac,
-    0.94 - 0.10*altFrac
-  );
+  // Background color follows the lower sky-band so the off-dome edges blend in.
+  if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
 
   updateCamera(dt);
 }
