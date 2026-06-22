@@ -3291,6 +3291,182 @@ function updateVortexTrails(strength){
   }
 }
 
+// ====== AI WAKE TURBULENCE ======
+// Faint vortex ribbons trailing off the AI plane's wingtips, plus a proximity
+// check that injects a brief roll+yaw kick (and a low rumble SFX) when the
+// player tucks in close behind and below the AI plane — i.e., in its wake.
+// Reuses the same ribbon shape as the player vortex but with lighter alpha
+// so it reads as "that's not you, that's the lead's wash".
+const AI_VORTEX_HALF_WIDTH = 0.38;     // slightly thinner than the player ribbon
+const AI_VORTEX_ALPHA = 0.55;          // base strength multiplier — softer than player vortices
+const aiVortexTips = [
+  new THREE.Vector3(-VORTEX_TIP_OFFSET, VORTEX_TIP_Y, VORTEX_TIP_Z),
+  new THREE.Vector3( VORTEX_TIP_OFFSET, VORTEX_TIP_Y, VORTEX_TIP_Z)
+];
+const aiVortexMeshes = [];
+for (let side = 0; side < 2; side++){
+  const geo = new THREE.BufferGeometry();
+  const posArr = new Float32Array(VORTEX_SEGS * 2 * 3);
+  const alphaArr = new Float32Array(VORTEX_SEGS * 2);
+  const idxArr = new Uint16Array((VORTEX_SEGS - 1) * 6);
+  for (let i = 0; i < VORTEX_SEGS - 1; i++){
+    const a = i*2, b = i*2 + 1, c = (i+1)*2, d = (i+1)*2 + 1;
+    idxArr[i*6+0] = a; idxArr[i*6+1] = b; idxArr[i*6+2] = c;
+    idxArr[i*6+3] = b; idxArr[i*6+4] = d; idxArr[i*6+5] = c;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+  geo.setAttribute('aAlpha', new THREE.BufferAttribute(alphaArr, 1));
+  geo.setIndex(new THREE.BufferAttribute(idxArr, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms: { uStrength: { value: 0 } },
+    vertexShader: `
+      attribute float aAlpha;
+      varying float vAlpha;
+      void main(){
+        vAlpha = aAlpha;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      varying float vAlpha;
+      uniform float uStrength;
+      void main(){
+        float a = vAlpha * uStrength;
+        if (a < 0.005) discard;
+        gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+      }`
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 5;
+  mesh.visible = false;
+  scene.add(mesh);
+  const history = new Array(VORTEX_SEGS).fill(null).map(() => new THREE.Vector3());
+  aiVortexMeshes.push({ geo, mat, mesh, posArr, alphaArr, history, primed: false });
+}
+const _aiVortexTmpRight = new THREE.Vector3();
+const _aiVortexTmpTip = new THREE.Vector3();
+function updateAIVortexTrails(strength){
+  const right = _aiVortexTmpRight.set(1,0,0).applyQuaternion(aiPlane.quaternion);
+  for (let side = 0; side < 2; side++){
+    const v = aiVortexMeshes[side];
+    const tipWorld = _aiVortexTmpTip.copy(aiVortexTips[side]).applyQuaternion(aiPlane.quaternion).add(aiPlane.position);
+    if (!v.primed){
+      for (let i = 0; i < VORTEX_SEGS; i++) v.history[i].copy(tipWorld);
+      v.primed = true;
+    } else {
+      for (let i = VORTEX_SEGS - 1; i > 0; i--) v.history[i].copy(v.history[i-1]);
+      v.history[0].copy(tipWorld);
+    }
+    for (let i = 0; i < VORTEX_SEGS; i++){
+      const taper = 1 - (i / (VORTEX_SEGS - 1)) * 0.85;
+      const w = AI_VORTEX_HALF_WIDTH * taper;
+      const p = v.history[i];
+      const x0 = p.x - right.x * w;
+      const y0 = p.y - right.y * w;
+      const z0 = p.z - right.z * w;
+      const x1 = p.x + right.x * w;
+      const y1 = p.y + right.y * w;
+      const z1 = p.z + right.z * w;
+      const base = i * 6;
+      v.posArr[base+0] = x0; v.posArr[base+1] = y0; v.posArr[base+2] = z0;
+      v.posArr[base+3] = x1; v.posArr[base+4] = y1; v.posArr[base+5] = z1;
+      const headFade = Math.min(1, i / 2);
+      const tailFade = 1 - (i / (VORTEX_SEGS - 1));
+      const a = headFade * tailFade * tailFade;
+      v.alphaArr[i*2]   = a;
+      v.alphaArr[i*2+1] = a;
+    }
+    v.geo.attributes.position.needsUpdate = true;
+    v.geo.attributes.aAlpha.needsUpdate = true;
+    v.mat.uniforms.uStrength.value = strength;
+    v.mesh.visible = strength > 0.02;
+  }
+}
+// Wake-hit zone: behind the AI plane (in its body frame) and below it. When
+// the player enters this cone we inject a roll+yaw perturbation scaled by
+// proximity and play a one-shot low rumble (cooldown so it doesn't fire-spam).
+const WAKE_BEHIND_M = 80;    // max distance behind the AI plane to count as in-wake
+const WAKE_BELOW_M  = 30;    // max vertical drop below the AI plane to count as in-wake
+const WAKE_LATERAL_M = 18;   // max lateral offset from the AI's centerline
+const WAKE_RUMBLE_COOLDOWN = 1.6; // seconds between rumble firings
+const wakeState = {
+  intensity: 0,        // 0..1 smoothed in-wake intensity (drives kick magnitude + visual boost)
+  rumbleCooldown: 0,   // seconds remaining before another rumble SFX can fire
+  wasInWake: false     // edge tracker so a fresh entry triggers an immediate rumble
+};
+const _wakeTmpRel = new THREE.Vector3();
+const _wakeTmpFwd = new THREE.Vector3();
+const _wakeTmpRight = new THREE.Vector3();
+const _wakeTmpUp = new THREE.Vector3();
+function updateAIWake(dt){
+  if (dt <= 0) return 0;
+  if (wakeState.rumbleCooldown > 0){
+    wakeState.rumbleCooldown = Math.max(0, wakeState.rumbleCooldown - dt);
+  }
+  // Gate exactly like updateFormation so wake effects don't fight pause/photo/intro overlays
+  // or fire while sitting on the ground.
+  if (state.onGround || state.crashed || state.paused || state.replayActive
+      || state.photoMode || state.introOpen || !aiPlane.visible){
+    wakeState.intensity = Math.max(0, wakeState.intensity - dt * 2);
+    wakeState.wasInWake = false;
+    return wakeState.intensity;
+  }
+  // Project the player's offset into the AI plane's body frame so we can
+  // check "behind" (negative local Z is forward in this codebase's convention,
+  // matching how plane.position uses fwd = -Z), "below", and "lateral".
+  _wakeTmpRel.copy(plane.position).sub(aiPlane.position);
+  _wakeTmpFwd.set(0,0,-1).applyQuaternion(aiPlane.quaternion);
+  _wakeTmpRight.set(1,0,0).applyQuaternion(aiPlane.quaternion);
+  _wakeTmpUp.set(0,1,0).applyQuaternion(aiPlane.quaternion);
+  const localFwd = _wakeTmpRel.dot(_wakeTmpFwd);   // >0 = in front of AI
+  const localRight = _wakeTmpRel.dot(_wakeTmpRight);
+  const localUp = _wakeTmpRel.dot(_wakeTmpUp);     // >0 = above AI
+  const behindM = -localFwd;                       // positive = behind AI
+  const belowM = -localUp;                         // positive = below AI
+  const lateralM = Math.abs(localRight);
+  const inWake = behindM > 5 && behindM < WAKE_BEHIND_M
+              && belowM > -4 && belowM < WAKE_BELOW_M
+              && lateralM < WAKE_LATERAL_M;
+  let target = 0;
+  if (inWake){
+    // Closer + more directly behind = stronger. Each axis tapers independently
+    // so brushing the edge gives a tiny shimmy and threading the cone hammers.
+    const distFade = 1 - Math.min(1, (behindM - 5) / (WAKE_BEHIND_M - 5));
+    const vertFade = 1 - Math.min(1, Math.max(0, belowM) / WAKE_BELOW_M);
+    const latFade = 1 - Math.min(1, lateralM / WAKE_LATERAL_M);
+    target = Math.max(0, Math.min(1, distFade * (0.4 + 0.6 * vertFade) * (0.4 + 0.6 * latFade)));
+  }
+  // Smooth so transitions feel like air, not a switch. Faster decay than
+  // attack so dropping out of the wake feels like the bumps subsiding.
+  const k = target > wakeState.intensity ? 4 : 6;
+  wakeState.intensity += (target - wakeState.intensity) * Math.min(1, dt * k);
+  // Inject a roll+yaw kick that scales with intensity. Sign tracks which side
+  // of the AI's centerline the player is on so the wake throws you outboard
+  // toward the vortex (matches real wake rollover). Tiny pitch nibble too so
+  // it doesn't feel like a pure roll bug.
+  if (wakeState.intensity > 0.05){
+    const sideSign = localRight >= 0 ? 1 : -1;
+    // Light random jitter so it doesn't feel mechanical.
+    const jitter = (Math.random() * 2 - 1) * 0.4;
+    const kick = wakeState.intensity;
+    plane.rotateZ((-sideSign * (0.7 + jitter * 0.3) * kick) * dt);  // roll outboard
+    plane.rotateY(( sideSign * (0.45 + jitter * 0.2) * kick) * dt);  // yaw toward outboard wing
+    plane.rotateX((Math.random() * 2 - 1) * 0.18 * kick * dt);       // pitch nibble
+  }
+  // Edge-triggered rumble: first frame entering the wake, fire a rumble SFX
+  // (subject to cooldown so re-entering quickly doesn't spam).
+  if (inWake && !wakeState.wasInWake && wakeState.rumbleCooldown <= 0){
+    if (typeof playWakeRumble === 'function') playWakeRumble(Math.max(0.4, target));
+    wakeState.rumbleCooldown = WAKE_RUMBLE_COOLDOWN;
+  }
+  wakeState.wasInWake = inWake;
+  return wakeState.intensity;
+}
+
 // ====== CONTRAILS ======
 // Puffy white particle trail emitted from two engine-ish points behind the plane.
 // Visible at high altitude with throttle (jet-style contrails). Each puff drifts
@@ -5038,6 +5214,8 @@ function resetPlane(){
   pickWindTarget();
   state.wind.copy(state.windTarget);
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
+  for (const v of aiVortexMeshes){ v.primed = false; v.mesh.visible = false; }
+  wakeState.intensity = 0; wakeState.rumbleCooldown = 0; wakeState.wasInWake = false;
   clearContrails();
   clearRibbon();
   // Clear any in-flight airshow smoke puffs so reset doesn't leave colored
@@ -5496,6 +5674,51 @@ function playReverserWhoosh(){
   osc.connect(og).connect(ctx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.42);
+}
+
+// Low rumble fired when the player punches into the AI plane's wake. Mostly
+// low-passed noise with a sub-bass sine sag, so it reads as "air slamming
+// the airframe" rather than as an engine or impact sound. Scaled by the
+// wake intensity (0..1) so threading the cone hits harder than skimming it.
+function playWakeRumble(intensity){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const i = Math.max(0, Math.min(1, intensity || 0));
+  const vol = 0.34 * settings.volume * (0.55 + 0.45 * i);
+  if (vol <= 0) return;
+  // Rumbly noise burst: 0.7s of low-passed white noise with a fast attack
+  // and gentle exponential decay.
+  const dur = 0.7;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let k = 0; k < data.length; k++) data[k] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(180, t0);
+  lp.frequency.exponentialRampToValueAtTime(90, t0 + dur);
+  lp.Q.value = 0.6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol * 0.95, t0 + 0.04);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Sub thump: sine that sags from 70 → 40 Hz to give the rumble chest-weight.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(70, t0);
+  osc.frequency.exponentialRampToValueAtTime(40, t0 + dur * 0.8);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0, t0);
+  og.gain.linearRampToValueAtTime(vol * 0.55, t0 + 0.03);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
 }
 
 // Wheel dust kicked up the moment reverse thrust grabs. Tiny fixed-pool sprite
@@ -6866,6 +7089,17 @@ function step(dt){
   // tail so the player can spot it from 3+ km out at a glance. Runs after
   // updateAITraffic so the puff spawns from the freshly-updated AI pose.
   updateAISmoke(dt);
+  // Wake turbulence behind the AI plane — visible wingtip vortex ribbons
+  // plus a roll/yaw kick + low rumble when the player tucks into the wash.
+  // Runs after updateAITraffic so the ribbons trail from the freshly-updated
+  // AI pose. Visibility is gated on the AI plane being visible at all so the
+  // ribbons cull cleanly past the 12 km AI draw distance. Boost ribbon
+  // intensity briefly when the player is actually in the wake so it reads
+  // as "the lead's wash is what's bumping me".
+  const _wakeKick = updateAIWake(dt);
+  const _aiVortBase = aiPlane.visible && !state.paused && !state.replayActive
+                   && !state.photoMode && !state.introOpen ? 0.18 : 0;
+  updateAIVortexTrails(_aiVortBase + _wakeKick * 0.45);
   // Formation tracker — watch for sustained close + parallel flight next to
   // the AI plane; fires a toast + bumps pilotStats + flashes a connecting line.
   updateFormation(dt);
@@ -9161,6 +9395,8 @@ updateCamModeUi();
     pickWindTarget();
     state.wind.copy(state.windTarget);
     for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
+    for (const v of aiVortexMeshes){ v.primed = false; v.mesh.visible = false; }
+    wakeState.intensity = 0; wakeState.rumbleCooldown = 0; wakeState.wasInWake = false;
     clearContrails();
     clearRibbon();
     clearAirshowSmoke();
