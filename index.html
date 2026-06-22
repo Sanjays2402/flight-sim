@@ -15,6 +15,15 @@
      off so it never eats clicks; hidden in photo mode via PHOTO_HIDE_IDS. */
   #rainOverlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #rainOverlay.show { display:block; }
+  /* Binoculars overlay: dark vignette + faint reticle ring that fades in while
+     the player holds B in an external cam. Sits above the 3D world and rain but
+     below all HUD chrome (z-index:2) so the gauges and minimap stay readable
+     when zoomed. Pointer-events off so it never eats clicks. Opacity is driven
+     each frame from state.binoT (0..1) so the fade matches the FOV ease. Hidden
+     in photo mode via PHOTO_HIDE_IDS. */
+  #bino { position:fixed; inset:0; pointer-events:none; z-index:2; opacity:0; transition:opacity .08s linear; background: radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 26%, rgba(0,0,0,0.55) 48%, rgba(0,0,0,0.92) 70%); display:none; }
+  #bino.show { display:block; }
+  #bino::after { content:''; position:absolute; left:50%; top:50%; width:42vmin; height:42vmin; margin:-21vmin 0 0 -21vmin; border-radius:50%; border:1px solid rgba(126,231,135,0.18); box-shadow: inset 0 0 22px rgba(0,0,0,0.45); }
   .panel { position:fixed; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:8px 12px; font-size:12px; line-height:1.55; }
   #hud { top:12px; left:12px; min-width:170px; }
   #hud .row { display:flex; justify-content:space-between; gap:18px; }
@@ -217,6 +226,7 @@
 <body>
 <canvas id="c"></canvas>
 <canvas id="rainOverlay"></canvas>
+<div id="bino"></div>
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
@@ -253,7 +263,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -2016,6 +2026,13 @@ const state = {
   refueling: false,
   msgT: 0,
   cam: 0,
+  // Spotter binoculars: hold B in any external cam (not cockpit) while airborne
+  // to zoom the FOV way in with a subtle vignette so you can actually study
+  // distant airports / the AI plane / rings before flying to them. binoActive
+  // is set each frame from the key+cam gates; binoT eases 0..1 so the zoom and
+  // overlay fade smoothly rather than snapping. Release to snap back.
+  binoActive: false,
+  binoT: 0,
   flyByPos: new THREE.Vector3(),
   flyByActive: false,
   flyByT: 0,
@@ -4162,6 +4179,56 @@ function updateRainOverlay(dt){
   rainCtx.globalAlpha = 1.0;
 }
 
+// ====== BINOCULARS ======
+// Spotter zoom: hold B in an external cam (chase / flyby / orbit) while airborne
+// to crank the camera FOV way in and overlay a soft vignette. Designed to spot
+// distant airports, the AI traffic plane, or the next ring chain before flying
+// over. Release to snap back. We don't disturb settings.fov — the user's chosen
+// FOV is the baseline we ease back to.
+const BINO_FOV_MIN   = 12;     // fully-zoomed lens; tighter than this stops feeling like binoculars
+const BINO_EASE_IN   = 6.5;    // exp-ease rate while zooming in (per second)
+const BINO_EASE_OUT  = 9.0;    // snap-back rate when released
+const binoEl = document.getElementById('bino');
+function binosAllowed(){
+  // External cam means anything except cockpit (cam===1). Skip on the ground
+  // (B is brakes there), during the intro / photo / replay / pause modals, and
+  // while crashed (no point peering through binoculars at debris).
+  if (state.cam === 1) return false;
+  if (state.onGround) return false;
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
+  if (state.crashed) return false;
+  return true;
+}
+function updateBinoculars(dt){
+  const wantOn = !!(keys['KeyB']) && binosAllowed();
+  state.binoActive = wantOn;
+  const target = wantOn ? 1 : 0;
+  const rate = wantOn ? BINO_EASE_IN : BINO_EASE_OUT;
+  // Exponential ease toward the target so the zoom feels smooth even at low FPS.
+  const k = 1 - Math.exp(-rate * Math.max(0, dt));
+  state.binoT += (target - state.binoT) * k;
+  if (state.binoT < 0.0005) state.binoT = 0;
+  else if (state.binoT > 0.9995) state.binoT = 1;
+  // Drive FOV: lerp from user's chosen FOV down to BINO_FOV_MIN.
+  const baseFov = settings.fov;
+  const fov = baseFov + (BINO_FOV_MIN - baseFov) * state.binoT;
+  if (Math.abs(camera.fov - fov) > 0.01){
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+  // Drive the vignette overlay. Display flip avoids paying for the gradient
+  // when the player isn't using binoculars at all.
+  if (binoEl){
+    if (state.binoT > 0.001){
+      if (!binoEl.classList.contains('show')) binoEl.classList.add('show');
+      binoEl.style.opacity = String(state.binoT);
+    } else if (binoEl.classList.contains('show')){
+      binoEl.classList.remove('show');
+      binoEl.style.opacity = '0';
+    }
+  }
+}
+
 function loop(now){
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - lastT)/1000);
@@ -4202,6 +4269,7 @@ function loop(now){
     tickATC(now);
   }
   updateRainOverlay(dt);
+  updateBinoculars(dt);
   renderer.render(scene, camera);
 }
 
@@ -4229,7 +4297,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel','rainOverlay'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;

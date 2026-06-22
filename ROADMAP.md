@@ -48,10 +48,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Pause menu (Esc) — overlay with Resume / Restart Mission / Back to Menu, freezes sim + audio, also pauses the autopilot tick so nothing drifts. Currently there's no graceful way to bail mid-flight.
 - [x] Runway taxi guidance arrows — when on the ground near an airport, draw a faint chevron line on the taxiway pointing to the active runway threshold so new players can find where to take off from.
 - [x] Hard-deck altitude warning ("PULL UP") — when descending fast toward terrain below 150m AGL outside an airport zone, flash red "TERRAIN — PULL UP" with a sharp beep. Saves a lot of dumb crashes into mountains.
+- [x] Spotter binoculars (B key) — hold B in external cam to zoom FOV way in with a subtle vignette, so you can actually look at distant airports, the AI plane, or rings before flying to them. Release to snap back.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-- [ ] Spotter binoculars (B key) — hold B in external cam to zoom FOV way in with a subtle vignette, so you can actually look at distant airports, the AI plane, or rings before flying to them. Release to snap back.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
