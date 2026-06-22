@@ -62,6 +62,8 @@
   #mission .lbl { color:#6aa; }
   #mission .val { color:#cfe; font-weight:600; }
   #mission .tgt { color:#7ee787; }
+  #minimap { position:fixed; bottom:48px; right:12px; width:160px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:4px; }
+  #minimap canvas { display:block; width:100%; height:100%; }
   #cammode { position:fixed; bottom:12px; right:12px; padding:4px 10px; font-size:11px; letter-spacing:1px; color:#cfe; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; font-weight:700; }
   #cammode .lbl { color:#6aa; font-weight:500; margin-right:6px; }
   #cammode .mode { color:#7ee787; }
@@ -106,6 +108,7 @@
 <div id="help" class="panel">
   <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>T</kbd> +1h · <kbd>R</kbd> reset
 </div>
+<div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
 <div id="replay"><span class="dot"></span>REPLAY · LAST 30s<small>click or press <b>R</b> to skip</small></div>
 <div id="status"></div>
@@ -1779,6 +1782,7 @@ function step(dt){
   drawAttitude(plane.quaternion);
   drawCompass(hdg);
   drawVSI(vs);
+  drawMinimap(hdg);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -1989,6 +1993,124 @@ function drawVSI(vs){
   vsiCtx.beginPath();
   vsiCtx.arc(cx + 14, cy, 2.5, 0, Math.PI*2);
   vsiCtx.fill();
+}
+
+// ====== Mini-map ======
+// Top-down map in the bottom-right corner showing all airports, the plane,
+// and a short heading line. North is up. The viewport is centred on the plane
+// and spans roughly MINIMAP_RANGE metres so distant airports stay visible.
+const minimapCv = document.getElementById('minimapCv');
+const minimapCtx = minimapCv.getContext('2d');
+const MINIMAP_RANGE = 22000; // metres across full map width
+function drawMinimap(hdgDeg){
+  const W = minimapCv.width, H = minimapCv.height;
+  const cx = W/2, cy = H/2;
+  const R = Math.min(W, H)/2 - 2;
+  const scale = (W - 8) / MINIMAP_RANGE; // metres -> pixels
+  minimapCtx.clearRect(0,0,W,H);
+  // Circular background with subtle grid.
+  minimapCtx.save();
+  minimapCtx.beginPath(); minimapCtx.arc(cx, cy, R, 0, Math.PI*2); minimapCtx.clip();
+  minimapCtx.fillStyle = 'rgba(10,18,28,0.55)';
+  minimapCtx.fillRect(0,0,W,H);
+  // Faint range rings every 5 km.
+  minimapCtx.strokeStyle = 'rgba(106,170,170,0.25)';
+  minimapCtx.lineWidth = 1;
+  for (let km = 5; km <= 20; km += 5){
+    minimapCtx.beginPath();
+    minimapCtx.arc(cx, cy, km * 1000 * scale, 0, Math.PI*2);
+    minimapCtx.stroke();
+  }
+  // World axis cross (subtle).
+  minimapCtx.strokeStyle = 'rgba(106,170,170,0.18)';
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(cx, 4); minimapCtx.lineTo(cx, H-4);
+  minimapCtx.moveTo(4, cy); minimapCtx.lineTo(W-4, cy);
+  minimapCtx.stroke();
+  // Airports: small square + label. World +z is south (down on screen).
+  for (const a of AIRPORTS){
+    const dx = a.x - plane.position.x;
+    const dz = a.z - plane.position.z;
+    const px = cx + dx * scale;
+    const py = cy + dz * scale;
+    if (px < 4 || px > W-4 || py < 4 || py > H-4){
+      // Off-map: draw a tick on the rim pointing at the airport.
+      const ang = Math.atan2(dz, dx);
+      const ex = cx + Math.cos(ang) * (R - 6);
+      const ey = cy + Math.sin(ang) * (R - 6);
+      minimapCtx.fillStyle = a.isMain ? '#ffd166' : '#7ee787';
+      minimapCtx.beginPath();
+      minimapCtx.arc(ex, ey, 2.5, 0, Math.PI*2);
+      minimapCtx.fill();
+      continue;
+    }
+    // Runway line oriented by airport heading; length scaled from runway length.
+    const hLen = Math.max(6, (a.len * scale) * 0.5);
+    const cs = Math.cos(a.hdg), sn = Math.sin(a.hdg);
+    minimapCtx.strokeStyle = a.isMain ? '#ffd166' : '#7ee787';
+    minimapCtx.lineWidth = 2;
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(px - sn * hLen, py + cs * hLen);
+    minimapCtx.lineTo(px + sn * hLen, py - cs * hLen);
+    minimapCtx.stroke();
+    minimapCtx.fillStyle = a.isMain ? '#ffd166' : '#7ee787';
+    minimapCtx.font = 'bold 9px ui-monospace, monospace';
+    minimapCtx.textAlign = 'left';
+    minimapCtx.textBaseline = 'top';
+    minimapCtx.fillText(a.id, px + 5, py + 4);
+  }
+  // Hop target highlight: pulsing ring around the current target airport.
+  if (state.mode === 'hop' && !state.hopDone){
+    const wantId = state.hopOrder[state.hopIdx];
+    const wantAp = AIRPORTS.find(a => a.id === wantId);
+    if (wantAp){
+      const dx = wantAp.x - plane.position.x;
+      const dz = wantAp.z - plane.position.z;
+      const px = cx + dx * scale;
+      const py = cy + dz * scale;
+      const t = (performance.now() * 0.004) % 1;
+      const ringR = 8 + t * 8;
+      minimapCtx.strokeStyle = 'rgba(255,209,102,' + (1 - t).toFixed(3) + ')';
+      minimapCtx.lineWidth = 1.5;
+      minimapCtx.beginPath();
+      minimapCtx.arc(px, py, ringR, 0, Math.PI*2);
+      minimapCtx.stroke();
+    }
+  }
+  // Plane (centre): yellow triangle pointing along current heading. Forward
+  // heading 0° = north (up on screen, -z), 90° = east (+x).
+  const hdgRad = hdgDeg * Math.PI/180;
+  minimapCtx.save();
+  minimapCtx.translate(cx, cy);
+  minimapCtx.rotate(hdgRad);
+  // Short heading line ahead of the plane.
+  minimapCtx.strokeStyle = '#ffd166';
+  minimapCtx.lineWidth = 1;
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(0, 0);
+  minimapCtx.lineTo(0, -22);
+  minimapCtx.stroke();
+  minimapCtx.fillStyle = '#ffd166';
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(0, -7);
+  minimapCtx.lineTo(-4, 4);
+  minimapCtx.lineTo( 4, 4);
+  minimapCtx.closePath();
+  minimapCtx.fill();
+  minimapCtx.restore();
+  minimapCtx.restore();
+  // Outer ring border (above clip).
+  minimapCtx.strokeStyle = '#1e3548';
+  minimapCtx.lineWidth = 2;
+  minimapCtx.beginPath();
+  minimapCtx.arc(cx, cy, R, 0, Math.PI*2);
+  minimapCtx.stroke();
+  // 'N' marker at top so orientation is obvious.
+  minimapCtx.fillStyle = '#ff5252';
+  minimapCtx.font = 'bold 10px ui-monospace, monospace';
+  minimapCtx.textAlign = 'center';
+  minimapCtx.textBaseline = 'top';
+  minimapCtx.fillText('N', cx, 2);
 }
 
 // ====== Camera ======
