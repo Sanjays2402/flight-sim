@@ -20,25 +20,25 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Touch-and-go scoring — each successful landing gives points based on sink rate + centerline + speed at touchdown.
 - [x] Free-flight mission picker — start menu with: Free Flight, Touch & Go Challenge, Airport Hop.
 - [x] Airport hop mission — fly to the next airport in a sequence, finish timer.
+- [x] Procedural cities near airports — boxy buildings for visual interest on approach.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-1. **Procedural cities near airports** — boxy buildings for visual interest on approach.
-2. **Time of day cycle** — sun moves, sky color, lights on runways at night.
-3. **Weather: wind + crosswind on approach** — variable wind affects rudder.
-4. **Smoke / contrails behind plane** at high alt or when damaged.
-5. **External chase cam + cockpit cam toggle** (C key).
-6. **Replay last 30s** at the end of each landing.
-7. **Mini-map in HUD corner** — top-down with airports, plane, heading line.
-8. **Damage model** — over-G or hard-landing gives damage %, affects handling.
-9. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
-10. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
-11. **AI traffic** — one other plane doing circuits at the home airport.
-12. **Mobile touch controls** — virtual stick on left, throttle slider on right.
-13. **Settings panel** — sensitivity, FOV, audio volume.
+1. **Time of day cycle** — sun moves, sky color, lights on runways at night.
+2. **Weather: wind + crosswind on approach** — variable wind affects rudder.
+3. **Smoke / contrails behind plane** at high alt or when damaged.
+4. **External chase cam + cockpit cam toggle** (C key).
+5. **Replay last 30s** at the end of each landing.
+6. **Mini-map in HUD corner** — top-down with airports, plane, heading line.
+7. **Damage model** — over-G or hard-landing gives damage %, affects handling.
+8. **Engine-out glide** — fuel runs out / kill engine with K, see if you can land deadstick.
+9. **Refuel on ground at airport** — taxi to apron, fuel ticks up.
+10. **AI traffic** — one other plane doing circuits at the home airport.
+11. **Mobile touch controls** — virtual stick on left, throttle slider on right.
+12. **Settings panel** — sensitivity, FOV, audio volume.
+13. **Liveries / paint picker** — 3–5 color schemes for the plane.
 14. **Liveries / paint picker** — 3–5 color schemes for the plane.
-15. **Liveries / paint picker** — 3–5 color schemes for the plane.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

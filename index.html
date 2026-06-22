@@ -536,6 +536,77 @@ function makeAirport(a){
 for (const a of AIRPORTS) makeAirport(a);
 const MAIN_AP = AIRPORTS[0];
 
+// ====== PROCEDURAL CITIES (instanced boxes near each airport) ======
+// Boxy buildings clustered in a ring around every airport, so approaches have
+// visual interest. Taller blocks near the centre form a skyline; lower
+// outskirts fade into countryside. One InstancedMesh per airport keeps draw
+// calls cheap. Buildings sit on terrain, never on runway/water/lake.
+{
+  const CITY_PER_AIRPORT = 220;
+  const CITY_R_MIN = 320;     // skip the runway/hangar zone
+  const CITY_R_MAX = 1800;    // outer suburb edge
+  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+  const boxMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  // Per-instance tint via instanceColor; vertexColors:true enables that mix.
+  for (let ai = 0; ai < AIRPORTS.length; ai++){
+    const a = AIRPORTS[ai];
+    const mesh = new THREE.InstancedMesh(boxGeo, boxMat, CITY_PER_AIRPORT);
+    mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    const colors = new Float32Array(CITY_PER_AIRPORT * 3);
+    const dummy = new THREE.Object3D();
+    const tmpColor = new THREE.Color();
+    let n = 0, tries = 0;
+    while (n < CITY_PER_AIRPORT && tries < CITY_PER_AIRPORT * 20){
+      tries++;
+      // Deterministic-ish ring scatter around this airport.
+      const ang = hash2(ai * 13 + 1, tries) * Math.PI * 2;
+      const rNorm = hash2(ai * 17 + 5, tries * 3 + 7);
+      const r = CITY_R_MIN + Math.pow(rNorm, 0.8) * (CITY_R_MAX - CITY_R_MIN);
+      const x = a.x + Math.cos(ang) * r;
+      const z = a.z + Math.sin(ang) * r;
+      const h = terrainHeight(x, z);
+      if (h < 6) continue;                                    // no buildings in water/beach
+      if (h > 280) continue;                                  // no buildings on cliffs
+      const fr = nearestRunwayInfo(x, z);
+      if (fr.d < 260) continue;                               // clear of runway/hangars
+      const ldx = (x - LAKE.x) / LAKE.rx;
+      const ldz = (z - LAKE.z) / LAKE.rz;
+      if (Math.hypot(ldx, ldz) < 1.15) continue;              // not in the lake
+      // Skyline: tallest near centre, shrinking with distance.
+      const distFrac = (r - CITY_R_MIN) / (CITY_R_MAX - CITY_R_MIN);
+      const tallChance = 1 - distFrac;
+      const rRand = hash2(ai * 23 + 11, tries * 5 + 3);
+      let bh;
+      if (rRand < 0.08 * tallChance) bh = 38 + rRand * 60;   // rare downtown tower
+      else if (rRand < 0.35)         bh = 12 + rRand * 22;   // mid-rise
+      else                            bh = 4  + rRand * 9;   // small house/shop
+      const bw = 8 + hash2(ai * 29, tries * 7) * 18;
+      const bd = 8 + hash2(ai * 31, tries * 9) * 18;
+      const yaw = hash2(ai * 37, tries * 11) * Math.PI * 2;
+      dummy.position.set(x, h + bh * 0.5, z);
+      dummy.rotation.set(0, yaw, 0);
+      dummy.scale.set(bw, bh, bd);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(n, dummy.matrix);
+      // Muted urban palette: warm beiges, grey concretes, occasional brick red.
+      const cRand = hash2(ai * 41, tries * 13);
+      if (cRand < 0.35)      tmpColor.setRGB(0.78, 0.74, 0.66);
+      else if (cRand < 0.65) tmpColor.setRGB(0.62, 0.62, 0.64);
+      else if (cRand < 0.85) tmpColor.setRGB(0.50, 0.52, 0.55);
+      else                   tmpColor.setRGB(0.66, 0.42, 0.34);
+      const shade = 0.85 + hash2(ai * 43, tries * 17) * 0.30;
+      colors[n*3+0] = tmpColor.r * shade;
+      colors[n*3+1] = tmpColor.g * shade;
+      colors[n*3+2] = tmpColor.b * shade;
+      n++;
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+    scene.add(mesh);
+  }
+}
+
 // ====== TREES (instanced) ======
 {
   const NUM_TREES = 700;
