@@ -75,6 +75,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
 </div>
@@ -126,6 +127,7 @@
     <div class="tip">
       Throttle to ~80%, hold <kbd>I</kbd> at ~140 km/h to rotate. Retract gear with <kbd>G</kbd>.
       Three airfields scattered across mountains, lakes &amp; coast. To land: lower gear, deploy flaps, fly the PAPI — <span style="color:#ff3030">red</span>=low, <span style="color:#fff">white</span>=high, 2&amp;2=on slope.
+      Watch the <b>WIND</b> readout — a stiff crosswind on final means you’ll need rudder (<kbd>Q</kbd>/<kbd>E</kbd>) to crab the nose into the breeze.
     </div>
     <div class="go">CLICK or press SPACE to fly</div>
   </div>
@@ -994,6 +996,10 @@ const state = {
   flyByT: 0,
   introOpen: true,
   wind: new THREE.Vector3(2, 0, 1.2),
+  // Wind drifts toward a periodically re-rolled target so each approach is different.
+  // Stored in world units (m/s). +x = wind FROM west, +z = wind FROM north.
+  windTarget: new THREE.Vector3(2, 0, 1.2),
+  windNextChangeMs: 0,
   stall: 0,
   vortex: 0,
   scoreLast: null,
@@ -1051,6 +1057,9 @@ function resetPlane(){
   state.stall = 0;
   state.vortex = 0;
   state.msgT = 0;
+  // Seed a fresh wind on reset so reps feel different.
+  pickWindTarget();
+  state.wind.copy(state.windTarget);
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   hideStatus();
 }
@@ -1161,6 +1170,17 @@ function fmtHopTime(ms){
   return m + ':' + String(s).padStart(2, '0');
 }
 
+// Pick a new wind target: variable speed (0..14 m/s ≈ 0..27 kt) and direction.
+// Cross-runway components get amplified slightly so crosswind approaches show up often.
+function pickWindTarget(){
+  const dir = Math.random() * Math.PI * 2;
+  const spd = 2 + Math.random() * 12;            // 2..14 m/s
+  state.windTarget.set(Math.sin(dir) * spd, 0, Math.cos(dir) * spd);
+  state.windNextChangeMs = performance.now() + (30000 + Math.random() * 60000); // re-roll every 30..90s
+}
+pickWindTarget();
+state.wind.copy(state.windTarget);
+
 function landingProj(px, pz){
   let best = null, bestS = 1e9;
   for (const ri of runwayInfos){
@@ -1200,8 +1220,16 @@ function step(dt){
   const right = tmpV3.set(1,0,0).applyQuaternion(plane.quaternion);
 
   const v = state.vel;
-  const speed = v.length();
-  const vBody = v.clone().applyQuaternion(plane.quaternion.clone().invert());
+  // Airspeed = ground velocity minus wind vector. Aerodynamic forces (lift,
+  // drag, AoA, sideslip) all key off airspeed, not ground velocity. This is
+  // what makes wind feel real: with a steady crosswind, the plane crabs into
+  // the wind on approach unless the pilot dances the rudder.
+  // Wind effect ramps in once the plane is moving — prevents weird sideforce
+  // sitting still on the ramp with a 10 m/s wind blowing.
+  const windEffect = state.onGround ? Math.min(1, v.length() / 30) : 1;
+  const airVel = v.clone().addScaledVector(state.wind, -windEffect);
+  const speed = airVel.length();
+  const vBody = airVel.clone().applyQuaternion(plane.quaternion.clone().invert());
   const vFwd = -vBody.z;
   const vVert = vBody.y;
   let aoa = 0;
@@ -1230,7 +1258,7 @@ function step(dt){
   const dragMag = qDyn * WING_AREA * cd;
 
   const liftDir = up.clone();
-  const dragDir = speed > 0.01 ? v.clone().multiplyScalar(-1/speed) : new THREE.Vector3();
+  const dragDir = speed > 0.01 ? airVel.clone().multiplyScalar(-1/speed) : new THREE.Vector3();
 
   const thrustMag = state.throttle * MAX_THRUST;
   const accel = new THREE.Vector3();
@@ -1250,7 +1278,9 @@ function step(dt){
   plane.rotateY(-yIn * YAW_AUTH   * qFactor * dt);
 
   if (speed > 8){
-    const velDir = v.clone().normalize();
+    // Weathervane: align nose with airflow, not ground track. This lets the
+    // plane crab in a crosswind (nose into wind, body of jet still tracks straight).
+    const velDir = airVel.clone().normalize();
     const dot = THREE.MathUtils.clamp(fwd.dot(velDir), -1, 1);
     const axis = new THREE.Vector3().crossVectors(fwd, velDir);
     const angle = Math.acos(dot);
@@ -1399,6 +1429,16 @@ function step(dt){
     for (const u of waterUniList) u.t.value = tm;
   }
 
+  // Wind: drift current wind smoothly toward target; re-roll target periodically.
+  // On the ground, kill wind so taxi is calm — wind only matters once airborne.
+  if (performance.now() > state.windNextChangeMs) pickWindTarget();
+  const windEase = 1 - Math.exp(-0.25 * dt);
+  state.wind.x += (state.windTarget.x - state.wind.x) * windEase;
+  state.wind.z += (state.windTarget.z - state.wind.z) * windEase;
+  // Light gusts on top of the steady wind.
+  const gust = Math.sin(performance.now() * 0.0009) * 0.8 + Math.cos(performance.now() * 0.0017) * 0.5;
+  state.wind.x += gust * 0.02;
+  state.wind.z += gust * 0.02;
   // Time of day advances every step.
   state.todHours = (state.todHours + TOD_SPEED * dt) % 24;
   applyTimeOfDay(state.todHours);
@@ -1422,6 +1462,14 @@ function step(dt){
   $('#flp').textContent  = flapDeg;
   $('#gear').textContent = state.gearDown ? 'DOWN' : 'UP';
   $('#aoa').textContent  = aoaDeg.toFixed(1);
+
+  // Wind HUD: direction wind is coming FROM (aviation convention) + speed in knots.
+  // Our wind vector points the way wind is going TO; flip 180° for the readout.
+  const windSpd = Math.hypot(state.wind.x, state.wind.z);
+  const windSpdKt = windSpd * 1.94384;
+  let windFromDeg = Math.atan2(-state.wind.x, -state.wind.z) * 180/Math.PI;
+  if (windFromDeg < 0) windFromDeg += 360;
+  $('#wind').textContent = String(Math.round(windFromDeg)).padStart(3,'0') + '@' + Math.round(windSpdKt) + 'kt';
 
   // Touch-and-go score panel
   document.getElementById('scLast').textContent  = state.scoreLast == null ? '—' : ('+'+state.scoreLast);
