@@ -163,6 +163,9 @@
   #settings .row .name { color:#6aa; font-size:11px; letter-spacing:1px; font-weight:700; }
   #settings .row .val { color:#fff; font-weight:700; font-size:12px; }
   #settings input[type=range] { width:100%; accent-color:#7ee787; }
+  #settings select { width:100%; padding:6px 8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
+  #settings select:hover { border-color:#7ee787; }
+  #settings select:focus { outline:none; border-color:#7ee787; }
   #settings .hint { font-size:10px; color:#9bb; margin-top:2px; line-height:1.4; }
   #settings .actions { display:flex; gap:8px; margin-top:6px; }
   #settings button { flex:1; padding:8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
@@ -349,6 +352,11 @@
       <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
     </div>
+    <div class="row">
+      <div class="top"><span class="name">SMOKE TRAIL COLOR</span><span class="val" id="setTrailV">LIVERY</span></div>
+      <select id="setTrail"></select>
+      <div class="hint">Ribbon (<kbd>Y</kbd>) and airshow smoke (<kbd>~</kbd>) color. LIVERY follows your paint scheme.</div>
+    </div>
     <div class="actions">
       <button id="setReset">RESET</button>
       <button id="setClose" class="primary">CLOSE</button>
@@ -500,7 +508,21 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery' };
+// Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
+// "track the active livery accent" (legacy behavior, the default). Any other
+// id is a fixed hex applied to both the ribbon shader uniform and per-puff
+// airshow sprite color. Add new entries here and they show up in the dropdown.
+const TRAIL_COLORS = [
+  { id: 'livery',  name: 'LIVERY',  hex: null },
+  { id: 'white',   name: 'WHITE',   hex: 0xf2f2f2 },
+  { id: 'red',     name: 'RED',     hex: 0xff3030 },
+  { id: 'blue',    name: 'BLUE',    hex: 0x3aa6ff },
+  { id: 'green',   name: 'GREEN',   hex: 0x55e07a },
+  { id: 'yellow',  name: 'YELLOW',  hex: 0xffd23a },
+  { id: 'magenta', name: 'MAGENTA', hex: 0xff4ad2 },
+];
+const TRAIL_COLOR_IDS = TRAIL_COLORS.map(t => t.id);
 const settings = Object.assign({}, SETTINGS_DEFAULT);
 try {
   const raw = localStorage.getItem(SETTINGS_KEY);
@@ -511,6 +533,7 @@ try {
     if (typeof saved.volume === 'number') settings.volume = Math.max(0, Math.min(1, saved.volume));
     if (Number.isInteger(saved.livery) && saved.livery >= 0 && saved.livery < LIVERIES.length) settings.livery = saved.livery;
     if (typeof saved.rain === 'boolean') settings.rain = saved.rain;
+    if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -2292,6 +2315,21 @@ function clearContrails(){
   contrailAccum = 0;
 }
 
+// ====== TRAIL COLOR HELPER ======
+// Both the aerobatic ribbon and the airshow smoke plume share this color
+// source so the smoke-trail-color setting moves them together. Default mode
+// ('livery') tracks the live livery accent so swapping paint mid-flight still
+// recolors the trail going forward (matching the legacy behavior). Any other
+// id returns a fixed hex from TRAIL_COLORS. Returns a shared THREE.Color
+// instance — call sites copy() the value rather than holding the ref.
+const _trailColorTmp = new THREE.Color(0xffffff);
+function getTrailColor(){
+  const entry = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
+  if (entry.hex == null) return matAccent.color;
+  _trailColorTmp.setHex(entry.hex);
+  return _trailColorTmp;
+}
+
 // ====== AEROBATIC RIBBON TRAIL ======
 // Toggleable colored smoke trail off the tail (Y key). Off by default so it
 // doesn't clutter normal flights. Stores ~5s of world-space tail positions
@@ -2417,9 +2455,9 @@ function updateRibbon(dt, nowMs){
     ribbonAlphaArr[i*2]   = alpha;
     ribbonAlphaArr[i*2+1] = alpha;
   }
-  // Sync the ribbon color to the active livery accent on every frame the
-  // ribbon is visible so changing paint in the settings panel updates the trail.
-  ribbonMat.uniforms.uColor.value.copy(matAccent.color);
+  // Sync the ribbon color to the active trail-color setting on every frame the
+  // ribbon is visible so changing it in the settings panel updates the trail.
+  ribbonMat.uniforms.uColor.value.copy(getTrailColor());
   ribbonGeo.attributes.position.needsUpdate = true;
   ribbonGeo.attributes.aAlpha.needsUpdate = true;
   ribbonMesh.visible = true;
@@ -2475,9 +2513,10 @@ function spawnAirshowPuff(world){
   airshowHead = (airshowHead + 1) % AIRSHOW_MAX;
   p.spr.position.copy(world);
   p.spr.scale.setScalar(AIRSHOW_START_R);
-  // Tint each puff to the live livery accent so swapping paint mid-flight
-  // updates the plume going forward without recoloring already-aged smoke.
-  p.mat.color.copy(matAccent.color);
+  // Tint each puff to the live trail color (livery accent by default, or a
+  // fixed pick from the settings panel) so swapping mid-flight updates the
+  // plume going forward without recoloring already-aged smoke.
+  p.mat.color.copy(getTrailColor());
   p.age = 0;
   p.spr.visible = true;
 }
@@ -5598,6 +5637,8 @@ addEventListener('keydown', e => {
   const livV = document.getElementById('setLivV');
   const rainBtn = document.getElementById('setRainBtn');
   const rainV = document.getElementById('setRainV');
+  const trailSel = document.getElementById('setTrail');
+  const trailV = document.getElementById('setTrailV');
   if (!panel || !btnOpen) return;
   // Build the livery chip row once. Each chip stores its index and repaints the
   // plane on click via applyLivery(); selection state is reflected on syncInputs.
@@ -5622,6 +5663,21 @@ addEventListener('keydown', e => {
     });
   }
   buildLiveryChips();
+  // Populate the smoke-trail-color dropdown once. Selected option mirrors
+  // settings.trailColor on every syncInputs() and the change handler writes
+  // back into settings + saves; the trail emission code reads getTrailColor()
+  // on each tick so no plane / scene rebuild is needed.
+  function buildTrailOptions(){
+    if (!trailSel) return;
+    trailSel.innerHTML = '';
+    for (const opt of TRAIL_COLORS){
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.name;
+      trailSel.appendChild(o);
+    }
+  }
+  buildTrailOptions();
   function syncInputs(){
     sens.value = Math.round(settings.sensitivity * 100);
     fov.value = Math.round(settings.fov);
@@ -5639,6 +5695,11 @@ addEventListener('keydown', e => {
     if (rainBtn){
       rainBtn.textContent = settings.rain ? 'RAIN: ON' : 'RAIN: OFF';
       rainBtn.classList.toggle('primary', settings.rain);
+    }
+    if (trailSel) trailSel.value = settings.trailColor;
+    if (trailV){
+      const tc = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
+      trailV.textContent = tc.name;
     }
   }
   function applyFov(){
@@ -5671,6 +5732,15 @@ addEventListener('keydown', e => {
       e.stopPropagation();
       settings.rain = !settings.rain;
       applyRainVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (trailSel){
+    trailSel.addEventListener('change', () => {
+      const v = trailSel.value;
+      if (TRAIL_COLOR_IDS.indexOf(v) === -1) return;
+      settings.trailColor = v;
       syncInputs();
       saveSettings();
     });
