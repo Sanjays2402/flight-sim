@@ -106,6 +106,18 @@
   #settings button { flex:1; padding:8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
   #settings button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
   #settings button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  /* Livery picker — row of swatch chips. Each chip is a small pill with two
+     halves (fuselage on top, accent on bottom) plus the scheme name beneath.
+     Selected chip gets the green outline so the active paint is obvious. */
+  #setLiveries { display:grid; grid-template-columns: repeat(5, 1fr); gap:6px; }
+  #setLiveries .lv { cursor:pointer; padding:4px 2px 5px; border-radius:6px; background:rgba(20,40,60,.55); border:1px solid #2a4a6a; text-align:center; transition:border-color .15s ease, background .15s ease; }
+  #setLiveries .lv:hover { border-color:#7ee787; background:rgba(40,80,110,.7); }
+  #setLiveries .lv.sel { border-color:#7ee787; background:rgba(40,90,55,.6); }
+  #setLiveries .lv .sw { width:34px; height:18px; margin:0 auto 3px; border-radius:4px; border:1px solid rgba(0,0,0,.4); overflow:hidden; display:flex; flex-direction:column; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+  #setLiveries .lv .sw .top { flex:2; }
+  #setLiveries .lv .sw .bot { flex:1; }
+  #setLiveries .lv .nm { font-size:9px; letter-spacing:1px; color:#9bb; font-weight:700; }
+  #setLiveries .lv.sel .nm { color:#7ee787; }
 </style>
 </head>
 <body>
@@ -164,6 +176,11 @@
       <div class="top"><span class="name">AUDIO VOLUME</span><span class="val" id="setVolV">100%</span></div>
       <input type="range" id="setVol" min="0" max="100" step="5" value="100">
       <div class="hint">Master volume (stall horn, future engine sound).</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">LIVERY</span><span class="val" id="setLivV">CLASSIC</span></div>
+      <div id="setLiveries"></div>
+      <div class="hint">Paint scheme for your plane. Saved between flights.</div>
     </div>
     <div class="actions">
       <button id="setReset">RESET</button>
@@ -243,7 +260,18 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.5, 4000
 // Defaults match the values that existed before settings shipped, so opting out
 // (i.e. never touching the panel) gives exactly the same feel as before.
 const SETTINGS_KEY = 'flightsim.settings.v1';
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0 };
+// LIVERIES: hand-picked paint schemes. Index 0 is the original look so existing
+// players keep their plane. Each entry is { name, fuse, accent } where fuse is
+// the main body color and accent paints the belly stripe, wingtips, tail flash,
+// and flaps. Add more here and they'll show up in the picker automatically.
+const LIVERIES = [
+  { name: 'CLASSIC', fuse: 0xeeeeee, accent: 0xc62828 },
+  { name: 'NAVY',    fuse: 0x1d3a6a, accent: 0xffc94a },
+  { name: 'FOREST',  fuse: 0x274e2a, accent: 0xe8e0c8 },
+  { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
+  { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
+];
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0 };
 const settings = Object.assign({}, SETTINGS_DEFAULT);
 try {
   const raw = localStorage.getItem(SETTINGS_KEY);
@@ -252,6 +280,7 @@ try {
     if (typeof saved.sensitivity === 'number') settings.sensitivity = Math.max(0.3, Math.min(2.0, saved.sensitivity));
     if (typeof saved.fov === 'number') settings.fov = Math.max(50, Math.min(110, saved.fov));
     if (typeof saved.volume === 'number') settings.volume = Math.max(0, Math.min(1, saved.volume));
+    if (Number.isInteger(saved.livery) && saved.livery >= 0 && saved.livery < LIVERIES.length) settings.livery = saved.livery;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -917,8 +946,17 @@ applyTimeOfDay(9.0);
 const plane = new THREE.Group();
 scene.add(plane);
 
+// matFuse / matAccent are shared across every airframe part, so swapping their
+// color repaints the whole plane in one shot. applyLivery() does the swap and
+// is called once at startup plus whenever the player picks a new scheme.
 const matFuse   = new THREE.MeshLambertMaterial({ color: 0xeeeeee });
 const matAccent = new THREE.MeshLambertMaterial({ color: 0xc62828 });
+function applyLivery(i){
+  const lv = LIVERIES[i] || LIVERIES[0];
+  matFuse.color.setHex(lv.fuse);
+  matAccent.color.setHex(lv.accent);
+}
+applyLivery(settings.livery);
 const matDark   = new THREE.MeshLambertMaterial({ color: 0x222428 });
 const matGlass  = new THREE.MeshLambertMaterial({ color: 0x223344, transparent:true, opacity:0.75 });
 const matMetal  = new THREE.MeshLambertMaterial({ color: 0x999999 });
@@ -2741,7 +2779,32 @@ replayEl.addEventListener('click', () => stopReplay());
   const sensV = document.getElementById('setSensV');
   const fovV = document.getElementById('setFovV');
   const volV = document.getElementById('setVolV');
+  const livRow = document.getElementById('setLiveries');
+  const livV = document.getElementById('setLivV');
   if (!panel || !btnOpen) return;
+  // Build the livery chip row once. Each chip stores its index and repaints the
+  // plane on click via applyLivery(); selection state is reflected on syncInputs.
+  function buildLiveryChips(){
+    if (!livRow) return;
+    livRow.innerHTML = '';
+    LIVERIES.forEach((lv, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'lv';
+      chip.dataset.idx = String(i);
+      chip.title = lv.name;
+      const fuseHex = '#' + lv.fuse.toString(16).padStart(6, '0');
+      const accHex  = '#' + lv.accent.toString(16).padStart(6, '0');
+      chip.innerHTML = '<div class="sw"><div class="top" style="background:' + fuseHex + '"></div><div class="bot" style="background:' + accHex + '"></div></div><div class="nm">' + lv.name + '</div>';
+      chip.addEventListener('click', () => {
+        settings.livery = i;
+        applyLivery(i);
+        syncInputs();
+        saveSettings();
+      });
+      livRow.appendChild(chip);
+    });
+  }
+  buildLiveryChips();
   function syncInputs(){
     sens.value = Math.round(settings.sensitivity * 100);
     fov.value = Math.round(settings.fov);
@@ -2749,6 +2812,12 @@ replayEl.addEventListener('click', () => stopReplay());
     sensV.textContent = settings.sensitivity.toFixed(2) + '×';
     fovV.textContent = Math.round(settings.fov) + '°';
     volV.textContent = Math.round(settings.volume * 100) + '%';
+    if (livRow){
+      for (const c of livRow.children){
+        c.classList.toggle('sel', +c.dataset.idx === settings.livery);
+      }
+    }
+    if (livV) livV.textContent = (LIVERIES[settings.livery] || LIVERIES[0]).name;
   }
   function applyFov(){
     camera.fov = settings.fov;
@@ -2778,6 +2847,7 @@ replayEl.addEventListener('click', () => stopReplay());
   btnReset.addEventListener('click', () => {
     Object.assign(settings, SETTINGS_DEFAULT);
     applyFov();
+    applyLivery(settings.livery);
     syncInputs();
     saveSettings();
   });
