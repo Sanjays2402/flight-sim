@@ -132,6 +132,14 @@
      Lets the player tune control sensitivity, FOV, and master audio volume. Stored in localStorage. */
   #setbtn { position:fixed; bottom:46px; right:12px; padding:4px 9px; font-size:13px; color:#cfe; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; cursor:pointer; font-family:inherit; line-height:1; user-select:none; -webkit-user-select:none; }
   #setbtn:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  /* Airshow smoke: HUD toggle (also bound to `~`) that turns on a permanent
+     colored smoke trail off the tail in the active livery accent color.
+     Sits just above #setbtn on the right edge so it stays out of the way.
+     Hidden on mobile-throttle overlap is fine — the button is also a tap
+     target on touch devices when not obscured, and `~` works on keyboards. */
+  #airshow { position:fixed; bottom:80px; right:12px; padding:4px 9px; font-size:13px; color:#cfe; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; cursor:pointer; font-family:inherit; line-height:1; user-select:none; -webkit-user-select:none; min-width:18px; text-align:center; touch-action:manipulation; }
+  #airshow:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  #airshow.on { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
   #settings { position:fixed; inset:0; background:rgba(0,5,12,.78); display:none; align-items:center; justify-content:center; z-index:20; }
   #settings.show { display:flex; }
   #settings .card { width:340px; padding:20px 24px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; }
@@ -263,7 +271,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>Y</kbd> ribbon · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -273,6 +281,7 @@
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
+<button id="airshow" title="Airshow smoke (~)">~</button>
 <div id="settings">
   <div class="card">
     <h2>SETTINGS</h2>
@@ -2150,6 +2159,119 @@ function updateRibbon(dt, nowMs){
   ribbonMesh.visible = true;
 }
 
+// ====== AIRSHOW SMOKE TRAIL ======
+// Permanent colored smoke plume off the tail in the active livery accent color.
+// Toggled by the HUD `~` button (or the `~` key). Independent of the aerobatic
+// ribbon — the ribbon is a sharp shaded ribbon, this is a soft puffy plume
+// that lingers behind the plane, like Red-Arrows-style display smoke. Built on
+// the same fixed-size sprite pool pattern as the contrails so we never
+// allocate at runtime. Hidden anywhere a live trail wouldn't make sense
+// (paused, replay, photo mode, on the ground, crashed, intro open).
+const AIRSHOW_MAX = 160;              // pool size (~8s of trail at peak emit)
+const AIRSHOW_LIFE = 8.0;             // seconds before a puff fully fades out
+const AIRSHOW_START_R = 0.5;          // initial puff radius (m)
+const AIRSHOW_GROW = 2.2;             // additional radius growth over lifetime (m)
+const AIRSHOW_EMIT_PER_SEC = 22;      // puffs per second while active
+const AIRSHOW_TAIL_OFFSET = new THREE.Vector3(0, 0.55, 3.8); // matches the ribbon
+const airshowTex = (() => {
+  // Soft round alpha disc — same baked-canvas trick as the contrails so we get
+  // a cheap, color-tintable puff sprite. Tinted per-sprite via material.color.
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const cx = cv.getContext('2d');
+  const g = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  cx.fillStyle = g; cx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const airshowPool = [];
+let airshowHead = 0;
+for (let i = 0; i < AIRSHOW_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xffffff
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(AIRSHOW_START_R);
+  spr.visible = false;
+  spr.renderOrder = 4;
+  scene.add(spr);
+  airshowPool.push({ spr, mat, age: AIRSHOW_LIFE + 1, life: AIRSHOW_LIFE });
+}
+let airshowAccum = 0;
+const _asTmpOff = new THREE.Vector3();
+const _asTmpWorld = new THREE.Vector3();
+function spawnAirshowPuff(world){
+  const p = airshowPool[airshowHead];
+  airshowHead = (airshowHead + 1) % AIRSHOW_MAX;
+  p.spr.position.copy(world);
+  p.spr.scale.setScalar(AIRSHOW_START_R);
+  // Tint each puff to the live livery accent so swapping paint mid-flight
+  // updates the plume going forward without recoloring already-aged smoke.
+  p.mat.color.copy(matAccent.color);
+  p.age = 0;
+  p.spr.visible = true;
+}
+function clearAirshowSmoke(){
+  for (const p of airshowPool){ p.spr.visible = false; p.mat.opacity = 0; p.age = p.life + 1; }
+  airshowAccum = 0;
+}
+function setAirshowSmokeBtn(){
+  const btn = document.getElementById('airshow');
+  if (!btn) return;
+  if (state.airshowSmoke) btn.classList.add('on'); else btn.classList.remove('on');
+}
+function toggleAirshowSmoke(){
+  state.airshowSmoke = !state.airshowSmoke;
+  if (!state.airshowSmoke) clearAirshowSmoke();
+  setAirshowSmokeBtn();
+  showStatus('AIRSHOW SMOKE ' + (state.airshowSmoke ? 'ON' : 'OFF'), null, state.airshowSmoke ? 'good' : 'hard');
+}
+// (Button wiring lives below the `state` declaration so the click handler can
+// read state.airshowSmoke safely; const TDZ would bite if we wired it here.)
+function updateAirshowSmoke(dt){
+  // Emit while the toggle is on and we're actually flying — same suppression
+  // list as the ribbon so paused/replay/photo/ground/crashed/intro never spawn
+  // new puffs. Already-alive puffs keep aging out either way so a quick toggle
+  // off leaves a natural trailing tail instead of popping the plume.
+  const allowEmit = state.airshowSmoke && !state.paused && !state.replayActive
+    && !state.photoMode && !state.onGround && !state.crashed && !state.introOpen;
+  if (allowEmit){
+    airshowAccum += AIRSHOW_EMIT_PER_SEC * dt;
+    while (airshowAccum >= 1){
+      airshowAccum -= 1;
+      _asTmpWorld.copy(_asTmpOff.copy(AIRSHOW_TAIL_OFFSET))
+        .applyQuaternion(plane.quaternion).add(plane.position);
+      spawnAirshowPuff(_asTmpWorld);
+    }
+  } else {
+    airshowAccum = 0;
+  }
+  // Age every puff, drift gently with wind, grow, fade. Mirrors the contrail
+  // loop so behavior stays familiar.
+  for (const p of airshowPool){
+    if (!p.spr.visible) continue;
+    p.age += dt;
+    if (p.age >= p.life){
+      p.spr.visible = false;
+      p.mat.opacity = 0;
+      continue;
+    }
+    const t = p.age / p.life;
+    p.spr.position.x += state.wind.x * 0.25 * dt;
+    p.spr.position.z += state.wind.z * 0.25 * dt;
+    const r = AIRSHOW_START_R + AIRSHOW_GROW * t;
+    p.spr.scale.setScalar(r);
+    // Fade in fast, hold a moment, then long fade-out for a trailing plume.
+    const fadeIn = Math.min(1, t / 0.08);
+    const fadeOut = Math.min(1, (1 - t) / 0.6);
+    p.mat.opacity = 0.85 * fadeIn * fadeOut;
+  }
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -2199,6 +2321,11 @@ const state = {
   // and screenshots, hidden anywhere we wouldn't want a live trail (paused,
   // replay, photo mode, on the ground, crashed).
   ribbonOn: false,
+  // Airshow smoke: HUD-toggleable permanent colored smoke trail off the tail
+  // in the livery accent color (toggle via the `~` button or key). Pairs with
+  // the ribbon or stands alone — the ribbon is a tight shaded ribbon, this
+  // is a soft puffy smoke plume. Hidden in the same situations as the ribbon.
+  airshowSmoke: false,
   // GPWS (ground proximity warning): throttle the "PULL UP" beep so it only
   // chirps a few times per second instead of every frame. Timestamp in ms
   // (performance.now) of the last beep; 0 means "ready to beep now".
@@ -2254,6 +2381,21 @@ const state = {
   // those modes keep their existing Esc behavior.
   paused: false
 };
+(function setupAirshowSmokeBtn(){
+  // Wire the on-screen `~` HUD button to the same toggle the keyboard uses.
+  // Click works on desktop; touch devices also trigger click on tap. The
+  // button has its own .on class for the green tint when smoke is active.
+  // Lives below the `state` declaration so the handler can safely read it
+  // (const TDZ makes earlier wiring throw on the initial setAirshowSmokeBtn).
+  const btn = document.getElementById('airshow');
+  if (!btn) return;
+  btn.addEventListener('click', e => {
+    e.preventDefault();
+    if (state.introOpen) return;
+    toggleAirshowSmoke();
+  });
+  setAirshowSmokeBtn();
+})();
 
 // Replay ring buffer. We sample at REPLAY_HZ for REPLAY_SECONDS of history.
 // Snapshots are plain objects with the only fields needed to redraw the plane:
@@ -2429,6 +2571,13 @@ addEventListener('keydown', e=>{
     state.ribbonOn = !state.ribbonOn;
     if (!state.ribbonOn) clearRibbon();
     showStatus('RIBBON ' + (state.ribbonOn ? 'ON' : 'OFF'), null, state.ribbonOn ? 'good' : 'hard');
+  }
+  if (e.code==='Backquote'){
+    // Airshow smoke toggle. Permanent puffy plume in the livery accent color.
+    // Pairs with the ribbon or stands alone. Same HUD `~` button hits this
+    // path too; keep the two in sync via toggleAirshowSmoke().
+    if (state.introOpen) return;
+    toggleAirshowSmoke();
   }
 });
 
@@ -2688,6 +2837,9 @@ function resetPlane(){
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   clearContrails();
   clearRibbon();
+  // Clear any in-flight airshow smoke puffs so reset doesn't leave colored
+  // sprites drifting over the runway. The toggle state itself is preserved.
+  clearAirshowSmoke();
   // Replay buffer also resets so the next session's replay starts clean.
   stopReplay();
   clearReplayBuffer();
@@ -3465,6 +3617,9 @@ function step(dt){
   // tracks real time even when the sim slows under heavy load. Function itself
   // is a no-op when state.ribbonOn is false.
   updateRibbon(dt, performance.now());
+  // Airshow smoke — independent of the ribbon. Function self-gates on the
+  // toggle + sim flags, and lets in-flight puffs age out naturally on toggle-off.
+  updateAirshowSmoke(dt);
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
@@ -4593,7 +4748,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','bino'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
