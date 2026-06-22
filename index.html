@@ -4786,6 +4786,51 @@ function drawMinimap(hdgDeg){
   minimapCtx.textAlign = 'center';
   minimapCtx.textBaseline = 'top';
   minimapCtx.fillText('N', cx, 2);
+  // Wind arrow (top-left corner). Shows the FROM bearing in north-up screen
+  // space so pilots planning approaches from 5+ km out can read runway choice
+  // off the mini-map instead of needing the airport wind sock. The arrow
+  // points the way the wind is blowing (tail at FROM, head at TO) — same
+  // convention as a chart wind barb without the feathers. Length grows with
+  // wind speed up to a cap so a gale doesn't overrun the corner.
+  const _wSpd = Math.hypot(state.wind.x, state.wind.z);
+  if (_wSpd > 0.4) {
+    // state.wind points the way wind is going TO; FROM bearing = vector
+    // pointing into where the wind comes from. We want the arrow shaft to
+    // run FROM->TO, so its screen direction is the TO direction.
+    // Screen: +x right (east), +y down (south). World: +x east, +z south,
+    // so screen vector = (wind.x, wind.z) normalised.
+    const _wLen = Math.min(22, 8 + _wSpd * 1.4); // px, capped
+    const _wux = state.wind.x / _wSpd;
+    const _wuz = state.wind.z / _wSpd;
+    const _wcx = 16, _wcy = 16; // top-left badge centre
+    // Faint dark disc behind the arrow so it stays legible over bright tiles.
+    minimapCtx.fillStyle = 'rgba(8,14,22,0.55)';
+    minimapCtx.beginPath(); minimapCtx.arc(_wcx, _wcy, 13, 0, Math.PI*2); minimapCtx.fill();
+    // Shaft
+    minimapCtx.strokeStyle = '#ffffff';
+    minimapCtx.lineWidth = 1.4;
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(_wcx - _wux * _wLen * 0.5, _wcy - _wuz * _wLen * 0.5);
+    minimapCtx.lineTo(_wcx + _wux * _wLen * 0.5, _wcy + _wuz * _wLen * 0.5);
+    minimapCtx.stroke();
+    // Arrowhead at the TO end (small triangle perpendicular to the shaft).
+    const _hx = _wcx + _wux * _wLen * 0.5;
+    const _hy = _wcy + _wuz * _wLen * 0.5;
+    const _px = -_wuz, _py = _wux; // perpendicular unit
+    minimapCtx.fillStyle = '#ffffff';
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(_hx, _hy);
+    minimapCtx.lineTo(_hx - _wux * 5 + _px * 3, _hy - _wuz * 5 + _py * 3);
+    minimapCtx.lineTo(_hx - _wux * 5 - _px * 3, _hy - _wuz * 5 - _py * 3);
+    minimapCtx.closePath();
+    minimapCtx.fill();
+    // 'W' label under the badge so first-time players know what it is.
+    minimapCtx.fillStyle = 'rgba(255,255,255,0.65)';
+    minimapCtx.font = 'bold 8px ui-monospace, monospace';
+    minimapCtx.textAlign = 'center';
+    minimapCtx.textBaseline = 'top';
+    minimapCtx.fillText('W', _wcx, _wcy + 13);
+  }
 }
 
 // ====== Cockpit instrument panel ======

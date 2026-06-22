@@ -63,11 +63,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Runway lights flare on touchdown — when the wheels actually kiss the runway, briefly pulse the runway edge/centerline lights brighter (yellow flash that decays over ~600ms). Tiny visual reward that makes every landing feel like a moment instead of just "score popup".
 - [x] G-meter on HUD — live `G: 1.0` readout under SPD with a per-flight peak tick, turns amber past 2.5G and red past 4G. Players now see G-loads live instead of only learning from the crash card, so they can self-limit before snapping a wing.
 - [x] Quick-jump airport selector (J key) — small overlay listing all airports with a one-key number; press the number to instantly teleport plane to that airport's runway threshold with engine running at 30% throttle. Free-flight only (disabled in scored missions, replay, photo). Massively shortcuts "I want to practice landings at the other field" without restarting the mission.
+- [x] Wind direction arrow on the mini-map — small white arrow in the mini-map corner over a dim disc, shaft running FROM→TO, length scaled to wind speed. Players planning approaches from 5 km out can now read runway choice straight off the HUD without flying close enough to spot the airport wind sock.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Wind direction arrow on the mini-map — thin white arrow in the mini-map corner showing wind FROM direction, length scaled to wind speed. The wind sock at the airport is great up close, but pilots planning approaches from 5km out can't see it. This makes runway selection an actual decision.
 - [ ] Smoke trail color picker in settings — dropdown for ribbon/airshow smoke color (white, red, blue, green, yellow, magenta, livery accent), persisted to localStorage. Right now everyone's stuck with whatever the livery accent gives them; letting players pick their own air-show colors is one of those tiny things that makes the sim feel like *theirs*.
 
 ## How the ship loop works
