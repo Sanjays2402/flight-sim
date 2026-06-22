@@ -591,6 +591,7 @@
       <div class="mbtn" data-mode="hop"><div class="mt">AIRPORT HOP</div><div class="md">Visit all 3 fields<br>in sequence</div></div>
       <div class="mbtn" data-mode="ring"><div class="mt">RING CHASE</div><div class="md">Fly the chain of rings<br>against the clock</div></div>
       <div class="mbtn" data-mode="carrier"><div class="mt">CARRIER</div><div class="md">Trap on CV-01<br>offshore deck</div></div>
+      <div class="mbtn" data-mode="wing"><div class="mt">WINGMAN</div><div class="md">Stay on the lead's tail<br>across 3 airports</div></div>
     </div>
     <div class="menurow">
       <button id="introStats" type="button">📊 PILOT STATS</button>
@@ -2642,6 +2643,11 @@ const aiState = {
 }
 function updateAITraffic(dt){
   if (dt <= 0) return;
+  // Wingman mission overrides the home-field circuit: the lead flies a route
+  // between airports instead, and the player has to stay on its tail. Bail
+  // out of the legacy circuit path entirely so AI position only gets a
+  // single update per frame.
+  if (state.mode === 'wing'){ updateWingmanLead(dt); return; }
   const leg = AI_LEGS[aiState.leg];
   const wp = aiLocalToWorld(leg.lx, leg.lz);
   const targetY = MAIN_AP.elev + leg.alt;
@@ -2683,6 +2689,234 @@ function updateAITraffic(dt){
   // Cull if absurdly far (shouldn't happen, but safe).
   const distToPlayer = aiPlane.position.distanceTo(plane.position);
   aiPlane.visible = distToPlayer < 12000;
+}
+
+// ====== WINGMAN MISSION ======
+// Hook the AI traffic plane into a 3-airport relay route, then score the
+// player on how well they stay glued to its tail. Everything here is
+// scoped to `state.mode === 'wing'` so it never touches other missions.
+const WING_CRUISE_AGL    = 260;   // m AGL — lead's cruise altitude on enroute legs
+const WING_LEG_CAPTURE_M = 700;   // m — how close (horizontally) the lead has to get to the next field to advance
+const WING_LOCK_RADIUS_M = 200;   // m — player must stay within this 3D radius to hold formation
+const WING_LOCK_DRAIN    = 0.20;  // bar/sec drain rate when outside the slot
+const WING_LOCK_REFILL   = 0.12;  // bar/sec refill rate when inside the slot
+const WING_LEAD_SPEED    = 38;    // m/s — same cruise speed as the home-field circuit
+const WING_TURN_RATE     = 0.45;  // rad/s — turn authority for the lead
+// Build a random 3-airport route starting at MAIN_AP. AIRPORTS only has 3
+// fields right now, so the route is MAIN_AP + the other two in shuffled
+// order; if more fields are added later, the route will naturally pull from
+// the same pool. The player departs MAIN_AP so the first "waypoint" the
+// lead heads for is the second field.
+function wingmanBuildRoute(){
+  const others = AIRPORTS.filter(a => a.id !== MAIN_AP.id).map(a => a.id);
+  // Fisher-Yates so each session picks a fresh order.
+  for (let i = others.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = others[i]; others[i] = others[j]; others[j] = t;
+  }
+  return [MAIN_AP.id, ...others, MAIN_AP.id];
+}
+// Reset the AI plane back onto the home-field downwind so it looks natural
+// the moment the player leaves wingman mode (or finishes it). Called from
+// `startMission` for non-wing modes.
+function resetAIPatternCircuit(){
+  const start = aiLocalToWorld(AI_LEGS[2].lx, AI_LEGS[2].lz);
+  aiState.pos.set(start.x, MAIN_AP.elev + AI_LEGS[2].alt, start.z);
+  aiState.leg = 3;
+  aiState.heading = MAIN_AP.hdg + Math.PI;
+  aiState.bank = 0;
+}
+// Park the lead next to the player's runway threshold (just off the wing)
+// so a fresh wingman run starts with a sane formation-lock position. Lead
+// is offset 60 m to the right of the player and 4 m up so it reads as a
+// nearby lead without clipping into the runway lights.
+function wingmanSpawnLeadAtPlayer(){
+  // Build a right-wing offset using the player's heading at spawn (which is
+  // the runway heading because resetPlane just ran). Plain math — no quat
+  // gymnastics needed since the plane is level on the ground.
+  const hdg = MAIN_AP.hdg;
+  const ox =  Math.cos(hdg) * 60;
+  const oz = -Math.sin(hdg) * 60;
+  aiState.pos.set(
+    plane.position.x + ox,
+    plane.position.y + 4,
+    plane.position.z + oz
+  );
+  aiState.heading = hdg;
+  aiState.bank = 0;
+  aiPlane.position.copy(aiState.pos);
+  aiPlane.rotation.set(0, 0, 0);
+  aiPlane.rotateY(aiState.heading);
+}
+function wingmanStartMission(){
+  state.wingRoute = wingmanBuildRoute();
+  state.wingIdx = 1; // route[0] is MAIN_AP (departure); first target is route[1]
+  state.wingDone = false;
+  state.wingFailed = false;
+  state.wingLock = 1;
+  state.wingStartMs = performance.now();
+  state.wingElapsedMs = 0;
+  state.wingFailNotified = false;
+  state.wingJoined = false;
+  wingmanSpawnLeadAtPlayer();
+}
+// Steer the lead toward its next airport target on the wingman route. Same
+// math as the home-field circuit waypoint loop, just with an airport-shaped
+// target and a softer altitude profile so the player can keep up. Once the
+// lead hits the last airport the mission latches `wingDone`.
+function updateWingmanLead(dt){
+  // Routes are seeded inside startMission, but be defensive — `aiPlane`
+  // updates run every frame and a stale state shouldn't NPE.
+  if (!state.wingRoute || state.wingRoute.length === 0){
+    state.wingRoute = wingmanBuildRoute();
+    state.wingIdx = 1;
+  }
+  let tgtId = state.wingRoute[state.wingIdx] || state.wingRoute[state.wingRoute.length - 1];
+  let tgt = AIRPORTS.find(a => a.id === tgtId) || MAIN_AP;
+  // While the player is still on the runway, hold the lead in a slow shallow
+  // climb 60m off the right wing along the departure heading instead of
+  // bee-lining for the next field. Speed is throttled so the lead stays in
+  // the player's lock radius through the takeoff roll; the lead commits to
+  // the actual route the instant the player goes airborne.
+  const leadOnHold = state.onGround && !state.wingDone && !state.wingFailed;
+  if (leadOnHold){
+    const dirX =  Math.sin(MAIN_AP.hdg);
+    const dirZ = -Math.cos(MAIN_AP.hdg);
+    tgt = {
+      x: aiState.pos.x + dirX * 1500,
+      z: aiState.pos.z + dirZ * 1500
+    };
+  }
+  // Slow the lead way down once the mission's over so its visuals don't
+  // wander out into the ocean while the player reads the banner. On the
+  // hold pattern the lead crawls at ~15 m/s so it doesn't outrun a slow
+  // takeoff roll.
+  const speed = state.wingDone ? 18 : (leadOnHold ? 15 : WING_LEAD_SPEED);
+  const dx = tgt.x - aiState.pos.x;
+  const dz = tgt.z - aiState.pos.z;
+  const distH = Math.hypot(dx, dz);
+  const desiredHdg = Math.atan2(dx, -dz);
+  let dh = desiredHdg - aiState.heading;
+  while (dh >  Math.PI) dh -= 2*Math.PI;
+  while (dh < -Math.PI) dh += 2*Math.PI;
+  const turn = Math.max(-WING_TURN_RATE*dt, Math.min(WING_TURN_RATE*dt, dh));
+  aiState.heading += turn;
+  const wantBank = Math.max(-0.55, Math.min(0.55, dh * 0.9));
+  aiState.bank += (wantBank - aiState.bank) * Math.min(1, 2.5*dt);
+  const vx = Math.sin(aiState.heading) * speed;
+  const vz = -Math.cos(aiState.heading) * speed;
+  aiState.pos.x += vx * dt;
+  aiState.pos.z += vz * dt;
+  // Cruise altitude scales with terrain so the lead doesn't fly into
+  // mountains. Drop a little near the airport so the flyover reads as a
+  // real waypoint pass, not a 300m-overhead drift. In runway-hold the
+  // lead just climbs to a low pattern alt so the player can rejoin easily
+  // after rotation.
+  const terr = terrainHeight(aiState.pos.x, aiState.pos.z);
+  const closeM = Math.max(0, Math.min(1, (1800 - distH) / 1500));
+  const cruiseAGL = leadOnHold ? 120 : (WING_CRUISE_AGL - closeM * 180); // ~80m AGL at the field
+  const targetY = terr + Math.max(40, cruiseAGL);
+  const dy = targetY - aiState.pos.y;
+  // Lead climbs faster when there's a big gap (e.g. takeoff hold) so it
+  // catches its cruise alt before the player rotates.
+  const climbCap = leadOnHold ? 6 : 3;
+  const vy = Math.max(-climbCap, Math.min(climbCap, dy * 0.5));
+  aiState.pos.y += vy * dt;
+  // Waypoint capture — switch to the next airport once the lead is close
+  // enough horizontally. Final waypoint latches `wingDone`. Skipped while
+  // we're in the runway-hold pattern so the synthetic target can't trigger
+  // an early advance.
+  if (!leadOnHold && !state.wingDone && distH < WING_LEG_CAPTURE_M){
+    if (state.wingIdx >= state.wingRoute.length - 1){
+      state.wingDone = true;
+      state.wingElapsedMs = performance.now() - state.wingStartMs;
+      // Fanfare + status — only if the player hasn't already busted out.
+      if (!state.wingFailed){
+        if (typeof showStatus === 'function'){
+          showStatus('WINGMAN COMPLETE', state.wingRoute.join(' \u2192 ') + ' \u00b7 ' + fmtHopTime(state.wingElapsedMs), 'good');
+        }
+        if (typeof showMissionDone === 'function'){
+          showMissionDone('MISSION COMPLETE', 'Wingman \u00b7 ' + fmtHopTime(state.wingElapsedMs));
+        }
+        if (typeof pushATC === 'function'){
+          pushATC('Wingman, nice flying, breaking off.', { tag:'LEAD', now:true });
+        }
+      }
+    } else {
+      state.wingIdx += 1;
+      if (typeof pushATC === 'function'){
+        const nextId = state.wingRoute[state.wingIdx];
+        pushATC('Wingman, route point clear, next \u2014 ' + nextId + '.', { tag:'LEAD' });
+      }
+    }
+  }
+  // Push visual pose.
+  aiPlane.position.copy(aiState.pos);
+  aiPlane.rotation.set(0, 0, 0);
+  aiPlane.rotateY(aiState.heading);
+  aiPlane.rotateZ(-aiState.bank);
+  aiPlane.rotateX(Math.max(-0.18, Math.min(0.18, -vy * 0.05)));
+  aiProp.rotation.z += dt * 60;
+  const distToPlayer = aiPlane.position.distanceTo(plane.position);
+  aiPlane.visible = distToPlayer < 12000;
+}
+// Per-frame lock-bar update for wingman mode. Drain/refill the bar based on
+// the player's distance from the lead, fail the mission if the bar empties,
+// and glow the existing formation connecting line bright green while the
+// player is inside the slot so the visual matches the bar.
+function updateWingmanLock(dt){
+  if (state.mode !== 'wing') return;
+  if (dt <= 0) return;
+  // Mission paused / replaying / in photo or intro / over -> don't tick.
+  if (state.paused || state.replayActive || state.photoMode || state.introOpen) return;
+  if (state.wingFailed) return;
+  // Player crash -> instant fail.
+  if (state.crashed){
+    state.wingFailed = true;
+    state.wingLock = 0;
+    if (!state.wingFailNotified){
+      state.wingFailNotified = true;
+      if (typeof showStatus === 'function') showStatus('WINGMAN BUSTED', 'Lead is alone now.', 'bad');
+      if (typeof pushATC === 'function') pushATC('Two is down, mission scrubbed.', { tag:'LEAD', now:true });
+    }
+    return;
+  }
+  // Done -> hold bar where it is, no more drain.
+  if (state.wingDone){ state.wingElapsedMs = performance.now() - state.wingStartMs; return; }
+  state.wingElapsedMs = performance.now() - state.wingStartMs;
+  const dist3 = aiPlane.position.distanceTo(plane.position);
+  // Grace period: while the player is still on the runway the lead is on a
+  // gentle climb-out hold (see `leadOnHold` in updateWingmanLead) and the
+  // lock bar should refill steadily so the timer doesn't punish the take
+  // off roll. The drain reactivates the instant the player rotates.
+  if (state.onGround){
+    state.wingLock = Math.min(1, state.wingLock + WING_LOCK_REFILL * dt);
+    if (typeof formationState !== 'undefined' && dist3 <= WING_LOCK_RADIUS_M){
+      formationState.lineGlow = Math.max(formationState.lineGlow, 0.6);
+    }
+    return;
+  }
+  if (dist3 <= WING_LOCK_RADIUS_M){
+    state.wingLock = Math.min(1, state.wingLock + WING_LOCK_REFILL * dt);
+    // First contact — player has joined the lead. Switch to the real drain
+    // rate from now on (catch-up grace is over).
+    if (!state.wingJoined) state.wingJoined = true;
+    // Keep the formation connecting line lit while the player is in slot.
+    if (typeof formationState !== 'undefined'){
+      formationState.lineGlow = Math.max(formationState.lineGlow, 0.6);
+    }
+  } else {
+    // Soft drain until the player has joined for the first time post-rotation;
+    // full drain from there on. Stops a slow climb-out from instant-failing.
+    const drain = state.wingJoined ? WING_LOCK_DRAIN : WING_LOCK_DRAIN * 0.35;
+    state.wingLock = Math.max(0, state.wingLock - drain * dt);
+    if (state.wingLock <= 0 && !state.wingFailNotified){
+      state.wingFailed = true;
+      state.wingFailNotified = true;
+      if (typeof showStatus === 'function') showStatus('WINGMAN BUSTED', 'Dropped formation \u2014 mission failed.', 'bad');
+      if (typeof pushATC === 'function') pushATC('Two, you are way out of position, mission scrubbed.', { tag:'LEAD', now:true });
+    }
+  }
 }
 
 // ====== FORMATION TRACKER ======
@@ -2760,15 +2994,24 @@ function updateFormation(dt){
     const charge = Math.min(1, formationState.holdSec / FORMATION_HOLD_SEC);
     formationState.lineGlow = Math.max(formationState.lineGlow, 0.15 + 0.55 * charge);
     if (formationState.holdSec >= FORMATION_HOLD_SEC){
-      pilotStats.formations += 1;
-      savePilotStats();
-      unlockAchievement('formationFlight');
-      showToast('\u{1F6E9}', 'FORMATION!', 'Tight wing on the AI plane \u2014 nice flying.');
-      if (typeof pushATC === 'function') pushATC('Nice formation, hold position.', { tag:'TWR' });
-      formationState.holdSec = 0;
-      formationState.cooldownSec = FORMATION_COOLDOWN_SEC;
-      formationState.fadeT = FORMATION_LINE_FADE;
-      formationState.lineGlow = 1.0;
+      // Suppress the legacy FORMATION! reward toast while in wingman mode —
+      // the lock bar is the real feedback channel, and a popup every 20s
+      // would compete with the mission HUD. Cooldown still ticks so the
+      // toast doesn't fire the instant the mode ends, either.
+      if (state.mode === 'wing'){
+        formationState.holdSec = 0;
+        formationState.cooldownSec = FORMATION_COOLDOWN_SEC;
+      } else {
+        pilotStats.formations += 1;
+        savePilotStats();
+        unlockAchievement('formationFlight');
+        showToast('\u{1F6E9}', 'FORMATION!', 'Tight wing on the AI plane \u2014 nice flying.');
+        if (typeof pushATC === 'function') pushATC('Nice formation, hold position.', { tag:'TWR' });
+        formationState.holdSec = 0;
+        formationState.cooldownSec = FORMATION_COOLDOWN_SEC;
+        formationState.fadeT = FORMATION_LINE_FADE;
+        formationState.lineGlow = 1.0;
+      }
     }
   } else {
     // Bleed the hold timer when conditions break so a momentary drift doesn't
@@ -4887,6 +5130,27 @@ const state = {
   // the first trap inside the touchdown box so the fanfare only fires once.
   carrierTraps: 0,
   carrierDone: false,
+  // Wingman mission state. AI plane breaks out of its home-field circuit and
+  // flies a 3-airport route; the player has to stay within WING_LOCK_RADIUS
+  // of the lead. A formation-lock bar drains while the player is outside the
+  // slot and slowly refills inside it. Drain to zero = mission fail; AI
+  // completes all three legs while the bar is still > 0 = mission win.
+  wingRoute: [],          // ordered list of airport ids the lead visits (incl. departure)
+  wingIdx: 0,             // index of the next waypoint (0..wingRoute.length-1)
+  wingDone: false,        // latches true when the lead reaches the final airport
+  wingFailed: false,      // latches true when the player drops out of slot or crashes
+  wingLock: 1,            // 0..1 formation-lock bar (1 = full, 0 = bust)
+  wingStartMs: 0,
+  wingElapsedMs: 0,
+  // Suppresses the legacy FORMATION! toast while in wingman mode (the lock
+  // bar is the goal, not a surprise reward; toast would fire every 20s).
+  // Re-armed by the existing formationState gates elsewhere.
+  wingFailNotified: false,
+  // Latches true the first time the player gets inside WING_LOCK_RADIUS of
+  // the lead after going airborne. While this is false the lock drains at a
+  // softer rate so a slow climb-out doesn't instant-fail the mission before
+  // the player ever gets close to the lead. Reset on every startMission.
+  wingJoined: false,
   // Time of day in 0..24 hours; advances with TOD_SPEED. Starts near sunrise
   // so the first frames show off the cycle without waiting.
   todHours: 9.0,
@@ -5926,7 +6190,7 @@ resetPlane();
 
 const intro = document.getElementById('intro');
 const missionEl = document.getElementById('mission');
-const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP', ring:'RING CHASE', carrier:'CARRIER' };
+const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP', ring:'RING CHASE', carrier:'CARRIER', wing:'WINGMAN' };
 function startMission(mode){
   state.mode = mode;
   // Reset T&G stats per run so each session has its own scoreboard.
@@ -5947,6 +6211,16 @@ function startMission(mode){
   if (mode === 'carrier'){
     state.carrierTraps = 0;
     state.carrierDone = false;
+  }
+  // Wingman mission: pick a 3-airport route starting at MAIN_AP. The AI
+  // plane breaks out of its home-field circuit and flies the route; the
+  // player has to stay glued to its tail. Lock bar starts full.
+  if (mode === 'wing'){
+    wingmanStartMission();
+  } else {
+    // Switching away from wingman puts the AI back on its home-field circuit
+    // so it doesn't keep wandering between airports during other missions.
+    if (typeof resetAIPatternCircuit === 'function') resetAIPatternCircuit();
   }
   // Ring chase: arm the chain, reset hit index + timer, show all rings.
   // Switching away from ring mode tucks the rings back out of the world so
@@ -5982,6 +6256,7 @@ function dismissIntro(){
               : state.mode === 'hop'  ? 'Flight plan active, departure approved.'
               : state.mode === 'ring' ? 'Ring course armed, timer running on gate 1.'
               : state.mode === 'carrier' ? 'Pacific actual, signal Charlie, deck is ready.'
+              : state.mode === 'wing' ? 'Wingman, you are number two, stay on my tail.'
               :                         'Ground to tower, cleared to taxi at your discretion.';
   pushATC(greet, { now:true });
 }
@@ -7871,6 +8146,13 @@ function step(dt){
   }
 
   // Mission HUD
+  // Clear any wingman-mode inline color tint on msVal whenever we're NOT in
+  // wingman — other branches use the panel's default color, and a stale
+  // amber/red from a previous mission would otherwise stick.
+  if (state.mode !== 'wing'){
+    const _msVal = document.getElementById('msVal');
+    if (_msVal && _msVal.style.color) _msVal.style.color = '';
+  }
   if (state.mode === 'tng'){
     document.getElementById('msTgt').textContent = 'Any field';
     document.getElementById('msLbl').textContent = 'Landings';
@@ -7925,6 +8207,43 @@ function step(dt){
       document.getElementById('msTgt').textContent = 'CV-01 · ' + (dC/1000).toFixed(1) + ' km' + trapTxt;
       document.getElementById('msLbl').textContent = 'Score';
       document.getElementById('msVal').textContent = '+' + state.scoreTotal;
+    }
+  } else if (state.mode === 'wing'){
+    // Wingman HUD: target line shows the next route point and elapsed time,
+    // lock line shows the current formation bar (color shifts green -> amber
+    // -> red as the bar drains). Distance to the lead lives below the bar so
+    // the player has both "how close am I right now" and "how locked am I".
+    const elapsedMs = state.wingDone ? state.wingElapsedMs : (performance.now() - state.wingStartMs);
+    const tgtEl = document.getElementById('msTgt');
+    const lblEl = document.getElementById('msLbl');
+    const valEl = document.getElementById('msVal');
+    if (state.wingFailed){
+      tgtEl.textContent = 'BUSTED · ' + fmtHopTime(elapsedMs);
+      lblEl.textContent = 'Lock';
+      valEl.textContent = '0%';
+      valEl.style.color = '#ff6a6a';
+    } else if (state.wingDone){
+      tgtEl.textContent = 'DONE · ' + fmtHopTime(elapsedMs);
+      lblEl.textContent = 'Lock';
+      valEl.textContent = Math.round(state.wingLock * 100) + '%';
+      valEl.style.color = '#7ee787';
+    } else {
+      const nextId = state.wingRoute[state.wingIdx] || '—';
+      const legNo = state.wingIdx; // route[0] = departure, so leg N is index N
+      const legCount = Math.max(1, state.wingRoute.length - 1);
+      tgtEl.textContent = nextId + ' (' + legNo + '/' + legCount + ') · ' + fmtHopTime(elapsedMs);
+      lblEl.textContent = 'Lock';
+      const pct = Math.round(state.wingLock * 100);
+      const bars = Math.max(0, Math.min(10, Math.round(state.wingLock * 10)));
+      const dist3 = aiPlane.position.distanceTo(plane.position);
+      // Cheap ASCII bar so drain reads at a glance without ballooning the
+      // val cell; numeric distance to the lead trails so the player knows
+      // exactly how close they are to a bust.
+      valEl.textContent = '[' + '█'.repeat(bars) + '░'.repeat(10 - bars) + '] '
+        + pct + '% · ' + Math.round(dist3) + ' m';
+      valEl.style.color = state.wingLock > 0.5 ? '#7ee787'
+                        : state.wingLock > 0.2 ? '#ffd166'
+                        :                       '#ff6a6a';
     }
   }
 
@@ -8016,6 +8335,11 @@ function step(dt){
 
   // AI traffic update (visual only, runs alongside player physics).
   updateAITraffic(dt);
+  // Wingman mission — update the formation-lock bar based on player
+  // distance from the lead. Drains outside WING_LOCK_RADIUS_M, refills
+  // inside; empties to zero = mission fail. Safe to call every frame; it
+  // bails out fast when mode != 'wing'.
+  updateWingmanLock(dt);
   // Thin white smoke plume off the AI plane — emitted from the AI plane's
   // tail so the player can spot it from 3+ km out at a glance. Runs after
   // updateAITraffic so the puff spawns from the freshly-updated AI pose.
