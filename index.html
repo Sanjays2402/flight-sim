@@ -315,7 +315,7 @@
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
   <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
-  <div class="row"><span class="lbl">DMG</span><span class="val" id="dmg">0%</span></div>
+  <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
@@ -2932,6 +2932,9 @@ const state = {
   // throttle at idle, fuel ticks back up. Set each frame by step(); HUD shows
   // a small ▲ FUEL tag while it's happening.
   refueling: false,
+  // Same pit-stop tick also bleeds airframe damage back down toward 0 so the
+  // apron acts as a real reset button, not just a gas station.
+  repairing: false,
   msgT: 0,
   cam: 0,
   // Spotter binoculars: hold B in any external cam (not cockpit) while airborne
@@ -3692,6 +3695,7 @@ function resetPlane(){
   state.fuel = 1;
   state.engineOut = false;
   state.refueling = false;
+  state.repairing = false;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -4275,7 +4279,12 @@ function step(dt){
   // that you don't get bored. Engine restart on the ground (existing logic)
   // handles getting moving again afterward.
   state.refueling = false;
-  if (state.onGround && !state.crashed && state.fuel < 1 && state.throttle <= 0.05 && speed < 4){
+  state.repairing = false;
+  // Repair on the apron mirrors refuel: when parked on an airport ramp with the
+  // throttle idle, airframe damage bleeds back down at the same ~30s-from-full
+  // rate. Pairs with the existing fuel pit stop — one stop tops off both —
+  // without needing any new UI beyond the matching DMG ▼ indicator.
+  if (state.onGround && !state.crashed && (state.fuel < 1 || state.damage > 0) && state.throttle <= 0.05 && speed < 4){
     // Check the closest airport's local-frame apron envelope. Apron geometry
     // above is (a.w + 24) × (a.len + 60); add a small slack so the wheels can
     // be just past the painted edge and still count.
@@ -4292,8 +4301,15 @@ function step(dt){
     }
     if (onApron){
       const REFUEL_RATE = 1 / 30; // empty → full in ~30s
-      state.fuel = Math.min(1, state.fuel + REFUEL_RATE * dt);
-      state.refueling = true;
+      if (state.fuel < 1){
+        state.fuel = Math.min(1, state.fuel + REFUEL_RATE * dt);
+        state.refueling = true;
+      }
+      // Same rate for the airframe — 100% damage bleeds out in ~30s parked.
+      if (state.damage > 0){
+        state.damage = Math.max(0, state.damage - REFUEL_RATE * dt);
+        state.repairing = true;
+      }
       // Topping off the tank also clears a dry-tank engine-out so the pilot
       // can fire back up and taxi away without hitting reset.
       if (state.engineOut && state.fuel > 0.05){
@@ -4692,6 +4708,7 @@ function step(dt){
   const dmgEl = document.getElementById('dmg');
   dmgEl.textContent = dmgPct + '%';
   dmgEl.style.color = dmgPct >= 70 ? '#ff5252' : (dmgPct >= 30 ? '#ffd166' : '#7ee787');
+  document.getElementById('repair').style.display = state.repairing ? 'inline' : 'none';
 
   // Fuel readout: same color ramp — green when topped up, amber when low, red near dry.
   const fuelPct = Math.round(state.fuel * 100);
@@ -6577,6 +6594,7 @@ updateCamModeUi();
     state.ap.on = false;
     state.msgT = 0;
     state.refueling = false;
+    state.repairing = false;
     state.engineOut = false;
     pickWindTarget();
     state.wind.copy(state.windTarget);
