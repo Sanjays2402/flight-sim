@@ -48,6 +48,18 @@
   #status.hard { background:rgba(100,70,10,.85); color:#ffd166; border-color:#ffd166; }
   #status.bad  { background:rgba(120,20,20,.85); color:#ff5252; border-color:#ff5252; }
   #status small { display:block; font-size:13px; font-weight:500; letter-spacing:0; margin-top:6px; opacity:0.85; }
+  /* Achievement toasts: small popups in the top-left below the HUD panel that
+     fire once when the pilot unlocks a milestone (first landing, 10 landings,
+     perfect score, ring chase under 60s, etc.). Unlocked ids are persisted to
+     localStorage so each only ever fires once per browser. Stacked vertically;
+     each toast slides in from the left and fades out after a few seconds. */
+  #achievements { position:fixed; top:340px; left:12px; display:flex; flex-direction:column; gap:6px; z-index:11; pointer-events:none; max-width:260px; }
+  #achievements .ach { padding:8px 12px 9px; background:rgba(8,14,22,.92); border:1px solid #ffd166; border-radius:8px; color:#cfe; font-size:11px; box-shadow:0 4px 14px rgba(0,0,0,.5); animation:achSlide .35s ease-out, achFade .5s ease-in 3.6s forwards; backdrop-filter:blur(6px); }
+  #achievements .ach .ic { display:inline-block; margin-right:6px; font-size:14px; vertical-align:middle; }
+  #achievements .ach .ttl { color:#ffd166; font-weight:800; letter-spacing:1px; font-size:11px; text-transform:uppercase; vertical-align:middle; }
+  #achievements .ach .desc { display:block; color:#9bb; margin-top:3px; line-height:1.35; font-size:10px; }
+  @keyframes achSlide { from { transform:translateX(-120%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+  @keyframes achFade  { from { opacity:1; } to { opacity:0; transform:translateX(-30%); } }
   #intro { position:fixed; inset:0; background:rgba(0,5,12,.86); display:flex; align-items:center; justify-content:center; z-index:10; }
   #intro .card { max-width:560px; padding:28px 32px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.92); }
   #intro h1 { font-size:34px; color:#7ee787; margin-bottom:6px; letter-spacing:2px; }
@@ -270,6 +282,7 @@
   </div>
 </div>
 <div id="status"></div>
+<div id="achievements"></div>
 <div id="mission">
   <div class="ttl" id="msTtl">MISSION</div>
   <div class="row"><span class="lbl">Target</span><span class="val tgt" id="msTgt">—</span></div>
@@ -420,6 +433,7 @@ function onTakeoff(){
   flightStartMs = performance.now();
   pilotStats.totalFlights += 1;
   savePilotStats();
+  unlockAchievement('firstFlight');
 }
 function closeFlightTime(){
   if (flightStartMs == null) return 0;
@@ -437,6 +451,9 @@ function onLanding(score){
     if (score > pilotStats.bestLandingScore) pilotStats.bestLandingScore = score;
   }
   savePilotStats();
+  unlockAchievement('firstLanding');
+  if (pilotStats.totalLandings >= 10) unlockAchievement('tenLandings');
+  if (typeof score === 'number' && score >= 300) unlockAchievement('perfectLanding');
 }
 function onCrash(){
   closeFlightTime();
@@ -450,6 +467,48 @@ function fmtFlightTime(sec){
   const s = sec % 60;
   if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
   return m + ':' + String(s).padStart(2,'0');
+}
+
+// ====== ACHIEVEMENTS ======
+// Quick toast popups for one-time milestones (first landing, 10 landings,
+// perfect landing score, ring chase under 60s, etc.). Unlocked ids are kept
+// in a Set persisted to localStorage so each only ever fires once per browser.
+// Toast DOM is appended into #achievements (top-left below the HUD); CSS
+// auto-fades each entry after ~4s and we GC the node a beat later.
+const ACH_KEY = 'flightsim.achievements.v1';
+const ACHIEVEMENTS = {
+  firstFlight:    { icon:'\u2708',  title:'First Flight',    desc:'Left the ground for the first time.' },
+  firstLanding:   { icon:'\u{1F6EC}', title:'First Landing',   desc:'Stuck a real touchdown — welcome to the club.' },
+  tenLandings:    { icon:'\u{1F396}', title:'Frequent Flyer',  desc:'10 successful landings logged.' },
+  perfectLanding: { icon:'\u2B50',  title:'Perfect Landing', desc:'Scored 300+ on a single landing.' },
+  ringUnder60:    { icon:'\u{1F3C1}', title:'Ring Master',     desc:'Ring chase complete in under 60 seconds.' },
+  highFlyer:      { icon:'\u{1F30C}', title:'High Flyer',      desc:'Climbed above 1000m for the first time.' }
+};
+const unlockedAch = new Set();
+try {
+  const raw = localStorage.getItem(ACH_KEY);
+  if (raw){
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) for (const id of arr) if (typeof id === 'string') unlockedAch.add(id);
+  }
+} catch(e){ /* corrupt — stay empty */ }
+function saveAchievements(){
+  try { localStorage.setItem(ACH_KEY, JSON.stringify(Array.from(unlockedAch))); } catch(e){}
+}
+function unlockAchievement(id){
+  if (unlockedAch.has(id)) return;
+  const def = ACHIEVEMENTS[id];
+  if (!def) return;
+  unlockedAch.add(id);
+  saveAchievements();
+  const host = document.getElementById('achievements');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'ach';
+  el.innerHTML = '<span class="ic">' + def.icon + '</span><span class="ttl">' + def.title + '</span><span class="desc">' + def.desc + '</span>';
+  host.appendChild(el);
+  // Toast auto-fades via CSS at ~3.6s + 0.5s; remove the node a beat after that.
+  setTimeout(function(){ if (el && el.parentNode) el.parentNode.removeChild(el); }, 4400);
 }
 
 // ====== TIME OF DAY ======
@@ -1582,6 +1641,7 @@ function updateRingChase(dt){
     if (state.ringIdx >= ringChain.length){
       state.ringDone = true;
       state.ringElapsedMs = tNow - state.ringStartMs;
+      if (state.ringElapsedMs < 60000) unlockAchievement('ringUnder60');
       let extra = '';
       if (state.ringBestMs === 0 || state.ringElapsedMs < state.ringBestMs){
         state.ringBestMs = state.ringElapsedMs;
@@ -2857,6 +2917,7 @@ function step(dt){
   // HUD
   const speedKmh = speed * 3.6;
   const altM = Math.max(0, plane.position.y - GEAR_H);
+  if (altM >= 1000 && !state.onGround) unlockAchievement('highFlyer');
   let hdg = Math.atan2(fwd.x, -fwd.z) * 180/Math.PI;
   if (hdg < 0) hdg += 360;
   const vs = state.vel.y;
