@@ -1903,6 +1903,131 @@ function makeWindSock(a){
   windSocks.push({ yawGrp, tiltGrp });
 }
 for (const a of AIRPORTS) makeWindSock(a);
+
+// ====== HANGARS (parked plane scenery) ======
+// Open-front hangar with a classic curved (half-cylinder) roof near each
+// ground airport's apron, with one parked AI plane inside in a livery that
+// is NOT the player's current paint scheme. Pure scenery — no collision, no
+// interaction. Makes airports feel inhabited instead of just runway +
+// control tower, and pairs with the existing AI traffic + airport beacon to
+// round out the airport-as-place feel. ~12m wide / 8m deep / 6m tall, sized
+// to read clearly from the air without crowding the windsock or beacon.
+const HANGAR_W = 12;   // along runway-local x (across the strip)
+const HANGAR_D = 8;    // along runway-local z (along the strip)
+const HANGAR_H = 6;    // wall height before the curved roof starts
+// Pick a livery for the parked plane that isn't the player's current one.
+// Deterministic per airport so the same field always parks the same paint.
+function pickHangarLivery(seedIdx){
+  const playerIdx = (settings && Number.isInteger(settings.livery)) ? settings.livery : 0;
+  let idx = (seedIdx + 1) % LIVERIES.length;
+  if (idx === playerIdx) idx = (idx + 1) % LIVERIES.length;
+  return LIVERIES[idx] || LIVERIES[1] || LIVERIES[0];
+}
+// Build a tiny static plane (fuse + wing + tail + prop, no animation) using
+// the same silhouette family as the AI plane, painted in the hangar's livery.
+function makeParkedPlane(livery){
+  const grp = new THREE.Group();
+  const fuseMat   = new THREE.MeshLambertMaterial({ color: livery.fuse });
+  const accentMat = new THREE.MeshLambertMaterial({ color: livery.accent });
+  const darkMat   = new THREE.MeshLambertMaterial({ color: 0x222428 });
+  const glassMat  = new THREE.MeshLambertMaterial({ color: 0x223344, transparent:true, opacity:0.75 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 4.6, 14), fuseMat);
+  body.rotation.x = Math.PI/2; grp.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 14), fuseMat);
+  nose.rotation.x = -Math.PI/2; nose.position.z = -2.9; grp.add(nose);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 14), fuseMat);
+  tail.rotation.x = Math.PI/2; tail.position.z = 3.1; grp.add(tail);
+  const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.561, 0.561, 0.5, 14), accentMat);
+  stripe.rotation.x = Math.PI/2; grp.add(stripe);
+  const cp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 10, 0, Math.PI*2, 0, Math.PI/2), glassMat);
+  cp.position.set(0, 0.42, -0.9); cp.scale.set(1.0, 0.9, 1.7); grp.add(cp);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.12, 1.4), fuseMat);
+  wing.position.set(0, 0.05, -0.2); grp.add(wing);
+  for (const s of [-1, 1]){
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 1.0), accentMat);
+    tip.position.set(s*4.3, 0.06, -0.2); grp.add(tip);
+  }
+  const tp = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.1, 0.9), fuseMat);
+  tp.position.set(0, 0.3, 3.4); grp.add(tp);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 1.1), fuseMat);
+  fin.position.set(0, 0.7, 3.4); grp.add(fin);
+  const finAcc = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.4), accentMat);
+  finAcc.position.set(0, 1.05, 3.5); grp.add(finAcc);
+  // Static prop — just a hub + two crossed blades, no rotation.
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.22, 12), darkMat);
+  hub.rotation.x = Math.PI/2; hub.position.z = -3.6; grp.add(hub);
+  for (let i=0;i<2;i++){
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.9, 0.06), darkMat);
+    blade.rotation.z = i*Math.PI/2;
+    blade.position.z = -3.6;
+    grp.add(blade);
+  }
+  return grp;
+}
+function makeHangar(a, idx){
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Place on the runway's left side (-x), well clear of the windsock at
+  // (-w/2-9, +len/2-18) and any MAIN_AP buildings at (-w/2-120, ±) by
+  // sitting at mid-runway (z near 0) and offset enough to leave a wide
+  // apron between hangar and strip. Slight per-airport z jitter so the
+  // three hangars don't look like an assembly line if you fly between them.
+  const baseX = -(a.w/2 + 24);   // ~24m off the runway edge → comfortable apron
+  const jitter = ((idx * 73) % 13) - 6;  // -6..+6 m along strip
+  const baseZ = -a.len * 0.08 + jitter;
+  // Open-front hangar faces toward the runway (+local x). Build it with the
+  // opening on +x by placing the back wall on -x, two side walls in z, and a
+  // half-cylinder roof spanning the top.
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0xb9b6ad });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x5a6470 });
+  const trimMat = new THREE.MeshLambertMaterial({ color: 0x3a3d40 });
+  // Back wall: spans the full depth (z) along -x face of the hangar.
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.3, HANGAR_H, HANGAR_D), wallMat);
+  back.position.set(baseX - HANGAR_W/2, HANGAR_H/2, baseZ);
+  grp.add(back);
+  // Two side walls (along x, depth = HANGAR_W). Sit at z = baseZ ± HANGAR_D/2.
+  for (const side of [-1, 1]){
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(HANGAR_W, HANGAR_H, 0.3), wallMat);
+    wall.position.set(baseX, HANGAR_H/2, baseZ + side * HANGAR_D/2);
+    grp.add(wall);
+  }
+  // Curved roof: half-cylinder lying on its side, axis along z (the depth),
+  // capping the open box. Built with OpenEnded=false so the curved end disks
+  // close it off and the silhouette reads clearly from any angle.
+  const roof = new THREE.Mesh(
+    new THREE.CylinderGeometry(HANGAR_W/2, HANGAR_W/2, HANGAR_D, 16, 1, false, 0, Math.PI),
+    roofMat
+  );
+  // CylinderGeometry default axis is +y. Lay it on its side (axis → z) by
+  // rotating -π/2 about x, then orient the open semicircle to face up by
+  // rotating π/2 about y so the flat side sits on top of the walls.
+  roof.rotation.x = -Math.PI/2;
+  roof.rotation.z =  Math.PI/2;
+  roof.position.set(baseX, HANGAR_H, baseZ);
+  grp.add(roof);
+  // Dark trim ring at the open front to read as the hangar door track.
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.4, HANGAR_H, HANGAR_D + 0.4), trimMat);
+  frame.position.set(baseX + HANGAR_W/2, HANGAR_H/2, baseZ);
+  grp.add(frame);
+  // Parked plane sits inside, nose pointing toward the open front (+x in
+  // hangar-local space, which is +x in airport-local space too). The plane
+  // group's own +z is the tail-end (matching the player/AI plane convention),
+  // so we rotate it so its nose (-z direction) aligns with hangar +x.
+  const livery = pickHangarLivery(idx);
+  const parked = makeParkedPlane(livery);
+  // Rotate the plane so its nose points along +x (out of the hangar).
+  // Plane's nose is at -z in its local frame → rotate y by +π/2 to map -z → +x.
+  parked.rotation.y = Math.PI/2;
+  // Position inside the hangar: center it along z, push slightly back from
+  // the open front so the prop sits ~1m inside the door. Plane height ~0.8m
+  // including landing gear — drop it onto the floor (y = 0.5).
+  parked.position.set(baseX - 0.5, 0.7, baseZ);
+  grp.add(parked);
+}
+AIRPORTS.forEach((a, i) => makeHangar(a, i));
+
 function updateWindSocks(){
   // Wind vector points the way wind is going TO. Sock tail should align with
   // that direction (real socks blow away from the pole). Heading-style yaw:

@@ -129,10 +129,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Engine restart sequence after deadstick — X-toggle engine kill is unchanged, but restarting from `engineOut` while airborne now requires throttle <30% + airspeed >80 km/h (windmilling prop) and pressing `I` to crank, mirroring the cold-start ritual: 1.6s starter motor SFX, catch thump, engine fires. New `state.airRestart` latch arms on a successful X-press in flight (HUD shows `IGNITION ARMED — press I to crank`, ATC "Restart attempt, cranking on your call."); if throttle/airspeed conditions aren't met, ATC fires "Restart failed, check throttle and airspeed." instead and nothing arms. Shared `beginIgnition()` / `finishIgnition()` / cockpit RPM spool with cold-start so the ritual feels consistent in the air and on the ground; ground-with-coldStart-OFF still hot-starts instantly. Mobile IGN button + help row updated.
 
+- [x] Hangar / parking spot at each airport — every airport now has an open-front hangar building (~12m wide × 8m deep × 6m tall with a curved half-cylinder roof and a dark dragway-style front frame) sitting ~24 m off the runway edge on the opposite side from the taxi-chevron apron, well clear of the windsock and beacon. One static AI plane is parked inside in a livery deterministically picked to differ from the player's current paint, with a frozen prop and the same silhouette family as the AI circuit traffic. Pure scenery — no collision, no interaction — and a small per-airport z jitter so the three hangars don't look like an assembly line if you fly between them.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Hangar / parking spot at each airport — small open-front hangar building (12m wide, 8m deep, 6m tall, classic curved roof) near the apron at each ground airport with one parked AI plane inside in a different livery from the player. Pure scenery — no collision, no interaction — but makes airports feel inhabited instead of just runway + control tower. Pairs with existing AI traffic + airport beacon to round out the airport-as-place feel.
 
 
 ## How the ship loop works
