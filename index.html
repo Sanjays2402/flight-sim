@@ -234,6 +234,7 @@
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
+  <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
@@ -2026,6 +2027,10 @@ const state = {
   windNextChangeMs: 0,
   stall: 0,
   vortex: 0,
+  // GPWS (ground proximity warning): throttle the "PULL UP" beep so it only
+  // chirps a few times per second instead of every frame. Timestamp in ms
+  // (performance.now) of the last beep; 0 means "ready to beep now".
+  gpwsBeepAt: 0,
   scoreLast: null,
   scoreBest: 0,
   scoreTotal: 0,
@@ -2689,6 +2694,28 @@ function playFlapWhoosh(){
   src.start(t0);
   src.stop(t0 + dur + 0.02);
 }
+// GPWS "PULL UP" beep — sharp, short, urgent. Two-tone square-ish chirp
+// (~900Hz → 1200Hz) so it cuts through the engine and stall horn. Called
+// from the HUD update loop at ~3Hz when the terrain warning is active.
+function playTerrainBeep(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.32 * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(900, t0);
+  osc.frequency.linearRampToValueAtTime(1200, t0 + 0.18);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+  g.gain.setValueAtTime(vol, t0 + 0.16);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.24);
+}
 // Centralized toggle helpers so keyboard + touch + any future binding all
 // trigger the same animation + SFX path.
 function toggleGear(){
@@ -3236,6 +3263,36 @@ function step(dt){
     gsEl.style.display = 'block';
   } else {
     gsEl.style.display = 'none';
+  }
+
+  // GPWS — "TERRAIN, PULL UP" warning. Fires when we're skimming the actual
+  // ground (not just sea level) below 150m AGL while descending fast, outside
+  // any airport zone. Uses true terrain height so it catches you flying into
+  // a mountainside even if your MSL altitude is high. Beep is throttled to
+  // ~3Hz via state.gpwsBeepAt so we don't spam the WebAudio node. Silent on
+  // the ground / mid-crash / mid-replay so it doesn't nag post-impact.
+  const tEl = document.getElementById('terrain');
+  const terrainY = terrainHeight(plane.position.x, plane.position.z);
+  const agl = plane.position.y - Math.max(0, terrainY) - GEAR_H;
+  // "Outside an airport zone" = nearestD already computed below, but we need
+  // it here. Recompute cheaply against AIRPORTS so order in the function
+  // doesn't matter.
+  let nearAp = 1e9;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < nearAp) nearAp = d;
+  }
+  const gpwsActive = !state.crashed && !state.onGround && !state.replayActive
+    && agl < 150 && sinkNow > 5 && nearAp > 1500;
+  if (gpwsActive){
+    tEl.style.display = 'block';
+    const nowMs = performance.now();
+    if (nowMs - state.gpwsBeepAt > 330){
+      playTerrainBeep();
+      state.gpwsBeepAt = nowMs;
+    }
+  } else {
+    tEl.style.display = 'none';
   }
 
   // Autopilot HUD row: hidden when off. When on, shows the locked altitude
