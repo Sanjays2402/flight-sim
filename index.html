@@ -688,6 +688,11 @@ function lerpKey(h){
 }
 const skyUniforms = { top:null, mid:null, bot:null, sunDir:null, sunColor:null };
 const runwayEdgeLights = []; // populated by makeAirport; emissive material + base color, toggled at dusk
+// Per-airport touchdown flare amount (0..1). When the wheels kiss the runway
+// we set the matching airport's flareT to 1 and decay it over ~600ms so the
+// runway lights briefly pulse bright yellow — a tiny visual reward that makes
+// every landing feel like a moment instead of just a score popup.
+const RUNWAY_FLARE_DECAY = 1 / 0.6; // 1.0 -> 0 in ~600ms
 function sunDirFor(h){
   // Sun arcs east→up→west: 0h below horizon, 6h on horizon east, 12h overhead, 18h horizon west.
   const a = ((h - 6) / 12) * Math.PI; // 0 at sunrise, π at sunset
@@ -723,12 +728,20 @@ function applyTimeOfDay(h){
     skyUniforms.sunColor.value.copy(k.sunCol);
   }
   scene.fog.color.copy(k.fog);
-  // Runway edge lights glow when sun is low (dusk/night/dawn).
+  // Runway edge lights glow when sun is low (dusk/night/dawn). On top of the
+  // night glow we layer a per-airport touchdown flare so the lights briefly
+  // pulse bright yellow whenever the wheels kiss the runway. Flare reads at
+  // any time of day, day or night.
   const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / 0.3));
   for (const e of runwayEdgeLights){
     // MeshLambertMaterial has no emissiveIntensity — scale the emissive color directly.
     const k = nightT;
-    e.mat.emissive.setRGB(1.0 * k, 0.78 * k, 0.32 * k);
+    const f = e.flareT || 0;
+    // Punchy yellow flash on touchdown, additive over the night base.
+    const r = Math.min(1.4, 1.0 * k + 1.2 * f);
+    const g = Math.min(1.4, 0.78 * k + 1.0 * f);
+    const b = Math.min(1.4, 0.32 * k + 0.25 * f);
+    e.mat.emissive.setRGB(r, g, b);
   }
   return { dir, k, nightT };
 }
@@ -1076,7 +1089,9 @@ function makeAirport(a){
   const lightMat = new THREE.MeshLambertMaterial({
     color: 0x333333, emissive: 0x000000
   });
-  runwayEdgeLights.push({ mat: lightMat, base: new THREE.Color(0x333333) });
+  const lightEntry = { mat: lightMat, base: new THREE.Color(0x333333), flareT: 0 };
+  runwayEdgeLights.push(lightEntry);
+  a._lights = lightEntry;
   const lightGeo = new THREE.SphereGeometry(0.55, 6, 5);
   const lightSpacing = 60;
   const lightCount = Math.max(2, Math.floor(a.len / lightSpacing));
@@ -1140,7 +1155,21 @@ function makeAirport(a){
 
   const aimX = a.x + Math.sin(a.hdg)*(a.len/2 - 300);
   const aimZ = a.z + Math.cos(a.hdg)*(a.len/2 - 300);
-  runwayInfos.push({ ap: a, aimX, aimZ });
+  runwayInfos.push({ ap: a, aimX, aimZ, lights: a._lights });
+}
+
+// Fire a touchdown flare on the matching airport's runway lights. Called from
+// the ground-contact branch in step(). Decay is handled in tickRunwayFlares().
+function flareRunwayLights(ap){
+  if (!ap || !ap._lights) return;
+  ap._lights.flareT = 1;
+}
+function tickRunwayFlares(dt){
+  for (const e of runwayEdgeLights){
+    if (e.flareT > 0){
+      e.flareT = Math.max(0, e.flareT - RUNWAY_FLARE_DECAY * dt);
+    }
+  }
 }
 
 for (const a of AIRPORTS) makeAirport(a);
@@ -3830,6 +3859,8 @@ function step(dt){
         } else {
           showStatus('HARD LANDING', reason + ' · +' + Math.round(dmgAdd*100) + '% dmg', 'hard');
           pushATC('Tower copies hard landing, maintenance advised.', { now:true });
+          // Wheels still touched the runway — flash the lights even on a rough one.
+          if (land && land.ri) flareRunwayLights(land.ri.ap);
           startReplay();
         }
       } else {
@@ -3870,6 +3901,9 @@ function step(dt){
         const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
         showStatus(title, sub, 'good');
         pushATC(apid + ', cleared to land confirmed. Welcome in.', { now:true });
+        // Pulse the runway lights bright yellow for ~600ms so the touchdown
+        // reads as a moment, not just a score popup.
+        if (land && land.ri) flareRunwayLights(land.ri.ap);
         state.landed = true;
         onLanding(score);
         startReplay();
@@ -4032,6 +4066,9 @@ function step(dt){
   // Time of day advances every step.
   const _prevTod = state.todHours;
   state.todHours = (state.todHours + TOD_SPEED * dt) % 24;
+  // Touchdown-flare decay runs before applyTimeOfDay so the latter picks up
+  // the freshly-decayed flare value when it sets emissive colors.
+  tickRunwayFlares(dt);
   applyTimeOfDay(state.todHours);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
