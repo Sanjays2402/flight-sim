@@ -1715,6 +1715,144 @@ function updateWindSocks(){
 }
 updateWindSocks(); // prime so first paint matches current wind, not the limp default
 
+// ====== AIRPORT BEACONS ======
+// Slow rotating airport beacon on a short tower near the threshold of every
+// field. Two small emissive heads (green + white) sit back-to-back and spin
+// together; an additive sprite glare on each head pulses brighter as the
+// head faces the camera so you can spot the airport from 8+ km out at
+// dusk/night. Same dusk gate as runway edge lights — off at high noon, on
+// from sunset through dawn — so the world doesn't get spammed with glowing
+// dots in broad daylight.
+const AIRPORT_BEACON_PERIOD = 4.5;          // seconds per full rotation (real beacons ~30 RPM ≈ 2s; 4.5s reads calmer at sim scale)
+const AIRPORT_BEACON_NIGHT_FALLOFF = 0.35;  // sun-altitude window over which the beacon fades up (matches runway edge lights)
+const airportBeacons = []; // [{ ap, headGrp, greenMat, whiteMat, greenGlare, whiteGlare, baseGreen, baseWhite }]
+const _beaconGlareTex = (() => {
+  // Soft additive disc — same flavour as the contrail/cloud puffs so the
+  // beacon glare blends naturally against sky and clouds.
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const cx = cv.getContext('2d');
+  const g = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  cx.fillStyle = g; cx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+function makeAirportBeacon(a){
+  // Tower planted on the right side of the runway (local +x) at the approach
+  // threshold so it doesn't crowd the windsock on the left. Slim white pole
+  // ~8m tall — taller than the windsock so the rotating heads sit clear of
+  // any hangar rooflines on the main field.
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  const towerX =  a.w/2 + 9;
+  const towerZ =  a.len/2 - 18;
+  const towerH = 8;
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0xdddddd });
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.22, towerH, 6),
+    poleMat
+  );
+  pole.position.set(towerX, towerH/2, towerZ);
+  grp.add(pole);
+  // Heads ride on a yaw group that we spin every frame. Mounted just above
+  // the pole top so the glare sprites read as sitting ON the tower head.
+  const headGrp = new THREE.Group();
+  headGrp.position.set(towerX, towerH + 0.35, towerZ);
+  grp.add(headGrp);
+  const headGeo = new THREE.SphereGeometry(0.5, 10, 8);
+  // Real airport beacons alternate green/white for civilian fields. Use a
+  // dim base color + emissive so the bulbs read even before the dusk gate
+  // kicks in their glow.
+  const baseGreen = new THREE.Color(0x143316);
+  const baseWhite = new THREE.Color(0x333333);
+  const greenMat = new THREE.MeshLambertMaterial({ color: 0x224422, emissive: baseGreen.clone() });
+  const whiteMat = new THREE.MeshLambertMaterial({ color: 0x666666, emissive: baseWhite.clone() });
+  const greenHead = new THREE.Mesh(headGeo, greenMat);
+  const whiteHead = new THREE.Mesh(headGeo, whiteMat);
+  // Back-to-back along the head group's local +x / -x so they sweep across
+  // the horizon a half-rotation apart — gives the familiar green/white blink
+  // pattern as the beacon spins past the player.
+  greenHead.position.x =  0.55;
+  whiteHead.position.x = -0.55;
+  headGrp.add(greenHead);
+  headGrp.add(whiteHead);
+  // Additive glare sprites — these are what carry the beacon visually from
+  // 8+ km out where the tiny head sphere would otherwise be sub-pixel. We
+  // pulse their opacity per-frame based on facing dot + nightT.
+  const mkGlare = (color) => {
+    const mat = new THREE.SpriteMaterial({
+      map: _beaconGlareTex, transparent: true, depthWrite: false,
+      opacity: 0, color, blending: THREE.AdditiveBlending, fog: false
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.scale.setScalar(14);
+    return spr;
+  };
+  const greenGlare = mkGlare(0x55ff66);
+  const whiteGlare = mkGlare(0xfff4d0);
+  greenHead.add(greenGlare);
+  whiteHead.add(whiteGlare);
+  airportBeacons.push({
+    ap: a, headGrp, greenMat, whiteMat,
+    greenGlare: greenGlare.material, whiteGlare: whiteGlare.material,
+    baseGreen, baseWhite
+  });
+}
+for (const a of AIRPORTS) makeAirportBeacon(a);
+// Camera-facing dot is cheap: project the beacon-to-camera vector onto the
+// head's current world forward axis. Computed in tickAirportBeacons() so the
+// glare brightens smoothly as a head sweeps toward the player.
+const _beaconTmpToCam = new THREE.Vector3();
+let airportBeaconPhase = 0;
+function tickAirportBeacons(dt){
+  // Reuse the same dusk gate as runway edge lights so the beacon falls off
+  // in tandem with the rest of the night lighting. sunDirFor is cheap — one
+  // call per frame, not per beacon.
+  const dir = sunDirFor(state.todHours);
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / AIRPORT_BEACON_NIGHT_FALLOFF));
+  airportBeaconPhase = (airportBeaconPhase + dt * (Math.PI * 2 / AIRPORT_BEACON_PERIOD)) % (Math.PI * 2);
+  for (const b of airportBeacons){
+    // Spin the head group as a unit; per-airport hdg offset so the two
+    // beacons aren't all facing the same way at the same instant.
+    b.headGrp.rotation.y = airportBeaconPhase + (b.ap.hdg || 0) * 1.7;
+    // Emissive base always reflects the dusk gate so the bulbs glow even
+    // when no one's looking straight at them.
+    const gIE = 0.18 + 1.05 * nightT;
+    const wIE = 0.18 + 1.10 * nightT;
+    b.greenMat.emissive.copy(b.baseGreen).multiplyScalar(1 + gIE * 3);
+    b.whiteMat.emissive.copy(b.baseWhite).multiplyScalar(1 + wIE * 3);
+    // Glare pulse: per-head world-forward dotted against the camera vector.
+    // Each head's local +z lies along the head group's rotated +z axis, so
+    // we can sample it without a full matrix decomposition.
+    // Green head sits on local +x; its outward axis is the +x of the rotated
+    // head group. Rotating local (1,0,0) by yaw about Y gives (sin, 0, cos).
+    const yaw = b.headGrp.rotation.y;
+    const gx =  Math.sin(yaw), gz = Math.cos(yaw);
+    const wx = -Math.sin(yaw), wz = -Math.cos(yaw);
+    // World position of the head group for the toCam vector.
+    const hp = b.headGrp.getWorldPosition(_beaconTmpToCam);
+    const cx = camera.position.x - hp.x;
+    const cz = camera.position.z - hp.z;
+    const cl = Math.hypot(cx, cz) || 1;
+    const cnx = cx / cl, cnz = cz / cl;
+    const gDot = Math.max(0, gx * cnx + gz * cnz);
+    const wDot = Math.max(0, wx * cnx + wz * cnz);
+    // Sharpen the dot so the glare reads as a brief sweep, not a constant
+    // wash. Multiply by nightT so the glare is essentially invisible at
+    // noon and full-strength after sunset.
+    const gPulse = Math.pow(gDot, 6);
+    const wPulse = Math.pow(wDot, 6);
+    b.greenGlare.opacity = 0.05 * (0.25 + 0.75 * nightT) + 0.85 * gPulse * (0.35 + 0.65 * nightT);
+    b.whiteGlare.opacity = 0.05 * (0.25 + 0.75 * nightT) + 0.95 * wPulse * (0.35 + 0.65 * nightT);
+  }
+}
+tickAirportBeacons(0); // prime so first frame doesn't show un-rotated heads
+
 // ====== PROCEDURAL CITIES (instanced boxes near each airport) ======
 // Boxy buildings clustered in a ring around every airport, so approaches have
 // visual interest. Taller blocks near the centre form a skyline; lower
@@ -6084,6 +6222,7 @@ function step(dt){
   tickRunwayFlares(dt);
   tickSkidmarks(dt);
   applyTimeOfDay(state.todHours);
+  tickAirportBeacons(dt);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
   // changing mid-flight. Wrap-aware: a midnight wrap (prev > now) only
