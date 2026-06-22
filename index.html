@@ -661,7 +661,8 @@ const state = {
   flyByActive: false,
   flyByT: 0,
   introOpen: true,
-  wind: new THREE.Vector3(2, 0, 1.2)
+  wind: new THREE.Vector3(2, 0, 1.2),
+  stall: 0
 };
 
 const keys = {};
@@ -700,6 +701,7 @@ function resetPlane(){
   state.onGround = true;
   state.crashed = false;
   state.landed = false;
+  state.stall = 0;
   state.msgT = 0;
   hideStatus();
 }
@@ -709,9 +711,42 @@ const intro = document.getElementById('intro');
 function dismissIntro(){
   if (!state.introOpen) return;
   state.introOpen = false; intro.style.display = 'none';
+  initStallAudio();
 }
 intro.addEventListener('click', dismissIntro);
 addEventListener('keydown', e=>{ if (state.introOpen && (e.code==='Space' || e.code==='Enter')) dismissIntro(); });
+
+// ====== Stall warning audio (short repeating beep) ======
+let stallAudio = null;
+function initStallAudio(){
+  if (stallAudio) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    stallAudio = { ctx, osc, gain };
+  } catch(e){ /* audio not available — silently skip */ }
+}
+function setStallAudio(active){
+  if (!stallAudio) return;
+  const { ctx, gain } = stallAudio;
+  if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+  if (active){
+    // pulse on/off ~5 Hz for a classic stall horn feel
+    const beat = (performance.now() * 0.005) % 1;
+    const target = beat < 0.5 ? 0.06 : 0.0;
+    gain.gain.setTargetAtTime(target, ctx.currentTime, 0.01);
+  } else {
+    gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+  }
+}
 
 // ====== PHYSICS ======
 const G = 9.81;
@@ -953,6 +988,11 @@ function step(dt){
   $('#gear').textContent = state.gearDown ? 'DOWN' : 'UP';
   $('#aoa').textContent  = aoaDeg.toFixed(1);
   const stallActive = (Math.abs(aoa) > STALL_AOA*0.85) && speed > 10 && !state.onGround;
+  // Stall intensity: 0 below warn threshold, 1 at MAX_AOA. Used for buffet shake + audio.
+  const stallNorm = (Math.abs(aoa) - STALL_AOA*0.85) / (MAX_AOA - STALL_AOA*0.85);
+  const stallIntensity = stallActive ? Math.max(0, Math.min(1, stallNorm)) : 0;
+  state.stall = state.stall * 0.6 + stallIntensity * 0.4;
+  setStallAudio(stallActive);
   $('#stall').style.display = stallActive ? 'block' : 'none';
 
   const spdEl = document.getElementById('spd');
@@ -1252,6 +1292,14 @@ function updateCamera(dt){
       plane.position.z + Math.sin(t)*r
     );
     camera.lookAt(plane.position);
+  }
+
+  // Stall buffet: shake the camera based on stall intensity (post-position so all cams get it).
+  if (state.stall > 0.01){
+    const amp = state.stall * (state.cam === 1 ? 0.18 : 0.45);
+    camera.position.x += (Math.random() - 0.5) * amp;
+    camera.position.y += (Math.random() - 0.5) * amp;
+    camera.position.z += (Math.random() - 0.5) * amp;
   }
 }
 
