@@ -91,10 +91,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Weather radar mini-panel — small dark canvas next to the mini-map showing top-down fuzzy blobs for current cloud-layer positions plus a soft green sweep wedge. Doesn't need to be physically accurate — it just has to read as "weather radar" so the player can see which way weather is drifting in the wind. Pairs naturally with the existing rain toggle.
 
+- [x] Engine fire emergency — rare random event (or triggered by a bird strike at high throttle) sets the engine on fire: orange flickering sprite at the cowl, black smoke pouring off into a long plume, fast-rising airframe damage at ~6%/sec, ATC "Mayday, engine fire, declaring emergency," and a flashing red 🔥 ENG FIRE banner with a repeating two-pulse chirp. To put it out: cut the engine with `X` and drop throttle to idle — the fire starves over ~10s. Ignore it and the airframe melts through 100% into the existing airframe-failure crash branch. Turns a quiet sortie into a real deadstick scenario you have to handle, and gives the bird-strike system actual teeth.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Engine fire emergency — rare random event (or triggered by sustained over-redline RPM / heavy bird strike at high throttle) sets the engine on fire: orange flicker sprite at the cowl, black smoke pouring back, fast-rising damage, ATC "Mayday, engine fire, declaring emergency," and a flashing red ENG FIRE banner. Pressing `X` to cut the engine + dropping throttle starves the fire so it puts itself out within ~10s; ignore it and the airframe melts. Turns a quiet sortie into a real deadstick scenario you have to handle.
 
 - [ ] Runway condition overlay — when rain is active, the runway surface gets a darker, slightly mirrored tint and braking friction drops noticeably (longer rollout, easier to skid through the threshold). HUD adds a small `RWY WET` pill near the wind readout. Gives the rain setting actual gameplay teeth instead of being pure visual.
 

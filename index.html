@@ -343,6 +343,7 @@
   <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
+  <div class="row"><span id="engfire" class="warn-red" style="display:none">🔥 ENG FIRE — CUT THROTTLE</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
@@ -2322,6 +2323,12 @@ function triggerBirdStrike(){
   playBirdThud();
   if (typeof pushATC === 'function') pushATC('Bird strike, bird strike.', { tag:'PILOT', now:true });
   showStatus('BIRD STRIKE', '+' + Math.round(BIRD_STRIKE_DAMAGE * 100) + '% damage', 'bad');
+  // Heavy bird strike at high throttle = compressor stall + fuel-line fire.
+  // Triggered only if the engine fire system is armed (not already burning,
+  // not on ground / crashed / etc.) so the gate stays consistent everywhere.
+  if (state.throttle >= 0.75 && !state.engineFire){
+    triggerEngineFire('Bird ingested at high power');
+  }
   // Seed 3-6 splatter blobs at randomized positions across the windshield —
   // biased toward upper-center where a bird would actually hit on a 3° approach.
   const w = innerWidth, h = innerHeight;
@@ -3400,6 +3407,269 @@ function updateAISmoke(dt){
   }
 }
 
+// ====== ENGINE FIRE EMERGENCY ======
+// Rare-but-real failure mode that turns a quiet sortie into a deadstick
+// scenario. Triggered randomly during high-throttle cruise (very low chance
+// per second after a min air-time gate) OR guaranteed when a bird strike
+// connects at high throttle (PT6 cores really do not like ingesting feathers).
+// Once `state.engineFire` is true:
+//   - Cowl emits an orange flicker sprite that scales/jitters every frame
+//   - Black smoke pours backward off the cowl via a dedicated fixed-pool
+//     emitter (separate from contrails/airshow so coloring stays correct)
+//   - Airframe damage ticks up at ~6%/sec until the fire is extinguished
+//   - A flashing red HUD banner + repeating chirp warns the player
+//   - One-shot mayday ATC call fires on ignition
+// To put it out: cut the engine (X) so fuel stops, drop throttle to idle, and
+// hold for ~10s. `engineFireStarvedT` accumulates while those starve conditions
+// are met; ignoring them keeps the airframe melting until it crosses 100% and
+// triggers the existing airframe-failure crash branch.
+const FIRE_DAMAGE_PER_SEC = 0.06;          // ~6% airframe per second while burning
+const FIRE_STARVE_SECS = 10.0;              // seconds at engineOut + idle throttle to fully starve
+const FIRE_MIN_AIRTIME_MS = 60 * 1000;      // must be airborne 60s before random fires can roll
+const FIRE_RANDOM_CHANCE_PER_SEC = 0.0015;  // ~1-in-670 per second at full throttle (very rare)
+const FIRE_MIN_THROTTLE = 0.7;              // random fires only roll above this throttle
+const FIRE_REROLL_MS = 2000;                // gap between consecutive eligibility rolls
+const FIRE_COWL_OFFSET = new THREE.Vector3(0, 0.15, -3.4); // cowl/nose, plane-local
+const FIRE_BEEP_INTERVAL_MS = 500;          // chirp cadence while burning
+
+// Flame flicker sprite — single shared sprite that we re-aim at the cowl in
+// world space each frame and scale/jitter to feel like a lick of fire. Way
+// cheaper than spawning a whole pool, and the fire reads fine as a single
+// pulsing disc against the black smoke trail. Built on the airshow puff
+// texture but tinted bright orange so it pops against the sky.
+let fireFlickerSprite = null;
+{
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xff7820, blending: THREE.AdditiveBlending
+  });
+  fireFlickerSprite = new THREE.Sprite(mat);
+  fireFlickerSprite.scale.setScalar(1.4);
+  fireFlickerSprite.visible = false;
+  fireFlickerSprite.renderOrder = 5;
+  scene.add(fireFlickerSprite);
+}
+
+// Black smoke pool — mirror of the airshow plume sized for a sustained fire.
+// Tinted dark grey/black per puff so we can see it against any sky color.
+const FIRE_SMOKE_MAX = 140;
+const FIRE_SMOKE_LIFE = 6.5;
+const FIRE_SMOKE_START_R = 0.7;
+const FIRE_SMOKE_GROW = 3.4;
+const FIRE_SMOKE_EMIT_PER_SEC = 28;
+const fireSmokePool = [];
+let fireSmokeHead = 0;
+for (let i = 0; i < FIRE_SMOKE_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0x222222
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(FIRE_SMOKE_START_R);
+  spr.visible = false;
+  spr.renderOrder = 4;
+  scene.add(spr);
+  fireSmokePool.push({ spr, mat, age: FIRE_SMOKE_LIFE + 1, life: FIRE_SMOKE_LIFE });
+}
+let fireSmokeAccum = 0;
+const _fireTmpOff = new THREE.Vector3();
+const _fireTmpWorld = new THREE.Vector3();
+function spawnFireSmoke(world){
+  const p = fireSmokePool[fireSmokeHead];
+  fireSmokeHead = (fireSmokeHead + 1) % FIRE_SMOKE_MAX;
+  p.spr.position.copy(world);
+  p.spr.scale.setScalar(FIRE_SMOKE_START_R);
+  // Slight tint variance so the plume isn't a flat color stripe.
+  const v = 0.10 + Math.random() * 0.18;
+  p.mat.color.setRGB(v, v, v);
+  p.age = 0;
+  p.spr.visible = true;
+}
+function clearEngineFireFx(){
+  if (fireFlickerSprite){
+    fireFlickerSprite.visible = false;
+    fireFlickerSprite.material.opacity = 0;
+  }
+  for (const p of fireSmokePool){ p.spr.visible = false; p.mat.opacity = 0; p.age = p.life + 1; }
+  fireSmokeAccum = 0;
+}
+function fireAllowedToTrigger(){
+  // Same suppression list as the bird strike / ribbon: never during intro,
+  // photo, pause, replay, on-ground or post-crash. Only random-roll once we
+  // already have an engine fire armed isn't applicable here — caller checks.
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
+  if (state.crashed || state.onGround) return false;
+  if (state.engineFire) return false;
+  return true;
+}
+function triggerEngineFire(reason){
+  if (!fireAllowedToTrigger()) return;
+  state.engineFire = true;
+  state.engineFireT = 0;
+  state.engineFireStarvedT = 0;
+  state.engineFireBeepAt = 0;
+  showStatus('ENGINE FIRE', reason || 'Cut throttle and kill the engine', 'bad');
+  if (typeof pushATC === 'function') pushATC('Mayday, engine fire, declaring emergency.', { tag:'PILOT', now:true });
+  // First chirp immediately so the warning is unmissable.
+  playFireWarnChirp();
+}
+function extinguishEngineFire(){
+  if (!state.engineFire) return;
+  state.engineFire = false;
+  state.engineFireT = 0;
+  state.engineFireStarvedT = 0;
+  state.engineFireBeepAt = 0;
+  // Push the next random eligibility roll out so we don't immediately re-fire
+  // on the same throttle setting.
+  state.nextFireRollMs = performance.now() + 30000;
+  showStatus('FIRE OUT', 'Engine starved, deadstick to nearest field', 'good');
+  if (typeof pushATC === 'function') pushATC('Fire is out, declaring emergency, deadstick.', { tag:'PILOT', now:true });
+}
+function maybeRollEngineFire(dt){
+  // Random ignition path: only rolls when we're well into a flight, throttle
+  // is high, and no fire is already burning. Hard-gated by fireAllowedToTrigger.
+  if (!fireAllowedToTrigger()) return;
+  const now = performance.now();
+  if (now < state.nextFireRollMs) return;
+  if (state.throttle < FIRE_MIN_THROTTLE) return;
+  if (flightStartMs == null || (now - flightStartMs) < FIRE_MIN_AIRTIME_MS) return;
+  // Per-second probability scaled by throttle (full-power flights are worse).
+  const throttleBoost = (state.throttle - FIRE_MIN_THROTTLE) / (1 - FIRE_MIN_THROTTLE);
+  const pPerSec = FIRE_RANDOM_CHANCE_PER_SEC * (0.5 + 0.5 * throttleBoost);
+  if (Math.random() < pPerSec * dt){
+    triggerEngineFire('Random component failure');
+  } else {
+    state.nextFireRollMs = now + FIRE_REROLL_MS;
+  }
+}
+function updateEngineFire(dt){
+  // Tick first: if a fire is burning, accumulate damage, advance the flicker
+  // clock, emit smoke, and check the starve conditions for auto-out.
+  if (state.engineFire){
+    // Hard kill the fire if the player crashes / lands / opens photo: those
+    // states want a clean visual, and a wreck on the ground doesn't need to
+    // keep accumulating damage.
+    if (state.crashed || state.onGround || state.introOpen || state.replayActive){
+      clearEngineFireFx();
+      // Leave state.engineFire true so a quick-restart / fresh sortie picks up
+      // the right reset path; resetPlane() clears the flag explicitly.
+    } else {
+      state.engineFireT += dt;
+      // Steady damage tick while burning.
+      state.damage = Math.min(1, state.damage + FIRE_DAMAGE_PER_SEC * dt);
+      // Starve check: engineOut AND throttle near idle. Either condition
+      // missing resets the starve counter so partial fixes don't help.
+      if (state.engineOut && state.throttle <= 0.05){
+        state.engineFireStarvedT += dt;
+        if (state.engineFireStarvedT >= FIRE_STARVE_SECS){
+          extinguishEngineFire();
+        }
+      } else {
+        state.engineFireStarvedT = 0;
+      }
+      // Warning chirp throttled to FIRE_BEEP_INTERVAL_MS so it cuts through
+      // the engine note without spamming oscillators.
+      const nowMs = performance.now();
+      if (nowMs - state.engineFireBeepAt > FIRE_BEEP_INTERVAL_MS){
+        playFireWarnChirp();
+        state.engineFireBeepAt = nowMs;
+      }
+    }
+  }
+
+  // Visuals: hidden anywhere a live trail wouldn't make sense. Already-alive
+  // smoke keeps aging out either way so a quick toggle (e.g. cam swap into
+  // photo) leaves a natural trailing tail instead of popping.
+  const showFx = state.engineFire && !state.paused && !state.replayActive
+    && !state.photoMode && !state.onGround && !state.crashed && !state.introOpen;
+
+  // Flame flicker sprite — always re-aim at the cowl in world space, vary
+  // scale + slight position jitter so it reads as a live flame, not a decal.
+  if (fireFlickerSprite){
+    if (showFx){
+      _fireTmpWorld.copy(_fireTmpOff.copy(FIRE_COWL_OFFSET))
+        .applyQuaternion(plane.quaternion).add(plane.position);
+      // Tiny lateral jitter so the flame dances around the cowl.
+      const jitter = 0.15;
+      _fireTmpWorld.x += (Math.random() - 0.5) * jitter;
+      _fireTmpWorld.y += (Math.random() - 0.5) * jitter;
+      _fireTmpWorld.z += (Math.random() - 0.5) * jitter;
+      fireFlickerSprite.position.copy(_fireTmpWorld);
+      // Pulse scale 0.9..1.8 and shift color hot-yellow on peaks.
+      const t = performance.now() * 0.012;
+      const pulse = 1.2 + 0.55 * Math.sin(t) + 0.25 * Math.sin(t * 2.7 + 1.3);
+      fireFlickerSprite.scale.setScalar(Math.max(0.6, pulse));
+      // Color flickers between deep orange and hot yellow.
+      const hot = (Math.sin(t * 3.1) * 0.5 + 0.5);
+      fireFlickerSprite.material.color.setRGB(1.0, 0.45 + 0.35 * hot, 0.06 + 0.18 * hot);
+      fireFlickerSprite.material.opacity = 0.9;
+      fireFlickerSprite.visible = true;
+    } else {
+      fireFlickerSprite.visible = false;
+      fireFlickerSprite.material.opacity = 0;
+    }
+  }
+
+  // Black smoke emit: same pattern as the airshow / AI plume so behavior
+  // stays familiar. Always-alive puffs keep aging in the loop below.
+  if (showFx){
+    fireSmokeAccum += FIRE_SMOKE_EMIT_PER_SEC * dt;
+    while (fireSmokeAccum >= 1){
+      fireSmokeAccum -= 1;
+      _fireTmpWorld.copy(_fireTmpOff.copy(FIRE_COWL_OFFSET))
+        .applyQuaternion(plane.quaternion).add(plane.position);
+      spawnFireSmoke(_fireTmpWorld);
+    }
+  } else {
+    fireSmokeAccum = 0;
+  }
+  // Age every puff, drift back with wind + slow lift so the plume curls up
+  // behind the plane. Mirrors the airshow loop.
+  for (const p of fireSmokePool){
+    if (!p.spr.visible) continue;
+    p.age += dt;
+    if (p.age >= p.life){
+      p.spr.visible = false;
+      p.mat.opacity = 0;
+      continue;
+    }
+    const t = p.age / p.life;
+    p.spr.position.x += state.wind.x * 0.25 * dt;
+    p.spr.position.z += state.wind.z * 0.25 * dt;
+    p.spr.position.y += 0.4 * dt; // slow lift as hot smoke rises
+    const r = FIRE_SMOKE_START_R + FIRE_SMOKE_GROW * t;
+    p.spr.scale.setScalar(r);
+    const fadeIn = Math.min(1, t / 0.08);
+    const fadeOut = Math.min(1, (1 - t) / 0.5);
+    p.mat.opacity = 0.85 * fadeIn * fadeOut;
+  }
+}
+// Fire-warning chirp — short two-pulse square so it reads as "alarm" against
+// the existing stall/GPWS beeps. Reuses the shared WebAudio context.
+function playFireWarnChirp(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.30 * settings.volume;
+  if (vol <= 0) return;
+  // Two quick pulses, slight upward sweep on each so it sounds urgent.
+  for (let i = 0; i < 2; i++){
+    const ts = t0 + i * 0.12;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(620, ts);
+    osc.frequency.linearRampToValueAtTime(820, ts + 0.09);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, ts);
+    g.gain.linearRampToValueAtTime(vol, ts + 0.008);
+    g.gain.setValueAtTime(vol, ts + 0.07);
+    g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.10);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(ts);
+    osc.stop(ts + 0.12);
+  }
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -3504,6 +3774,22 @@ const state = {
   // chirps a few times per second instead of every frame. Timestamp in ms
   // (performance.now) of the last beep; 0 means "ready to beep now".
   gpwsBeepAt: 0,
+  // Engine fire emergency. Rare random event in normal flight, or guaranteed
+  // when a bird strike hits at high throttle. While `engineFire` is true,
+  // `engineFireT` counts up the seconds since ignition (drives the cowl flame
+  // flicker + black smoke emit + steady damage tick). To put it out: cut the
+  // engine (X) and drop throttle to idle — the fire starves over ~10s tracked
+  // by `engineFireStarvedT`. Hitting the auto-out threshold clears the fire
+  // and silences the banner; ignoring it melts the airframe via damage tick.
+  // `engineFireBeepAt` throttles the warning chirp to ~2Hz so it cuts through
+  // without spamming the WebAudio context.
+  engineFire: false,
+  engineFireT: 0,
+  engineFireStarvedT: 0,
+  engineFireBeepAt: 0,
+  // Next earliest random-fire eligibility timestamp (ms). Bumped after each
+  // fire (or each spawn) so we don't roll the dice every frame for nothing.
+  nextFireRollMs: 0,
   scoreLast: null,
   scoreBest: 0,
   scoreTotal: 0,
@@ -4302,6 +4588,15 @@ function resetPlane(){
   // respective thresholds (see step()).
   state.fuelWarnLow = false;
   state.fuelWarnCrit = false;
+  // Engine fire: clear flag + visuals + starve counter so a fresh sortie
+  // starts cool, and reset the random-roll cooldown so the new flight is
+  // immediately eligible (after the air-time gate inside maybeRollEngineFire).
+  state.engineFire = false;
+  state.engineFireT = 0;
+  state.engineFireStarvedT = 0;
+  state.engineFireBeepAt = 0;
+  state.nextFireRollMs = 0;
+  clearEngineFireFx();
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -5637,6 +5932,11 @@ function step(dt){
   // Airshow smoke — independent of the ribbon. Function self-gates on the
   // toggle + sim flags, and lets in-flight puffs age out naturally on toggle-off.
   updateAirshowSmoke(dt);
+  // Engine fire emergency: random-roll once per frame (cheap; self-gated), then
+  // tick the active fire (damage accumulation, starve check, flame + smoke
+  // visuals). Both calls self-gate so a clean cruise pays nothing.
+  maybeRollEngineFire(dt);
+  updateEngineFire(dt);
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
@@ -5772,6 +6072,15 @@ function step(dt){
   }
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
+  // Engine fire HUD banner: visible only while the fire is actively burning
+  // (and we're not in a cleanup state). Mirror the visual gate from
+  // updateEngineFire so the banner can't ghost over photo / replay / etc.
+  const fireEl = document.getElementById('engfire');
+  if (fireEl){
+    const showFireHud = state.engineFire && !state.crashed && !state.onGround
+      && !state.introOpen && !state.replayActive;
+    fireEl.style.display = showFireHud ? 'block' : 'none';
+  }
   // Reverse-thrust HUD pill: visible while the visual lerp is non-zero so it
   // tracks the ease-in/out rather than snapping when the player releases Z.
   document.getElementById('reverser').style.display = (state.reverserT > 0.05) ? 'inline' : 'none';
