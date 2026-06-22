@@ -118,6 +118,29 @@
   #setLiveries .lv .sw .bot { flex:1; }
   #setLiveries .lv .nm { font-size:9px; letter-spacing:1px; color:#9bb; font-weight:700; }
   #setLiveries .lv.sel .nm { color:#7ee787; }
+  /* Pilot stats screen — opens from the main menu via the STATS button.
+     Same modal style as Settings (centered card on a dimmed backdrop) but tuned
+     for read-only number rows. Tracks lifetime totals across all flights and
+     sessions; persisted to localStorage so it survives reloads. */
+  #intro .menurow { display:flex; gap:8px; margin-bottom:14px; }
+  #intro .menurow button { flex:1; padding:8px 10px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; border-radius:8px; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; transition:all .15s ease; }
+  #intro .menurow button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; transform:translateY(-1px); }
+  #stats { position:fixed; inset:0; background:rgba(0,5,12,.86); display:none; align-items:center; justify-content:center; z-index:30; }
+  #stats.show { display:flex; }
+  #stats .card { width:380px; padding:22px 28px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; }
+  #stats h2 { font-size:20px; color:#7ee787; margin-bottom:14px; letter-spacing:2px; font-weight:800; }
+  #stats .row { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; border-bottom:1px solid rgba(30,53,72,.5); }
+  #stats .row:last-of-type { border-bottom:none; }
+  #stats .name { color:#6aa; font-size:11px; letter-spacing:1px; font-weight:700; }
+  #stats .val { color:#fff; font-weight:700; font-size:14px; }
+  #stats .val.hi { color:#7ee787; }
+  #stats .hint { font-size:10px; color:#9bb; margin:10px 0 4px; line-height:1.4; }
+  #stats .actions { display:flex; gap:8px; margin-top:8px; }
+  #stats button { flex:1; padding:8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
+  #stats button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #stats button.danger { color:#ff8a8a; border-color:#5a2a2a; }
+  #stats button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  #stats button.danger:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
 </style>
 </head>
 <body>
@@ -206,6 +229,23 @@
   <div class="row"><span class="lbl">Target</span><span class="val tgt" id="msTgt">—</span></div>
   <div class="row"><span class="lbl" id="msLbl">Dist</span><span class="val" id="msVal">—</span></div>
 </div>
+<div id="stats">
+  <div class="card">
+    <h2>PILOT STATS</h2>
+    <div class="row"><span class="name">TOTAL FLIGHTS</span><span class="val" id="stFlights">0</span></div>
+    <div class="row"><span class="name">SUCCESSFUL LANDINGS</span><span class="val" id="stLandings">0</span></div>
+    <div class="row"><span class="name">CRASHES</span><span class="val" id="stCrashes">0</span></div>
+    <div class="row"><span class="name">BEST LANDING SCORE</span><span class="val hi" id="stBest">0</span></div>
+    <div class="row"><span class="name">AVG LANDING SCORE</span><span class="val" id="stAvg">0</span></div>
+    <div class="row"><span class="name">LONGEST FLIGHT</span><span class="val" id="stLongest">0:00</span></div>
+    <div class="row"><span class="name">TOTAL AIR TIME</span><span class="val" id="stTotalTime">0:00</span></div>
+    <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
+    <div class="actions">
+      <button id="stReset" class="danger" type="button">RESET</button>
+      <button id="stClose" class="primary" type="button">CLOSE</button>
+    </div>
+  </div>
+</div>
 <div id="intro">
   <div class="card">
     <h1>FLIGHT SIM</h1>
@@ -215,6 +255,9 @@
       <div class="mbtn" data-mode="tng"><div class="mt">TOUCH &amp; GO</div><div class="md">Rack up landings<br>chase best score</div></div>
       <div class="mbtn" data-mode="hop"><div class="mt">AIRPORT HOP</div><div class="md">Visit all 3 fields<br>in sequence</div></div>
       <div class="mbtn" data-mode="ring"><div class="mt">RING CHASE</div><div class="md">Fly the chain of rings<br>against the clock</div></div>
+    </div>
+    <div class="menurow">
+      <button id="introStats" type="button">📊 PILOT STATS</button>
     </div>
     <div class="ctrls">
       <span>Throttle</span><span><kbd>W</kbd> up / <kbd>S</kbd> down</span>
@@ -289,6 +332,77 @@ camera.fov = settings.fov;
 camera.updateProjectionMatrix();
 function saveSettings(){
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch(e){ /* private mode — skip */ }
+}
+
+// ====== PILOT STATS ======
+// Lifetime tally across every flight: total flights, successful landings,
+// crashes, best landing score, average landing score, longest single flight,
+// total time aloft. Persisted to localStorage so it survives reloads. Updated
+// at three hook points in the sim:
+//   - takeoff:   first frame state.onGround flips false  -> flightStartMs set, totalFlights++
+//   - landing:   good touchdown (sets state.landed=true) -> landings++, score rollups, flight time closed
+//   - crash:     state.crashed=true                      -> crashes++, flight time closed
+// Flight time is the wall-clock span between takeoff and the next ground event.
+const STATS_KEY = 'flightsim.stats.v1';
+const STATS_DEFAULT = {
+  totalFlights: 0,
+  totalLandings: 0,
+  crashes: 0,
+  bestLandingScore: 0,
+  totalLandingScore: 0,    // sum of all good-landing scores; avg = total/landings
+  longestFlightSec: 0,
+  totalAirSec: 0           // cumulative seconds in the air
+};
+const pilotStats = Object.assign({}, STATS_DEFAULT);
+try {
+  const raw = localStorage.getItem(STATS_KEY);
+  if (raw){
+    const saved = JSON.parse(raw);
+    for (const k of Object.keys(STATS_DEFAULT)){
+      if (typeof saved[k] === 'number' && isFinite(saved[k]) && saved[k] >= 0) pilotStats[k] = saved[k];
+    }
+  }
+} catch(e){ /* corrupt — stay on defaults */ }
+function savePilotStats(){
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(pilotStats)); } catch(e){ /* private mode — skip */ }
+}
+// Track wall-clock takeoff time. null while on the ground; ms timestamp once airborne.
+let flightStartMs = null;
+function onTakeoff(){
+  if (flightStartMs != null) return;
+  flightStartMs = performance.now();
+  pilotStats.totalFlights += 1;
+  savePilotStats();
+}
+function closeFlightTime(){
+  if (flightStartMs == null) return 0;
+  const sec = Math.max(0, (performance.now() - flightStartMs) / 1000);
+  flightStartMs = null;
+  pilotStats.totalAirSec += sec;
+  if (sec > pilotStats.longestFlightSec) pilotStats.longestFlightSec = sec;
+  return sec;
+}
+function onLanding(score){
+  closeFlightTime();
+  pilotStats.totalLandings += 1;
+  if (typeof score === 'number' && isFinite(score) && score > 0){
+    pilotStats.totalLandingScore += score;
+    if (score > pilotStats.bestLandingScore) pilotStats.bestLandingScore = score;
+  }
+  savePilotStats();
+}
+function onCrash(){
+  closeFlightTime();
+  pilotStats.crashes += 1;
+  savePilotStats();
+}
+function fmtFlightTime(sec){
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  return m + ':' + String(s).padStart(2,'0');
 }
 
 // ====== TIME OF DAY ======
@@ -2280,6 +2394,7 @@ function step(dt){
           state.damage = 1;
           showStatus('CRASHED', reason, 'bad');
           state.crashed = true;
+          onCrash();
           startReplay();
         } else {
           showStatus('HARD LANDING', reason + ' · +' + Math.round(dmgAdd*100) + '% dmg', 'hard');
@@ -2323,6 +2438,7 @@ function step(dt){
         const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
         showStatus(title, sub, 'good');
         state.landed = true;
+        onLanding(score);
         startReplay();
       }
     }
@@ -2360,6 +2476,7 @@ function step(dt){
     }
   } else {
     state.onGround = false;
+    onTakeoff();
   }
 
   // Wingtip vortex trails — fade in under high-G or near stall.
@@ -2376,6 +2493,7 @@ function step(dt){
   if (state.damage >= 0.999 && !state.crashed && !state.onGround){
     showStatus('AIRFRAME FAILURE', 'damage 100%', 'bad');
     state.crashed = true;
+    onCrash();
     startReplay();
   }
   const vortexTarget = Math.max(0, Math.min(1, Math.max(gFactor, state.stall * 1.1)))
@@ -3067,6 +3185,58 @@ addEventListener('resize', ()=>{
 
 // Click anywhere on the replay banner to dismiss it.
 replayEl.addEventListener('click', () => stopReplay());
+
+// ====== PILOT STATS UI ======
+// Read-only modal opened from the main menu's PILOT STATS button. Reflects the
+// `pilotStats` object live each open. Reset button clears everything (with a
+// confirm) so a player who fat-fingers the wrong button doesn't lose their run.
+(function setupStatsUi(){
+  const panel = document.getElementById('stats');
+  const btnOpen = document.getElementById('introStats');
+  const btnClose = document.getElementById('stClose');
+  const btnReset = document.getElementById('stReset');
+  if (!panel || !btnOpen) return;
+  const cells = {
+    flights:  document.getElementById('stFlights'),
+    landings: document.getElementById('stLandings'),
+    crashes:  document.getElementById('stCrashes'),
+    best:     document.getElementById('stBest'),
+    avg:      document.getElementById('stAvg'),
+    longest:  document.getElementById('stLongest'),
+    total:    document.getElementById('stTotalTime')
+  };
+  function refresh(){
+    cells.flights.textContent  = pilotStats.totalFlights;
+    cells.landings.textContent = pilotStats.totalLandings;
+    cells.crashes.textContent  = pilotStats.crashes;
+    cells.best.textContent     = pilotStats.bestLandingScore;
+    const avg = pilotStats.totalLandings > 0
+      ? Math.round(pilotStats.totalLandingScore / pilotStats.totalLandings)
+      : 0;
+    cells.avg.textContent      = avg;
+    cells.longest.textContent  = fmtFlightTime(pilotStats.longestFlightSec);
+    cells.total.textContent    = fmtFlightTime(pilotStats.totalAirSec);
+  }
+  function openPanel(){ refresh(); panel.classList.add('show'); }
+  function closePanel(){ panel.classList.remove('show'); }
+  btnOpen.addEventListener('click', e => { e.stopPropagation(); openPanel(); });
+  btnClose.addEventListener('click', e => { e.stopPropagation(); closePanel(); });
+  panel.addEventListener('click', e => { if (e.target === panel) closePanel(); });
+  btnReset.addEventListener('click', e => {
+    e.stopPropagation();
+    if (!confirm('Reset all pilot stats? This cannot be undone.')) return;
+    Object.assign(pilotStats, STATS_DEFAULT);
+    savePilotStats();
+    refresh();
+  });
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'Escape' && panel.classList.contains('show')){
+      e.preventDefault();
+      closePanel();
+    }
+  });
+})();
 
 // ====== SETTINGS PANEL UI ======
 // Toggleable modal that exposes the persisted `settings` object. Sliders write
