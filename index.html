@@ -361,7 +361,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -4456,6 +4456,13 @@ const state = {
   // Stored in world units (m/s). +x = wind FROM west, +z = wind FROM north.
   windTarget: new THREE.Vector3(2, 0, 1.2),
   windNextChangeMs: 0,
+  // Wind shear on short final: rare 4-6s burst that flips wind direction
+  // and bumps speed below 60m AGL within 1 km of a runway threshold. Tests
+  // the pilot's ability to actually crab + flare on the fly instead of
+  // trusting the steady wind readout. phase: 'idle' | 'active'. triggered
+  // latches per approach so we don't multi-fire; clears once AGL climbs
+  // back above 200m (matches the approachArmed pattern for radalt callouts).
+  shear: { phase: 'idle', endsAt: 0, triggered: false, savedTargetX: 0, savedTargetZ: 0, rwyDesignator: '' },
   stall: 0,
   vortex: 0,
   // Crash report card data: peakG and peakSink track the worst values seen
@@ -5451,6 +5458,14 @@ function resetPlane(){
   // Seed a fresh wind on reset so reps feel different.
   pickWindTarget();
   state.wind.copy(state.windTarget);
+  // Clear any in-flight wind shear so a reset doesn't keep the burst pill lit
+  // and re-arms the trigger so the next approach gets a fresh roll.
+  if (state.shear){
+    state.shear.phase = 'idle';
+    state.shear.endsAt = 0;
+    state.shear.triggered = false;
+    state.shear.rwyDesignator = '';
+  }
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   for (const v of aiVortexMeshes){ v.primed = false; v.mesh.visible = false; }
   wakeState.intensity = 0; wakeState.rumbleCooldown = 0; wakeState.wasInWake = false;
@@ -6097,6 +6112,104 @@ function pickWindTarget(){
 }
 pickWindTarget();
 state.wind.copy(state.windTarget);
+
+// ====== WIND SHEAR (short-final hazard) ======
+// Rare burst that overrides windTarget for 4-6s when the plane crosses
+// below 60m AGL within 1 km of a runway threshold. 15% chance per approach,
+// latched by state.shear.triggered so it can't multi-fire on the same
+// descent. Re-arms when AGL climbs back above 200m, mirroring the radalt
+// callout pattern. The shear vector is either a sudden headwind drop
+// (~8 m/s along the current wind axis) or a 60° swing with a +6 m/s surge,
+// 50/50. When the burst ends, we re-roll a fresh windTarget so wind eases
+// back to a new steady state instead of snapping. HUD shows a yellow
+// "⚠ WIND SHEAR" pill while active; ATC fires one Wind shear on final call.
+const SHEAR_TRIGGER_AGL    = 60;     // metres — fire window ceiling
+const SHEAR_TRIGGER_DIST   = 1000;   // metres from nearest threshold
+const SHEAR_REARM_AGL      = 200;    // metres — climb back above this to re-arm
+const SHEAR_CHANCE         = 0.15;   // 15% per qualifying approach
+const SHEAR_DUR_MIN_MS     = 4000;
+const SHEAR_DUR_MAX_MS     = 6000;
+function tickWindShear(){
+  const sh = state.shear;
+  if (!sh) return;
+  // End an active shear burst once the timer elapses; let wind ease back
+  // to a freshly re-rolled steady target so it doesn't snap.
+  if (sh.phase === 'active'){
+    if (performance.now() >= sh.endsAt){
+      sh.phase = 'idle';
+      pickWindTarget();
+    }
+    return;
+  }
+  // Idle: hunt for trigger conditions. Same gates as the radalt callouts
+  // (gear down, descending, not crashed/replay/photo/onGround), with an
+  // extra range gate so shear only fires near a real runway threshold.
+  if (state.crashed || state.onGround || state.replayActive || state.photoMode || state.introOpen || state.paused) return;
+  if (!state.gearDown) return;
+  // Find nearest runway threshold (either end) within the trigger range.
+  let nearestRi = null, nearestDist = 1e9, nearestEndIsSouth = true;
+  for (const ri of runwayInfos){
+    const dxS = plane.position.x - ri.aimX;
+    const dzS = plane.position.z - ri.aimZ;
+    const dS = Math.hypot(dxS, dzS);
+    const nx = ri.ap.x - Math.sin(ri.ap.hdg) * (ri.ap.len/2);
+    const nz = ri.ap.z - Math.cos(ri.ap.hdg) * (ri.ap.len/2);
+    const dxN = plane.position.x - nx;
+    const dzN = plane.position.z - nz;
+    const dN = Math.hypot(dxN, dzN);
+    const d = Math.min(dS, dN);
+    if (d < nearestDist){ nearestDist = d; nearestRi = ri; nearestEndIsSouth = dS <= dN; }
+  }
+  if (!nearestRi) return;
+  // Re-arm latch: any time we're high above a runway, clear the triggered
+  // flag so the next descent gets a fresh roll.
+  const agl = plane.position.y - nearestRi.ap.elev - GEAR_H;
+  if (agl > SHEAR_REARM_AGL){ sh.triggered = false; return; }
+  if (sh.triggered) return;
+  if (nearestDist > SHEAR_TRIGGER_DIST) return;
+  if (agl < 5 || agl > SHEAR_TRIGGER_AGL) return;
+  // Need to actually be descending toward the runway, not just sitting in
+  // the gate post-touchdown.
+  if (state.vel.y > -0.5) return;
+  // Roll the 15% dice once per arming.
+  sh.triggered = true;
+  if (Math.random() > SHEAR_CHANCE) return;
+  // Compose the shear wind vector. 50/50 between a headwind-drop pattern
+  // (rotate current wind 180° and bump speed) and a 60° swing with surge.
+  const curSpd = Math.hypot(state.windTarget.x, state.windTarget.z);
+  const curDir = Math.atan2(state.windTarget.x, state.windTarget.z); // direction wind is going TO
+  let newDir, newSpd;
+  if (Math.random() < 0.5){
+    // Sudden headwind drop / tailwind kick: flip the direction the wind is
+    // going by ~150-180° and bump magnitude by ~8 m/s. Pilot feels a vanished
+    // headwind on approach.
+    newDir = curDir + Math.PI + (Math.random() - 0.5) * 0.5;
+    newSpd = Math.max(6, curSpd) + 4 + Math.random() * 4;
+  } else {
+    // 60° crosswind swing with a +6 m/s surge — crab indicator goes wild.
+    const sign = Math.random() < 0.5 ? -1 : 1;
+    newDir = curDir + sign * (Math.PI / 3 + Math.random() * 0.3);
+    newSpd = Math.max(6, curSpd + 4 + Math.random() * 4);
+  }
+  // Cap so we don't exceed roughly real-world severe shear (~20 m/s ~ 40 kt).
+  newSpd = Math.min(newSpd, 20);
+  state.windTarget.set(Math.sin(newDir) * newSpd, 0, Math.cos(newDir) * newSpd);
+  // Push the windNextChangeMs out so pickWindTarget's normal scheduler
+  // doesn't immediately overwrite the shear vector mid-burst.
+  const durMs = SHEAR_DUR_MIN_MS + Math.random() * (SHEAR_DUR_MAX_MS - SHEAR_DUR_MIN_MS);
+  sh.endsAt = performance.now() + durMs;
+  state.windNextChangeMs = sh.endsAt + 1000;
+  sh.phase = 'active';
+  // ATC + designator: use the threshold we're closest to so the call names
+  // the runway end the pilot is actually shooting for.
+  let rwyHdg = nearestRi.ap.hdg;
+  if (!nearestEndIsSouth) rwyHdg = rwyHdg + Math.PI;
+  sh.rwyDesignator = (typeof runwayDesignator === 'function') ? runwayDesignator(rwyHdg, plane) : '';
+  if (typeof pushATC === 'function'){
+    const tail = sh.rwyDesignator ? (' RWY ' + sh.rwyDesignator) : '';
+    pushATC('Wind shear on final,' + tail + '.', { tag:'TWR', now:true });
+  }
+}
 
 function landingProj(px, pz){
   let best = null, bestS = 1e9;
@@ -6959,6 +7072,8 @@ function step(dt){
   // Wind: drift current wind smoothly toward target; re-roll target periodically.
   // On the ground, kill wind so taxi is calm — wind only matters once airborne.
   if (performance.now() > state.windNextChangeMs) pickWindTarget();
+  // Wind shear hazard: may override windTarget for a 4-6s burst on short final.
+  tickWindShear();
   const windEase = 1 - Math.exp(-0.25 * dt);
   state.wind.x += (state.windTarget.x - state.wind.x) * windEase;
   state.wind.z += (state.windTarget.z - state.wind.z) * windEase;
@@ -7194,6 +7309,10 @@ function step(dt){
   // lives in the on-ground physics block.
   const wetEl = document.getElementById('rwyWet');
   if (wetEl) wetEl.style.display = settings.rain ? 'inline' : 'none';
+  // Wind shear pill — yellow blinking while a shear burst is active so the
+  // pilot sees the warning the same frame the wind vector slams over.
+  const shearEl = document.getElementById('shearWarn');
+  if (shearEl) shearEl.style.display = (state.shear && state.shear.phase === 'active') ? 'inline' : 'none';
 
   // Touch-and-go score panel
   document.getElementById('scLast').textContent  = state.scoreLast == null ? '—' : ('+'+state.scoreLast);
