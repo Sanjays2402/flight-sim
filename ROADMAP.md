@@ -69,6 +69,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Landing performance summary card — after every successful touchdown (not just scored missions), pop a compact panel with touchdown speed, sink rate, centerline offset, G at touchdown, rollout distance, and a one-line verdict ("GREASED IT", "FIRM", "PORPOISED", "OFF CENTERLINE"). Mirrors the crash report card so every landing is a learning moment, not just a score popup that vanishes.
+- [ ] Trim wheel (`;` nose down, `'` nose up) — adjustable pitch trim that biases elevator so you can fly hands-off in cruise. HUD shows a tiny `TRIM ▲▼` indicator with current setting. Pairs with autopilot (AP off, trim still works) and makes long cruises stop being a wrist workout.
+- [ ] Bird strike events — when the plane flies through a flock of birds (existing scenery), play a wet thud, splatter a quick red overlay on the windshield (cockpit cam only) that fades over 4s, take a small damage hit (~8%), and fire an ATC line ("Bird strike, bird strike"). Turns the existing birds from pure decoration into actual risk.
+- [ ] Approach glideslope indicator on the HUD — a vertical "meatball" / PAPI strip on the right side of the HUD that lights up red/white based on whether you're above, on, or below a 3° glideslope to the nearest runway threshold (only shown when within 5 km and roughly aligned with a runway heading). Reads like a real ILS without any of the radio nav complexity.
+- [ ] Flock formation flight — when you fly close to and roughly parallel with the AI plane for 5 seconds, fire a "FORMATION!" toast + achievement, briefly show a thin connecting line between the two planes, and bump pilot stats. Turns the existing AI traffic from background noise into something you actually interact with.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
