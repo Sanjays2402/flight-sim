@@ -434,6 +434,11 @@
       <div class="hint">Paint scheme for your plane. Saved between flights.</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">ENGINES</span><span class="val" id="setTwinV">SINGLE</span></div>
+      <button id="setTwinBtn" type="button" style="width:100%">TOGGLE TWIN ENGINE</button>
+      <div class="hint">Single nose prop or two wing-mounted props. Pure visual + audio flavor — same flight model either way.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">RAIN</span><span class="val" id="setRainV">OFF</span></div>
       <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
@@ -630,7 +635,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false };
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -657,6 +662,7 @@ try {
     if (typeof saved.rain === 'boolean') settings.rain = saved.rain;
     if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
     if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
+    if (typeof saved.twinEngine === 'boolean') settings.twinEngine = saved.twinEngine;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -2232,6 +2238,46 @@ const propGroup = new THREE.Group();
 }
 propGroup.position.set(0, 0, -3.6);
 plane.add(propGroup);
+
+// Twin-engine prop discs: two smaller props mounted on the wings, just
+// forward of the wing leading edge at the same x as the existing struts so
+// they read as wing-mounted nacelle props. Hidden by default; the settings
+// toggle (settings.twinEngine) swaps them in for the nose prop. Flight model
+// is unchanged — same total thrust, same SFX path — purely a silhouette swap
+// in chase/orbit/replay views. Built once and reused so applyEngineConfig()
+// is just a visibility flip.
+const propGroupL = new THREE.Group();
+const propGroupR = new THREE.Group();
+for (const grp of [propGroupL, propGroupR]){
+  // Small nacelle bullet so the wing-mounted prop reads as an engine pod
+  // instead of a floating disc.
+  const nacelle = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.85, 12), matFuse);
+  nacelle.rotation.x = Math.PI/2;
+  nacelle.position.z = 0.25;
+  grp.add(nacelle);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.18, 12), matDark);
+  hub.rotation.x = Math.PI/2; grp.add(hub);
+  for (let i=0;i<2;i++){
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.35, 0.05), matDark);
+    blade.rotation.z = i*Math.PI/2; grp.add(blade);
+  }
+  grp.visible = false;
+}
+propGroupL.position.set(-2.2, 0.05, -1.55);
+propGroupR.position.set( 2.2, 0.05, -1.55);
+plane.add(propGroupL);
+plane.add(propGroupR);
+
+// Flip prop visuals between single nose prop and twin wing props. Called
+// once at startup and whenever the settings toggle flips. No flight-model
+// side effects.
+function applyEngineConfig(){
+  const twin = !!settings.twinEngine;
+  propGroup.visible = !twin;
+  propGroupL.visible = twin;
+  propGroupR.visible = twin;
+}
+applyEngineConfig();
 
 const gearGrp = new THREE.Group();
 plane.add(gearGrp);
@@ -4672,6 +4718,7 @@ function updateReplay(dt){
   // Drive prop spin + flap rotation from the replayed throttle so it doesn't sit dead.
   propSpin += (state.throttle * 60 + 4) * dt;
   propGroup.rotation.z = propSpin;
+  propGroupL.rotation.z = propGroupR.rotation.z = propSpin;
   const flapDeg = state.flapDeg[state.flaps];
   const flapRad = flapDeg * Math.PI/180;
   // Replay also eases instead of snapping so retracts/deploys look continuous
@@ -5818,6 +5865,40 @@ function playIgnitionCrank(){
   pop.connect(pg).connect(ctx.destination);
   pop.start(t0 + dur * 0.9);
   pop.stop(t0 + dur + 0.24);
+  // Twin engine: layer a second slightly-detuned starter whir + catch pop so
+  // ignition reads as two cylinders spinning up together. Same envelope/duration,
+  // a hair quieter so it never overpowers the primary, ~7% pitch lift for the
+  // detune beat. Skipped silently in single-engine mode so nothing changes for
+  // existing flights.
+  if (settings.twinEngine){
+    const dWhir = ctx.createOscillator();
+    dWhir.type = 'sawtooth';
+    dWhir.frequency.setValueAtTime(85 * 1.07, t0);
+    dWhir.frequency.linearRampToValueAtTime(140 * 1.07, t0 + dur * 0.85);
+    const dWlp = ctx.createBiquadFilter();
+    dWlp.type = 'lowpass';
+    dWlp.frequency.value = 600;
+    dWlp.Q.value = 0.6;
+    const dWg = ctx.createGain();
+    dWg.gain.setValueAtTime(0.0, t0);
+    dWg.gain.linearRampToValueAtTime(vol * 0.5, t0 + 0.08);
+    dWg.gain.setValueAtTime(vol * 0.5, t0 + dur * 0.85);
+    dWg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.05);
+    dWhir.connect(dWlp).connect(dWg).connect(ctx.destination);
+    dWhir.start(t0);
+    dWhir.stop(t0 + dur + 0.08);
+    const dPop = ctx.createOscillator();
+    dPop.type = 'sine';
+    dPop.frequency.setValueAtTime(160 * 1.07, t0 + dur * 0.9);
+    dPop.frequency.exponentialRampToValueAtTime(95 * 1.07, t0 + dur + 0.18);
+    const dPg = ctx.createGain();
+    dPg.gain.setValueAtTime(0.0, t0 + dur * 0.9);
+    dPg.gain.linearRampToValueAtTime(vol * 0.40, t0 + dur * 0.95);
+    dPg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.22);
+    dPop.connect(dPg).connect(ctx.destination);
+    dPop.start(t0 + dur * 0.9);
+    dPop.stop(t0 + dur + 0.24);
+  }
 }
 
 // Reverse-thrust whoosh: one-shot bandpassed noise sweep with a low rumble
@@ -6832,6 +6913,7 @@ function step(dt){
     propSpin += Math.min(8, speed * 0.06) * dt;
   }
   propGroup.rotation.z = propSpin;
+  propGroupL.rotation.z = propGroupR.rotation.z = propSpin;
   // Reverse-thrust visuals: ease reverserT toward active (1) / off (0) over
   // ~120ms each way and tilt the prop disc by ~0.35 rad so the blades visibly
   // “flip pitch” the way a real variable-pitch prop or thrust-reverser does.
@@ -6842,6 +6924,7 @@ function step(dt){
   if (state.reverserT < revTarget) state.reverserT = Math.min(revTarget, state.reverserT + revRate*dt);
   else if (state.reverserT > revTarget) state.reverserT = Math.max(revTarget, state.reverserT - revRate*dt);
   propGroup.rotation.x = state.reverserT * 0.35;
+  propGroupL.rotation.x = propGroupR.rotation.x = propGroup.rotation.x;
   updateReverseDust(dt);
   // Ease flaps + gear toward target. flapAnimRad chases flapRad at FLAP_RATE,
   // gearAnim chases 0/1 at GEAR_RATE so the gear hauls up and tucks into the
@@ -8947,10 +9030,12 @@ function updateCamModeUi(){
   }
   // Hide the airframe shell in cockpit view so you see out the window, not your own fuselage.
   // Keep the propGroup visible — that’s the classic spinning-disc-ahead cockpit look.
+  // Twin wing props are also skipped so applyEngineConfig() stays the single owner of
+  // their visibility (otherwise switching out of cockpit cam would re-show both layouts).
   const cockpit = state.cam === 1;
   for (let i = 0; i < plane.children.length; i++){
     const child = plane.children[i];
-    if (child === propGroup) continue;
+    if (child === propGroup || child === propGroupL || child === propGroupR) continue;
     child.visible = !cockpit;
   }
   // Cockpit instrument panel only shows in cockpit cam. Photo mode hides it via
@@ -9357,6 +9442,7 @@ function loop(now){
       // and force the stall horn quiet so its last gain target doesn't
       // hang while step() isn't running.
       propGroup.rotation.z += 0.4*dt;
+      propGroupL.rotation.z = propGroupR.rotation.z = propGroup.rotation.z;
       updateCamera(dt);
       setStallAudio(false);
     } else if (state.replayActive){
@@ -9375,6 +9461,7 @@ function loop(now){
     }
   } else {
     propGroup.rotation.z += 0.4*dt;
+    propGroupL.rotation.z = propGroupR.rotation.z = propGroup.rotation.z;
     updateCamera(dt);
   }
   // Make sure the ghost is hidden any frame we didn't run the live update
@@ -9721,6 +9808,8 @@ addEventListener('keydown', e => {
   const rainV = document.getElementById('setRainV');
   const coldBtn = document.getElementById('setColdBtn');
   const coldV = document.getElementById('setColdV');
+  const twinBtn = document.getElementById('setTwinBtn');
+  const twinV = document.getElementById('setTwinV');
   const trailSel = document.getElementById('setTrail');
   const trailV = document.getElementById('setTrailV');
   if (!panel || !btnOpen) return;
@@ -9785,6 +9874,11 @@ addEventListener('keydown', e => {
       coldBtn.textContent = settings.coldStart ? 'COLD START: ON' : 'COLD START: OFF';
       coldBtn.classList.toggle('primary', settings.coldStart);
     }
+    if (twinV) twinV.textContent = settings.twinEngine ? 'TWIN' : 'SINGLE';
+    if (twinBtn){
+      twinBtn.textContent = settings.twinEngine ? 'TWIN ENGINE: ON' : 'TWIN ENGINE: OFF';
+      twinBtn.classList.toggle('primary', settings.twinEngine);
+    }
     if (trailSel) trailSel.value = settings.trailColor;
     if (trailV){
       const tc = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
@@ -9840,6 +9934,15 @@ addEventListener('keydown', e => {
       saveSettings();
     });
   }
+  if (twinBtn){
+    twinBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.twinEngine = !settings.twinEngine;
+      applyEngineConfig();
+      syncInputs();
+      saveSettings();
+    });
+  }
   if (trailSel){
     trailSel.addEventListener('change', () => {
       const v = trailSel.value;
@@ -9853,6 +9956,7 @@ addEventListener('keydown', e => {
     Object.assign(settings, SETTINGS_DEFAULT);
     applyFov();
     applyLivery(settings.livery);
+    applyEngineConfig();
     applyRainVisible();
     syncInputs();
     saveSettings();
