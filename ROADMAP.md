@@ -104,6 +104,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Approach speed callouts — when within 2 km of the nearest runway threshold on final and gear is down, fire spoken-style ATC callouts at thresholds: "500" (ft AGL ~150m), "300", "100", "50", "30", "20", "10", "MINIMUMS" at ~60m, then per-foot countdown 50→10. Tiny LOC reuse of the ATC ticker + a one-shot beep per call, but makes every approach feel like a real airliner short-final without any new audio assets.
+- [ ] Flight log book — every completed flight (takeoff to full-stop or crash) writes a row to localStorage with date, mission type, route (origin → destination), duration, max alt, landing score, and verdict. New 📖 LOGBOOK button on the main menu opens a scrollable panel with the last 50 flights, oldest scrolled off. Pairs with the existing pilot stats screen so players can actually see their journey instead of just aggregate numbers.
+- [ ] Wake turbulence behind the AI plane — when you fly within ~80 m behind and ~30 m below the AI circuit plane, inject a brief roll + yaw kick that scales with proximity and a low rumble SFX. Visible faint vortex ribbons trail off the AI's wingtips (reuse player vortex code with lighter alpha). Turns the existing AI traffic from scenery + formation target into a genuine hazard pilots learn to respect, and teaches real wake-avoidance habits.
+- [ ] Crosswind landing crab indicator — on final within 3 km of a runway and below 200m AGL, HUD shows a small horizontal bar with a green tick marking the runway centerline heading and a magenta arrow showing the plane's current ground track. Pilots can now see their crab angle visually and kick out the rudder at flare instead of guessing from the wind readout. Hidden when not on approach or in photo mode.
+- [ ] Engine temperature gauge — fifth small canvas in the cockpit panel showing CHT (cylinder head temp) that rises with sustained high throttle and climbs, drops with low throttle and descents, and redlines above 230°C triggering a yellow ⚠ ENG TEMP warning. Overheating for >15s causes a 0.3%/sec damage tick and an ATC "Engine overheat, reduce power" call. Pairs with the cold-start sequence (starts cold at 40°C and warms up) so the engine actually has thermal personality across a flight.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
