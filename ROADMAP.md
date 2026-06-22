@@ -49,10 +49,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Runway taxi guidance arrows — when on the ground near an airport, draw a faint chevron line on the taxiway pointing to the active runway threshold so new players can find where to take off from.
 - [x] Hard-deck altitude warning ("PULL UP") — when descending fast toward terrain below 150m AGL outside an airport zone, flash red "TERRAIN — PULL UP" with a sharp beep. Saves a lot of dumb crashes into mountains.
 - [x] Spotter binoculars (B key) — hold B in external cam to zoom FOV way in with a subtle vignette, so you can actually look at distant airports, the AI plane, or rings before flying to them. Release to snap back.
+- [x] Aerobatic ribbon trail (Y key) — toggleable colored smoke trail off the tail in the current livery accent color. Off by default, hidden in photo/replay/pause and on the ground. (Bound to Y instead of T because T already cycles time-of-day.)
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-- [ ] Aerobatic ribbon trail (T key) — toggleable colored smoke trail off the tail when doing tricks. Draws a fading line behind the plane for ~5s, great for loops/rolls and screenshots. Off by default so it doesn't clutter normal flights.
 - [ ] Loop / roll detector — quietly track pitch and roll over time; when the plane completes a full 360° loop or aileron roll, fire an achievement-style toast ("LOOP!" / "AILERON ROLL!") and bump pilot stats. Tiny LOC, huge "wait, it noticed!" payoff.
 - [ ] Airshow smoke on/off button on the HUD — small `~` toggle (and tap target on mobile) that turns on a permanent colored smoke trail in the player's livery accent color. Pairs with the ribbon trail or stands alone.
 - [ ] Hot-air balloons drifting over the world — 3-4 lazy procedural balloons floating between airports, gentle bob, harmless. Pure scenery, makes the world feel less empty between airports.

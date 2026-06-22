@@ -263,7 +263,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>Y</kbd> ribbon · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -2000,6 +2000,139 @@ function clearContrails(){
   contrailAccum = 0;
 }
 
+// ====== AEROBATIC RIBBON TRAIL ======
+// Toggleable colored smoke trail off the tail (Y key). Off by default so it
+// doesn't clutter normal flights. Stores ~5s of world-space tail positions
+// with timestamps so the fade is by age (looks right at any airspeed) rather
+// than fixed-length. Uses the current livery accent color so each paint scheme
+// gets its own signature trail. Built on the same ribbon pattern as the wingtip
+// vortices so the GPU cost stays trivial.
+const RIBBON_SEGS = 64;
+const RIBBON_LIFE_SEC = 5.0;
+const RIBBON_HALF_WIDTH = 0.55;     // base half-width (m); narrows to 20% at the tail
+const RIBBON_TAIL_OFFSET = new THREE.Vector3(0, 0.55, 3.8); // just behind the tail cone
+const ribbonHistory = new Array(RIBBON_SEGS);
+for (let i = 0; i < RIBBON_SEGS; i++){
+  ribbonHistory[i] = { pos: new THREE.Vector3(), right: new THREE.Vector3(1,0,0), t: 0 };
+}
+let ribbonHistoryCount = 0;
+let ribbonLastSampleT = 0;
+const ribbonGeo = new THREE.BufferGeometry();
+const ribbonPosArr = new Float32Array(RIBBON_SEGS * 2 * 3);
+const ribbonAlphaArr = new Float32Array(RIBBON_SEGS * 2);
+const ribbonIdxArr = new Uint16Array((RIBBON_SEGS - 1) * 6);
+for (let i = 0; i < RIBBON_SEGS - 1; i++){
+  const a = i*2, b = i*2 + 1, c = (i+1)*2, d = (i+1)*2 + 1;
+  ribbonIdxArr[i*6+0] = a; ribbonIdxArr[i*6+1] = b; ribbonIdxArr[i*6+2] = c;
+  ribbonIdxArr[i*6+3] = b; ribbonIdxArr[i*6+4] = d; ribbonIdxArr[i*6+5] = c;
+}
+ribbonGeo.setAttribute('position', new THREE.BufferAttribute(ribbonPosArr, 3));
+ribbonGeo.setAttribute('aAlpha', new THREE.BufferAttribute(ribbonAlphaArr, 1));
+ribbonGeo.setIndex(new THREE.BufferAttribute(ribbonIdxArr, 1));
+const ribbonMat = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide,
+  uniforms: { uColor: { value: new THREE.Color(0xff8844) } },
+  vertexShader: `
+    attribute float aAlpha;
+    varying float vAlpha;
+    void main(){
+      vAlpha = aAlpha;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    varying float vAlpha;
+    uniform vec3 uColor;
+    void main(){
+      if (vAlpha < 0.005) discard;
+      gl_FragColor = vec4(uColor, vAlpha);
+    }`
+});
+const ribbonMesh = new THREE.Mesh(ribbonGeo, ribbonMat);
+ribbonMesh.frustumCulled = false;
+ribbonMesh.renderOrder = 5;
+ribbonMesh.visible = false;
+scene.add(ribbonMesh);
+const _ribbonTmpTail = new THREE.Vector3();
+const _ribbonTmpRight = new THREE.Vector3();
+function clearRibbon(){
+  ribbonHistoryCount = 0;
+  ribbonLastSampleT = 0;
+  ribbonMesh.visible = false;
+}
+function updateRibbon(dt, nowMs){
+  // Ribbon hidden whenever the toggle is off, the sim is frozen, or the plane
+  // is on the ground / crashed — none of those states should emit a trail.
+  if (!state.ribbonOn || state.paused || state.replayActive || state.photoMode
+      || state.onGround || state.crashed){
+    ribbonMesh.visible = false;
+    // Slowly drop old samples so re-enabling mid-flight doesn't snap a stale
+    // section in from the previous position.
+    if (!state.ribbonOn) ribbonHistoryCount = 0;
+    return;
+  }
+  // Pick the live tail point + the plane's right-axis (used for ribbon width).
+  _ribbonTmpTail.copy(RIBBON_TAIL_OFFSET).applyQuaternion(plane.quaternion).add(plane.position);
+  _ribbonTmpRight.set(1,0,0).applyQuaternion(plane.quaternion);
+  // Sample at most ~40 Hz so a fast loop doesn't burn through the buffer.
+  const sampleGapMs = (RIBBON_LIFE_SEC * 1000) / RIBBON_SEGS;
+  if (ribbonHistoryCount === 0 || (nowMs - ribbonLastSampleT) >= sampleGapMs){
+    // Shift history: index 0 = newest, last = oldest.
+    for (let i = RIBBON_SEGS - 1; i > 0; i--){
+      const dst = ribbonHistory[i], src = ribbonHistory[i - 1];
+      dst.pos.copy(src.pos);
+      dst.right.copy(src.right);
+      dst.t = src.t;
+    }
+    ribbonHistory[0].pos.copy(_ribbonTmpTail);
+    ribbonHistory[0].right.copy(_ribbonTmpRight);
+    ribbonHistory[0].t = nowMs;
+    ribbonLastSampleT = nowMs;
+    if (ribbonHistoryCount < RIBBON_SEGS) ribbonHistoryCount++;
+  } else {
+    // Always keep the head pinned to the live tail so the ribbon doesn't lag
+    // visibly while we wait for the next sample tick.
+    ribbonHistory[0].pos.copy(_ribbonTmpTail);
+    ribbonHistory[0].right.copy(_ribbonTmpRight);
+  }
+  // Need at least two samples to form a quad.
+  if (ribbonHistoryCount < 2){ ribbonMesh.visible = false; return; }
+  // Build quad strip: 2 verts per history sample, offset by tapered width along
+  // each sample's stored right-axis so the trail twists with the plane.
+  for (let i = 0; i < RIBBON_SEGS; i++){
+    const s = ribbonHistory[Math.min(i, ribbonHistoryCount - 1)];
+    const tNorm = i / (RIBBON_SEGS - 1);
+    const taper = 1 - tNorm * 0.8; // 1.0 at head, 0.2 at tail
+    const w = RIBBON_HALF_WIDTH * taper;
+    const base = i * 6;
+    ribbonPosArr[base+0] = s.pos.x - s.right.x * w;
+    ribbonPosArr[base+1] = s.pos.y - s.right.y * w;
+    ribbonPosArr[base+2] = s.pos.z - s.right.z * w;
+    ribbonPosArr[base+3] = s.pos.x + s.right.x * w;
+    ribbonPosArr[base+4] = s.pos.y + s.right.y * w;
+    ribbonPosArr[base+5] = s.pos.z + s.right.z * w;
+    // Alpha fades by sample age so a 5s tail looks right at any airspeed.
+    let alpha = 0;
+    if (i < ribbonHistoryCount){
+      const ageSec = (nowMs - s.t) / 1000;
+      const ageNorm = Math.min(1, ageSec / RIBBON_LIFE_SEC);
+      // Skip the very first sample so the ribbon starts just behind the tail.
+      const headFade = Math.min(1, i / 1.5);
+      alpha = headFade * (1 - ageNorm) * 0.9;
+    }
+    ribbonAlphaArr[i*2]   = alpha;
+    ribbonAlphaArr[i*2+1] = alpha;
+  }
+  // Sync the ribbon color to the active livery accent on every frame the
+  // ribbon is visible so changing paint in the settings panel updates the trail.
+  ribbonMat.uniforms.uColor.value.copy(matAccent.color);
+  ribbonGeo.attributes.position.needsUpdate = true;
+  ribbonGeo.attributes.aAlpha.needsUpdate = true;
+  ribbonMesh.visible = true;
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -2044,6 +2177,11 @@ const state = {
   windNextChangeMs: 0,
   stall: 0,
   vortex: 0,
+  // Aerobatic ribbon trail: Y toggles a colored smoke trail off the tail in
+  // the current livery accent color. Off by default; great for loops/rolls
+  // and screenshots, hidden anywhere we wouldn't want a live trail (paused,
+  // replay, photo mode, on the ground, crashed).
+  ribbonOn: false,
   // GPWS (ground proximity warning): throttle the "PULL UP" beep so it only
   // chirps a few times per second instead of every frame. Timestamp in ms
   // (performance.now) of the last beep; 0 means "ready to beep now".
@@ -2265,6 +2403,15 @@ addEventListener('keydown', e=>{
     // overlay, drag-to-orbit, wheel-zoom, and save behavior.
     if (state.introOpen || state.replayActive) return;
     setPhotoMode(!state.photoMode);
+  }
+  if (e.code==='KeyY'){
+    // Aerobatic ribbon trail toggle. Pure flavor — a colored smoke streak in
+    // the current livery accent color, great for loops/rolls and screenshots.
+    // Off by default so normal cruise flights stay clean.
+    if (state.introOpen) return;
+    state.ribbonOn = !state.ribbonOn;
+    if (!state.ribbonOn) clearRibbon();
+    showStatus('RIBBON ' + (state.ribbonOn ? 'ON' : 'OFF'), null, state.ribbonOn ? 'good' : 'hard');
   }
 });
 
@@ -2523,6 +2670,7 @@ function resetPlane(){
   state.wind.copy(state.windTarget);
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   clearContrails();
+  clearRibbon();
   // Replay buffer also resets so the next session's replay starts clean.
   stopReplay();
   clearReplayBuffer();
@@ -3173,6 +3321,11 @@ function step(dt){
   const dmgSmoke = Math.max(0, (state.damage - 0.3) / 0.7);
   const contrailStrength = Math.max(altGate * thrGate, dmgSmoke) * (state.onGround ? 0 : 1);
   updateContrails(dt, contrailStrength);
+
+  // Aerobatic ribbon trail — fed by the same step() tick so the sample cadence
+  // tracks real time even when the sim slows under heavy load. Function itself
+  // is a no-op when state.ribbonOn is false.
+  updateRibbon(dt, performance.now());
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
