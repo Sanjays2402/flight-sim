@@ -57,10 +57,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Wind sock at each airport — a small orange wind sock on a pole near the runway that tilts with the current wind direction and inflates with wind speed. Cheap to draw, makes pre-landing reads way easier than squinting at the HUD wind readout.
 - [x] Crash report card — after a crash, a small panel pops up bottom-center with peak G, sink rate at impact, speed, AoA, the failure reason, and a one-line verdict ("STALLED ON FINAL", "GEAR-UP LANDING", "OVERSPEED IMPACT", etc.). Hidden in photo mode, click to dismiss, R restarts. Every wreck is now a lesson instead of just a replay.
 
+- [x] Heading bug on the compass strip — press `[` and `]` to nudge a magenta tick around the compass; autopilot heading hold uses the bug instead of current heading. Plain key = 5° coarse, Shift = 1° fine. Off-edge chevron shows which way to turn when the bug is past the visible strip.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Heading bug on the compass strip — press `[` and `]` to nudge a magenta tick around the compass; autopilot heading hold uses the bug instead of current heading. Real-pilot UX trick that takes ~20 LOC.
 - [ ] Engine RPM gauge in the cockpit panel — fourth small canvas next to airspeed/attitude/altimeter showing prop RPM scaled from throttle (drops with engine-out, climbs with throttle). Finishes the cockpit panel so it doesn't look lopsided.
 - [ ] Sunrise / sunset toast — when the time-of-day cycle crosses sunrise or sunset, fire a quick golden-tinted toast ("🌅 Sunrise" / "🌇 Sunset") so the player actually notices the world changing instead of missing it mid-turn.
 

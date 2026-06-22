@@ -285,7 +285,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -2566,7 +2566,10 @@ const state = {
   // are captured at engage time. Any manual stick input (keyboard pitch/roll/yaw
   // or touch stick) auto-disengages so the pilot can grab control without
   // hunting for the key. Throttle is left to the pilot.
-  ap: { on:false, alt:0, hdgRad:0, disengageMsgT:0 },
+  // `hdgBug` is the magenta tick on the compass strip; nudged with [ and ]
+  // (Shift = 1° fine, plain = 5° coarse). Heading hold tracks the bug, not
+  // the heading captured at engage, so the pilot can re-aim mid-flight.
+  ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0 },
   // Replay system: rolling ~30s ring buffer of plane snapshots. After a
   // landing (good or bad) we rewind and play back so you can watch your
   // touchdown from any camera angle. Live physics is paused while replaying.
@@ -2715,7 +2718,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','BracketLeft','BracketRight'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -2771,7 +2774,8 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyH'){
     // Autopilot toggle. Only engages in the air (no point on the ground), and
     // only if not crashed. Captures the altitude + heading at the moment of
-    // engagement so the AP keeps you exactly where you were.
+    // engagement so the AP keeps you exactly where you were, and snaps the
+    // heading bug to that heading so the displayed bug matches the lock.
     if (state.ap.on){
       state.ap.on = false;
       showStatus('AUTOPILOT OFF', null, 'hard');
@@ -2780,10 +2784,25 @@ addEventListener('keydown', e=>{
       state.ap.alt = plane.position.y;
       const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
       state.ap.hdgRad = Math.atan2(fwdN.x, -fwdN.z);
-      state.ap.on = true;
       const hdgDeg = ((state.ap.hdgRad * 180/Math.PI) % 360 + 360) % 360;
+      state.ap.hdgBug = Math.round(hdgDeg);
+      state.ap.on = true;
       showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(Math.round(hdgDeg)).padStart(3,'0'), 'good');
       pushATC('Autopilot engaged, holding ' + Math.round(state.ap.alt - GEAR_H) + 'm.', { tag:'PILOT' });
+    }
+  }
+  if (e.code==='BracketLeft' || e.code==='BracketRight'){
+    // Heading bug nudge. Plain press = 5° coarse step, Shift = 1° fine step.
+    // Skip while the intro modal is up (no flight yet). The bug is always
+    // editable on the ground/mid-flight; when autopilot is engaged the next
+    // tick will track the new bug heading.
+    if (state.introOpen) return;
+    const step = e.shiftKey ? 1 : 5;
+    const dir  = (e.code === 'BracketLeft') ? -1 : 1;
+    state.ap.hdgBug = ((state.ap.hdgBug + dir*step) % 360 + 360) % 360;
+    if (state.ap.on){
+      // Update the locked heading immediately so the AP tracks the new bug.
+      state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
     }
   }
   if (e.code==='KeyP'){
@@ -3583,8 +3602,11 @@ function step(dt){
         showStatus('AUTOPILOT OFF', manualStick ? 'manual override' : null, 'hard');
       }
     } else {
-      // ---- Heading hold: shortest-arc error, command roll proportional to it,
-      // then null out yaw drift with a tiny rudder term. Bank limited to ~25°.
+      // ---- Heading hold: bug-driven target. The bug (set with [ / ]) is the
+      // authoritative heading; we mirror it into hdgRad so existing readouts
+      // stay consistent. Then shortest-arc error, command roll proportional
+      // to it, null out yaw drift with a tiny rudder term. Bank limited to ~25°.
+      state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
       const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
       const curHdg = Math.atan2(fwdN.x, -fwdN.z);
       let hdgErr = state.ap.hdgRad - curHdg;
@@ -4092,14 +4114,14 @@ function step(dt){
   }
 
   // Autopilot HUD row: hidden when off. When on, shows the locked altitude
-  // (meters above ground reference) and locked heading (degrees, 000–359).
+  // (meters above ground reference) and locked heading (degrees, 000–359),
+  // which equals the heading bug since heading hold tracks the bug.
   const apRow = document.getElementById('apRow');
   if (state.ap.on){
     apRow.style.display = 'flex';
-    let apHdgDeg = state.ap.hdgRad * 180/Math.PI;
-    apHdgDeg = ((apHdgDeg % 360) + 360) % 360;
+    const apHdgDeg = ((Math.round(state.ap.hdgBug) % 360) + 360) % 360;
     document.getElementById('apReadout').textContent =
-      'ON · ' + Math.round(state.ap.alt - GEAR_H) + 'm / ' + String(Math.round(apHdgDeg)).padStart(3,'0') + '°';
+      'ON · ' + Math.round(state.ap.alt - GEAR_H) + 'm / ' + String(apHdgDeg).padStart(3,'0') + '°';
   } else {
     apRow.style.display = 'none';
   }
@@ -4231,7 +4253,7 @@ function step(dt){
   updateAcrobat(dt);
 
   drawAttitude(plane.quaternion);
-  drawCompass(hdg);
+  drawCompass(hdg, state.ap.hdgBug);
   drawVSI(vs);
   drawMinimap(hdg);
   drawCockpitPanel(speedKmh, altM);
@@ -4332,7 +4354,7 @@ function drawAttitude(qPlane){
 // ====== Compass strip ======
 const compassCv = document.getElementById('compassCv');
 const compassCtx = compassCv.getContext('2d');
-function drawCompass(hdgDeg){
+function drawCompass(hdgDeg, bugDeg){
   const W = compassCv.width, H = compassCv.height;
   const cx = W/2;
   // 6 px per degree -> ~60° visible across 360 px logical
@@ -4367,6 +4389,43 @@ function drawCompass(hdgDeg){
       const lbl = labelFor(norm);
       compassCtx.fillStyle = (lbl === 'N') ? '#ff5252' : '#dfe';
       compassCtx.fillText(lbl, x, 14);
+    }
+  }
+  // Heading bug: magenta tick offset from center by the shortest signed arc
+  // between the bug and the current heading. Clamped to the edge of the
+  // visible strip with a small arrowhead so the pilot still sees which way
+  // to turn when the bug is off-screen.
+  if (typeof bugDeg === 'number'){
+    let diff = bugDeg - hdgDeg;
+    while (diff >  180) diff -= 360;
+    while (diff < -180) diff += 360;
+    const VIS = 60;            // visible half-range in degrees (matches major tick span)
+    const clamped = Math.max(-VIS, Math.min(VIS, diff));
+    const offEdge = Math.abs(diff) > VIS;
+    const bx = cx + clamped * PX_PER_DEG;
+    compassCtx.fillStyle = '#ff4ad8';
+    compassCtx.strokeStyle = '#ff4ad8';
+    compassCtx.lineWidth = 2;
+    // Inverted triangle hanging from the top of the strip (under the readout box)
+    compassCtx.beginPath();
+    compassCtx.moveTo(bx,     H - 28);
+    compassCtx.lineTo(bx - 6, H - 40);
+    compassCtx.lineTo(bx + 6, H - 40);
+    compassCtx.closePath();
+    compassCtx.fill();
+    // Short vertical stem down to the tick row so the bug visually pins to a tick.
+    compassCtx.beginPath();
+    compassCtx.moveTo(bx, H - 28);
+    compassCtx.lineTo(bx, H - 6);
+    compassCtx.stroke();
+    // Off-edge arrow hint: little chevron pointing toward the bug's true side.
+    if (offEdge){
+      const dir = diff > 0 ? 1 : -1;
+      compassCtx.beginPath();
+      compassCtx.moveTo(bx + dir*8, H - 34);
+      compassCtx.lineTo(bx + dir*14, H - 28);
+      compassCtx.lineTo(bx + dir*8,  H - 22);
+      compassCtx.stroke();
     }
   }
   // center caret
