@@ -194,6 +194,24 @@
   #cockpitPanel .gauge { display:flex; flex-direction:column; align-items:center; }
   #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); }
   #cockpitPanel .glbl { margin-top:4px; font-size:10px; letter-spacing:2px; color:#6aa; font-weight:700; }
+  /* Pause menu: press Esc mid-flight to freeze the sim. Same modal vibe as
+     Settings / Pilot Stats so the player gets a consistent feel — dimmed
+     backdrop, centered card, big readable buttons. Sits at a high z-index
+     so it covers HUD chrome but stays below the photo-mode overlays. While
+     #pause.show is on, the main loop skips step()/tickATC and the stall
+     horn is forced silent so nothing drifts in the background. */
+  #pause { position:fixed; inset:0; background:rgba(0,5,12,.78); display:none; align-items:center; justify-content:center; z-index:25; }
+  #pause.show { display:flex; }
+  #pause .card { width:300px; padding:24px 28px 20px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; text-align:center; }
+  #pause h2 { font-size:22px; color:#ffd166; margin-bottom:6px; letter-spacing:3px; font-weight:800; }
+  #pause .sub { font-size:11px; color:#9bb; margin-bottom:18px; letter-spacing:1px; }
+  #pause .actions { display:flex; flex-direction:column; gap:8px; }
+  #pause button { width:100%; padding:10px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; transition:all .15s ease; }
+  #pause button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; transform:translateY(-1px); }
+  #pause button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #pause button.primary:hover { background:rgba(60,120,75,.95); }
+  #pause .hint { font-size:10px; color:#9bb; margin-top:12px; letter-spacing:1px; }
+  #pause kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
 </style>
 </head>
 <body>
@@ -234,7 +252,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
@@ -294,6 +312,18 @@
   </div>
 </div>
 <div id="status"></div>
+<div id="pause">
+  <div class="card">
+    <h2>PAUSED</h2>
+    <div class="sub">SIM FROZEN</div>
+    <div class="actions">
+      <button id="pauseResume" class="primary" type="button">RESUME</button>
+      <button id="pauseRestart" type="button">RESTART MISSION</button>
+      <button id="pauseMenu" type="button">BACK TO MENU</button>
+    </div>
+    <div class="hint">press <kbd>Esc</kbd> to resume</div>
+  </div>
+</div>
 <div id="achievements"></div>
 <div id="mission">
   <div class="ttl" id="msTtl">MISSION</div>
@@ -341,6 +371,7 @@
       <span>Camera cycle</span><span><kbd>C</kbd></span>
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
+      <span>Pause menu</span><span><kbd>Esc</kbd></span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
     <div class="tip">
@@ -1950,7 +1981,14 @@ const state = {
   photoMode: false,
   photoYaw: 0,
   photoPitch: 0.25,
-  photoDist: 22
+  photoDist: 22,
+  // Pause menu: Esc mid-flight freezes the sim, opens an overlay with
+  // Resume / Restart Mission / Back to Menu. While true the loop skips
+  // step() and tickATC; autopilot and AI traffic naturally pause because
+  // they tick inside step(). Stall horn is silenced on entry so it doesn't
+  // hold its last gain target. Gated off during intro / photo / replay so
+  // those modes keep their existing Esc behavior.
+  paused: false
 };
 
 // Replay ring buffer. We sample at REPLAY_HZ for REPLAY_SECONDS of history.
@@ -3987,6 +4025,14 @@ function loop(now){
       // Throttle/control input is ignored, the prop also holds position so
       // the saved PNG isn't a motion-blurred disc.
       updatePhotoCamera(dt);
+    } else if (state.paused){
+      // Pause menu: world is frozen. Idle the prop slowly so the cockpit
+      // view doesn't look dead, keep the camera honoring its current mode,
+      // and force the stall horn quiet so its last gain target doesn't
+      // hang while step() isn't running.
+      propGroup.rotation.z += 0.4*dt;
+      updateCamera(dt);
+      setStallAudio(false);
     } else if (state.replayActive){
       // Replay mode: stop simulating, just play back the buffer.
       updateReplay(dt);
@@ -4004,7 +4050,8 @@ function loop(now){
   }
   // ATC chatter strip: pump queued/idle lines. Skipped while the intro or
   // photo mode is up so saved screenshots stay clean and the menu is quiet.
-  if (!state.introOpen && !state.photoMode){
+  // Also skipped while paused so the timeline doesn't drift behind the modal.
+  if (!state.introOpen && !state.photoMode && !state.paused){
     tickATC(now);
   }
   updateRainOverlay(dt);
@@ -4355,6 +4402,82 @@ addEventListener('keydown', e => {
 camera.position.set(MAIN_AP.x, MAIN_AP.elev + GEAR_H + 5, MAIN_AP.z + MAIN_AP.len/2 - 80);
 camera.lookAt(plane.position);
 updateCamModeUi();
+
+// ====== PAUSE MENU ======
+// Esc mid-flight opens a frozen overlay with Resume / Restart Mission / Back
+// to Menu so the player can bail cleanly instead of yanking the tab. The loop
+// already skips step() and tickATC when state.paused is true; this block owns
+// the toggle, the button wiring, and the guard rails (don't pause during the
+// intro / photo mode / replay; don't double-trigger Esc when settings, stats,
+// or photo mode are already eating Esc).
+(function setupPauseUi(){
+  const panel = document.getElementById('pause');
+  if (!panel) return;
+  const btnResume  = document.getElementById('pauseResume');
+  const btnRestart = document.getElementById('pauseRestart');
+  const btnMenu    = document.getElementById('pauseMenu');
+  const settingsPanel = document.getElementById('settings');
+  const statsPanel    = document.getElementById('stats');
+  function isAnyOtherModalOpen(){
+    return (settingsPanel && settingsPanel.classList.contains('show')) ||
+           (statsPanel    && statsPanel.classList.contains('show'));
+  }
+  function openPause(){
+    if (state.paused) return;
+    state.paused = true;
+    panel.classList.add('show');
+    // Quiet the horn so its last gain target doesn't hang while step()
+    // isn't running to retrigger it.
+    setStallAudio(false);
+  }
+  function closePause(){
+    if (!state.paused) return;
+    state.paused = false;
+    panel.classList.remove('show');
+    // Reset the dt baseline so the first unpaused frame doesn't apply the
+    // entire paused wall-clock delta at once (clamp in loop() also caps it,
+    // but this avoids a 50ms slug right after Resume).
+    lastT = performance.now();
+  }
+  // Buttons. stopPropagation so a stray click bubble doesn't hit the
+  // background dismiss (we intentionally don't wire background-click to
+  // close — the menu should require an explicit choice).
+  if (btnResume) btnResume.addEventListener('click', e => { e.stopPropagation(); closePause(); });
+  if (btnRestart) btnRestart.addEventListener('click', e => {
+    e.stopPropagation();
+    resetPlane();
+    // Re-arm whatever mission is active so timers / ring index / hop
+    // sequence start clean again.
+    startMission(state.mode);
+    closePause();
+  });
+  if (btnMenu) btnMenu.addEventListener('click', e => {
+    e.stopPropagation();
+    // Drop straight back to the start menu. Reset the plane so when the
+    // pilot picks a new mode the world is in a known state, hide the
+    // mission strip, and put the intro modal back up.
+    resetPlane();
+    closePause();
+    state.introOpen = true;
+    if (missionEl) missionEl.style.display = 'none';
+    setStallAudio(false);
+    if (intro) intro.style.display = 'flex';
+  });
+  // Esc toggles the menu. Gate against the modes that already own Esc so
+  // we don't double-fire (settings panel, pilot stats panel, photo mode),
+  // and skip while the intro is up or a replay is on screen — those have
+  // their own dismiss paths.
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code !== 'Escape') return;
+    if (state.introOpen) return;
+    if (state.photoMode) return;
+    if (state.replayActive) return;
+    if (!state.paused && isAnyOtherModalOpen()) return;
+    e.preventDefault();
+    if (state.paused) closePause(); else openPause();
+  });
+})();
 
 requestAnimationFrame(loop);
 </script>
