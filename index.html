@@ -363,7 +363,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -3744,6 +3744,18 @@ const state = {
   // overlay fade smoothly rather than snapping. Release to snap back.
   binoActive: false,
   binoT: 0,
+  // Quick-look check: in cockpit cam, hold V to swing the head ~90° left and
+  // release to snap back; tap-tap V toggles a 90° right lock so you can hold
+  // the wing-view while flying a long crosswind base. lookYaw is the eased
+  // rotation (rad) we apply to the cockpit look-at each frame; lookYawTarget
+  // is where it's heading. lookPressT records when V went down so keyup can
+  // tell a tap from a hold; lookLastTapMs latches the prior tap for double-tap
+  // detection. lookRightLocked is the persistent right-look toggle.
+  lookYaw: 0,
+  lookYawTarget: 0,
+  lookPressT: -1,
+  lookLastTapMs: -1,
+  lookRightLocked: false,
   // Cockpit head-bob: a subtle low-frequency camera wobble in cockpit cam
   // (state.cam===1) that sells the "I'm sitting in the plane" feeling. headBobT
   // is a continuous time accumulator driving the sine terms so the motion stays
@@ -4013,7 +4025,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','KeyJ','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','KeyJ','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -4189,7 +4201,49 @@ addEventListener('keydown', e=>{
     if (state.introOpen) return;
     toggleAirshowSmoke();
   }
+  if (e.code==='KeyV'){
+    // Quick-look check (cockpit only). Record the press time on keydown so
+    // keyup can tell a tap from a hold. The actual yaw target is recomputed
+    // every frame in updateCamera() from this press flag + lookRightLocked.
+    if (!lookAllowed()) return;
+    state.lookPressT = performance.now();
+  }
 });
+
+// Quick-look keyup: classifies the press as a tap (<250ms) or a hold. Two
+// taps inside 400ms toggle the persistent 90° right-look lock; any release
+// after a hold (or a lone tap) clears the press flag so the head eases back
+// to neutral. Gated through lookAllowed() so it never fires off-cockpit.
+addEventListener('keyup', e=>{
+  if (e.code !== 'KeyV') return;
+  if (state.lookPressT < 0) return; // press wasn't tracked (intro/wrong cam/etc.)
+  const now = performance.now();
+  const held = now - state.lookPressT;
+  state.lookPressT = -1;
+  if (held < 250){
+    // Tap. Pair with a prior recent tap to toggle the right-look lock.
+    if (state.lookLastTapMs > 0 && (now - state.lookLastTapMs) < 400){
+      state.lookRightLocked = !state.lookRightLocked;
+      state.lookLastTapMs = -1; // consumed
+    } else {
+      state.lookLastTapMs = now;
+    }
+  } else {
+    // Long press: a hold just ended. Drop any pending single-tap so an
+    // accidental quick release after a long hold can't pair into a toggle.
+    state.lookLastTapMs = -1;
+  }
+});
+
+// True when the quick-look feature should respond. Cockpit cam only, and
+// not during any modal/frozen state (photo / replay / pause / intro / crash)
+// where camera changes would feel wrong or fight other systems.
+function lookAllowed(){
+  if (state.cam !== 1) return false;
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
+  if (state.crashed) return false;
+  return true;
+}
 
 // ====== MOBILE TOUCH CONTROLS ======
 // Virtual stick (left) drives pitch + roll. Throttle slider (right) drives
@@ -7684,6 +7738,33 @@ function updateCamera(dt){
       const right2 = new THREE.Vector3(1,0,0).applyQuaternion(plane.quaternion);
       lookAt.addScaledVector(up,     _lookUpOff);
       lookAt.addScaledVector(right2, _lookSideOff);
+    }
+    // Quick-look check: yaw the cockpit look-at around the plane's up axis.
+    // Hold V → swing left (~-90°); release → ease back. Tap-tap V toggles a
+    // persistent +90° right look-out. Hold wins over the right lock so a hold
+    // on top of a right-lock immediately steers your eyes to the left wing.
+    // Eased exp → quick but never snappy, scales gracefully at low FPS.
+    let yawTarget = 0;
+    if (lookAllowed()){
+      const holding = state.lookPressT > 0 && (performance.now() - state.lookPressT) > 150;
+      if (holding) yawTarget = -Math.PI/2;
+      else if (state.lookRightLocked) yawTarget = Math.PI/2;
+    } else {
+      // Off cockpit / modal up: bleed any lock + tap state so reentering the
+      // cockpit cam starts fresh and nothing lingers as a stale look angle.
+      state.lookRightLocked = false;
+      state.lookLastTapMs = -1;
+      state.lookPressT = -1;
+    }
+    state.lookYawTarget = yawTarget;
+    const lookEase = 1 - Math.exp(-8.0 * Math.max(0, dt));
+    state.lookYaw += (yawTarget - state.lookYaw) * lookEase;
+    if (Math.abs(state.lookYaw) > 0.0005){
+      // Rotate (lookAt - eye) around the plane's up axis by lookYaw so the
+      // view swings sideways without lifting or rolling the horizon.
+      const dir = lookAt.clone().sub(camera.position);
+      dir.applyAxisAngle(up, state.lookYaw);
+      lookAt.copy(camera.position).add(dir);
     }
     camera.lookAt(lookAt);
   } else if (state.cam === 2){

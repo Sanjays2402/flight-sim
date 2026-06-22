@@ -95,10 +95,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Runway condition overlay — when rain is on, every runway, apron, and the carrier deck re-tint toward a darker, slightly mirrored shade (live, no scene rebuild) and braking friction on the runway drops noticeably (brakes ~45% weaker, free-rolling friction ~30% weaker) so rollouts are longer and skids are easier. HUD now shows a blue `RWY WET` pill next to the WIND row so pilots can read the slick before they're on the strip. Carrier deck is exempt from the friction drop (the arrestor wires don't care about a shower) but still tints, so visual + gameplay stay consistent.
 
+- [x] Quick-look check (`V` key) — in cockpit cam, hold V to swing the head ~90° left and release to ease back; tap-tap V toggles a persistent 90° right look-out so you can hold the wing view during a long crosswind base. Eased yaw rotates the look-at around the plane's up axis so the horizon stays level. Gated to cockpit only and disabled in intro / photo / replay / pause / crash so it can't fight other modes. Added to the help strip and the keydown preventDefault list.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Quick-look check (`V` key) — in cockpit cam, hold V to swing the head 90° left, release to return; tap-tap toggles to 90° right. Lets you actually clear final for traffic, look at the wing in a turn, or peek down at the runway during a high crosswind crab. Tiny camera change, huge "this feels like a cockpit" payoff.
 
 - [ ] Airport beacon lights — each airport gets a slow rotating green/white split beacon on a short tower near the threshold. Visible from 8+ km at night thanks to additive sprite; off during full daylight. Makes airport hunting at dusk/dawn way easier and adds a real "that's an airport over there" landmark to every approach.
 
