@@ -83,6 +83,14 @@
      matters most. Hidden in photo mode via PHOTO_HIDE_IDS. */
   #crab { position:fixed; top:88px; left:50%; transform:translateX(-50%); width:240px; height:34px; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); padding:2px; display:none; z-index:5; }
   #crab canvas { display:block; width:100%; height:100%; }
+  /* Crosswind takeoff coaching hint: small magenta arrow + label that appears
+     in the lower-center of the screen during the takeoff roll when a stiff
+     crosswind (>4 m/s component) is blowing across the active runway.
+     Points the way the pilot should hold aileron (into the wind) so the
+     upwind wing doesn't lift. Fades out above ~60 km/h ground speed so it
+     doesn't nag through rotation. Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #xwhint { position:fixed; bottom:62px; left:50%; transform:translateX(-50%); width:180px; height:64px; background:rgba(8,14,22,.78); border:1px solid #e88be8; border-radius:8px; backdrop-filter:blur(8px); padding:4px; display:none; z-index:6; pointer-events:none; box-shadow:0 0 18px rgba(232,139,232,0.25); }
+  #xwhint canvas { display:block; width:100%; height:100%; }
   @keyframes blink { 50% { opacity: 0.25; } }
   #help { bottom:12px; left:12px; max-width:380px; color:#9bb; }
   #help kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:11px; margin:0 1px; border:1px solid #2a4a6a; }
@@ -390,6 +398,7 @@
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
 <div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
 <div id="crab"><canvas id="crabCv" width="480" height="68"></canvas></div>
+<div id="xwhint"><canvas id="xwhintCv" width="360" height="128"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
 <div id="score">
@@ -4514,6 +4523,19 @@ const state = {
   // resetPlane() / takeoff so a fresh sortie starts clean.
   approachLastAGL: 9999,
   approachArmed: true,
+  // Crosswind-takeoff aileron-into-the-wind coaching. One-shot ATC call +
+  // visible magenta arrow appear once the player starts a takeoff roll on a
+  // runway with a crosswind component > XW_TAKEOFF_MIN_MS. `xwTakeoffArmed`
+  // re-arms once the plane is airborne for a fresh ground roll on the next
+  // sortie (also reset on resetPlane). `xwTakeoffFired` tracks whether the
+  // ATC call already played for this roll so a stuck-on-runway taxi doesn't
+  // spam the strip. `xwTakeoffSide` is +1 when the arrow points right (wind
+  // from the right, hold right aileron) and -1 when it points left.
+  xwTakeoffArmed: true,
+  xwTakeoffFired: false,
+  xwTakeoffActive: false,
+  xwTakeoffSide: 0,
+  xwTakeoffOpacity: 0,
   // Engine fire emergency. Rare random event in normal flight, or guaranteed
   // when a bird strike hits at high throttle. While `engineFire` is true,
   // `engineFireT` counts up the seconds since ignition (drives the cowl flame
@@ -5489,6 +5511,13 @@ function resetPlane(){
   // the last-AGL latch so the first descent through 500ft fires cleanly.
   state.approachLastAGL = 9999;
   state.approachArmed = true;
+  // Crosswind-takeoff coach: fresh sortie re-arms the one-shot ATC call and
+  // the visible arrow so a hot reset on the apron gets the cue again.
+  state.xwTakeoffArmed = true;
+  state.xwTakeoffFired = false;
+  state.xwTakeoffActive = false;
+  state.xwTakeoffSide = 0;
+  state.xwTakeoffOpacity = 0;
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
@@ -7594,6 +7623,7 @@ function step(dt){
   drawGlideslope(hdg);
   drawILSNeedles(hdg);
   drawCrabIndicator(hdg);
+  drawXwTakeoffHint();
   drawMinimap(hdg);
   drawWeatherRadar();
   drawCockpitPanel(speedKmh, altM, hdg, dt);
@@ -8343,6 +8373,174 @@ function drawCrabIndicator(hdgDeg){
     crabCtx.textBaseline = 'top';
     crabCtx.fillText('— CRAB —', cx, cy + 15);
   }
+}
+
+// ====== Crosswind takeoff coaching ======
+// During the takeoff roll on a runway with a stiff crosswind, show a small
+// magenta arrow telling the pilot which way to hold aileron (into the wind)
+// so the upwind wing doesn't lift. Also fires a one-shot ATC line the first
+// time the cue activates on this roll. Fades out above ~60 km/h ground speed
+// so it doesn't nag through rotation. Re-arms after takeoff so the next
+// taxi-out gets a fresh cue on the next sortie.
+const xwhintEl = document.getElementById('xwhint');
+const xwhintCv = document.getElementById('xwhintCv');
+const xwhintCtx = xwhintCv.getContext('2d');
+const XW_TAKEOFF_MIN_MS    = 4;    // crosswind component threshold in m/s
+const XW_TAKEOFF_FADE_KMH  = 60;   // ground speed at which the cue fades out
+const XW_TAKEOFF_FADE_BAND = 15;   // ease band over which opacity ramps down
+function drawXwTakeoffHint(){
+  // Gate: photo / pause / replay / intro / crash / airborne hide the hint.
+  // Only the takeoff roll counts; once airborne, re-arm for the next sortie.
+  const live = !state.crashed && !state.paused && !state.replayActive
+               && !state.photoMode && !state.introOpen;
+  if (!state.onGround){
+    if (live) state.xwTakeoffArmed = true;
+    state.xwTakeoffFired = false;
+    state.xwTakeoffActive = false;
+    state.xwTakeoffOpacity = Math.max(0, state.xwTakeoffOpacity - 0.12);
+    if (state.xwTakeoffOpacity <= 0.001 && xwhintEl.style.display !== 'none'){
+      xwhintEl.style.display = 'none';
+      xwhintEl.style.opacity = '0';
+    } else if (state.xwTakeoffOpacity > 0){
+      xwhintEl.style.opacity = state.xwTakeoffOpacity.toFixed(2);
+    }
+    return;
+  }
+  // On the ground: only fire if we're on a runway (so taxiing through a field
+  // or parked on a ramp doesn't trip it), throttle is up (actually rolling),
+  // and ground speed is below the fade-out band.
+  let onRwy = null;
+  try {
+    const proj = (typeof landingProj === 'function')
+      ? landingProj(plane.position.x, plane.position.z) : null;
+    if (proj && proj.ri && proj.onRunway) onRwy = proj;
+  } catch(e){ onRwy = null; }
+  const groundKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+  const rolling = state.throttle > 0.12 && groundKmh < (XW_TAKEOFF_FADE_KMH + XW_TAKEOFF_FADE_BAND);
+  // Visibility gate is independent of the ATC latch so the arrow keeps showing
+  // even after the one-shot "aileron into the wind" call fires.
+  let active = !!(live && onRwy && rolling);
+
+  // Crosswind component on the active runway. Pick the runway direction the
+  // plane is actually pointing (matches runwayDesignator's reciprocal logic
+  // so opposite-end takeoffs read the same way).
+  let crossMs = 0;
+  if (active){
+    // Use the plane's actual nose direction (horizontal projection) so the
+    // perpendicular reads the wind component the pilot actually feels. Body
+    // forward in three.js is -z; applyQuaternion gives the world-frame nose.
+    const _f = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+    const len2d = Math.hypot(_f.x, _f.z);
+    if (len2d > 1e-4){
+      const fx = _f.x / len2d;
+      const fz = _f.z / len2d;
+      // Pilot's right = forward rotated 90° clockwise viewed from above.
+      // With (x east, z south), that's (rx, rz) = (-fz, fx). Wind dotted into
+      // this gives the component blowing across the runway from the pilot's
+      // left (negative) or right (positive).
+      const rx = -fz;
+      const rz = fx;
+      crossMs = state.wind.x * rx + state.wind.z * rz;
+    }
+  }
+  if (active && Math.abs(crossMs) < XW_TAKEOFF_MIN_MS) active = false;
+
+  // Opacity ramp: fade out as ground speed crosses XW_TAKEOFF_FADE_KMH so the
+  // arrow doesn't nag through rotation. Ease in/out so toggles don't snap.
+  let targetOp = 0;
+  if (active){
+    const over = groundKmh - XW_TAKEOFF_FADE_KMH;
+    const fade = over <= 0 ? 1 : Math.max(0, 1 - over / XW_TAKEOFF_FADE_BAND);
+    targetOp = fade;
+    // Side: -1 means wind from the right (push left), so hold aileron RIGHT
+    // (into the wind) -> arrow points right (+1). Positive crossMs means wind
+    // pushing from left to right, hold aileron LEFT -> arrow points left.
+    state.xwTakeoffSide = crossMs > 0 ? -1 : 1;
+    state.xwTakeoffActive = true;
+  } else {
+    state.xwTakeoffActive = false;
+  }
+  state.xwTakeoffOpacity += (targetOp - state.xwTakeoffOpacity) * 0.18;
+  if (state.xwTakeoffOpacity < 0.01){
+    if (xwhintEl.style.display !== 'none'){
+      xwhintEl.style.display = 'none';
+      xwhintEl.style.opacity = '0';
+    }
+    return;
+  }
+  if (xwhintEl.style.display !== 'block') xwhintEl.style.display = 'block';
+  xwhintEl.style.opacity = state.xwTakeoffOpacity.toFixed(2);
+
+  // One-shot ATC call the first frame the cue actually goes active. Names
+  // the runway by designator ("<DD>") via the existing runwayDesignator()
+  // helper so an east-rolling departure off RWY 09 reads "09" and a west
+  // rollout off the same strip reads "27". Latched so a long sit on the
+  // numbers doesn't spam the ATC strip.
+  if (active && !state.xwTakeoffFired && state.xwTakeoffArmed){
+    state.xwTakeoffFired = true;
+    state.xwTakeoffArmed = false;
+    if (typeof pushATC === 'function' && typeof runwayDesignator === 'function'){
+      try {
+        const rwy = runwayDesignator(onRwy.ri.ap.hdg, plane);
+        pushATC('Aileron into the wind, RWY ' + rwy + '.', { tag:'TWR' });
+      } catch(e){
+        pushATC('Aileron into the wind for takeoff.', { tag:'TWR' });
+      }
+    }
+  }
+
+  // Render: magenta arrow + short label. Arrow points the way the pilot
+  // should hold aileron (into the wind). Tip biased to the indicated side.
+  const W = xwhintCv.width, H = xwhintCv.height;
+  xwhintCtx.clearRect(0, 0, W, H);
+
+  // Soft inner glow background — keeps the arrow readable against bright skies.
+  const grd = xwhintCtx.createRadialGradient(W/2, H/2, 4, W/2, H/2, Math.max(W, H)/1.4);
+  grd.addColorStop(0, 'rgba(232,139,232,0.18)');
+  grd.addColorStop(1, 'rgba(232,139,232,0)');
+  xwhintCtx.fillStyle = grd;
+  xwhintCtx.fillRect(0, 0, W, H);
+
+  // Arrow geometry. Side = +1 -> point right (hold right aileron); -1 -> left.
+  const side = state.xwTakeoffSide >= 0 ? 1 : -1;
+  const cx = W/2, cy = H/2 - 12;
+  const halfShaft = W * 0.30;
+  const shaftThick = 16;
+  const headLen = 28;
+  const headHalf = 20;
+  const tipX = cx + side * (halfShaft + headLen * 0.5);
+  const tailX = cx - side * halfShaft;
+  const headBaseX = cx + side * halfShaft;
+
+  xwhintCtx.fillStyle = '#e88be8';
+  xwhintCtx.strokeStyle = '#3a1238';
+  xwhintCtx.lineWidth = 2;
+  xwhintCtx.lineJoin = 'round';
+
+  xwhintCtx.beginPath();
+  // Shaft (rounded rect-ish): two horizontal edges + arrow head on one end.
+  xwhintCtx.moveTo(tailX, cy - shaftThick/2);
+  xwhintCtx.lineTo(headBaseX, cy - shaftThick/2);
+  xwhintCtx.lineTo(headBaseX, cy - headHalf);
+  xwhintCtx.lineTo(tipX, cy);
+  xwhintCtx.lineTo(headBaseX, cy + headHalf);
+  xwhintCtx.lineTo(headBaseX, cy + shaftThick/2);
+  xwhintCtx.lineTo(tailX, cy + shaftThick/2);
+  xwhintCtx.closePath();
+  xwhintCtx.fill();
+  xwhintCtx.stroke();
+
+  // Label underneath: AILERON <DIR>. Reads as a clear instruction so even a
+  // pilot who doesn't catch the ATC call knows what to do.
+  const dirWord = side > 0 ? 'RIGHT' : 'LEFT';
+  xwhintCtx.fillStyle = '#ffd1ff';
+  xwhintCtx.font = 'bold 14px ui-monospace, "SF Mono", Menlo, monospace';
+  xwhintCtx.textAlign = 'center';
+  xwhintCtx.textBaseline = 'middle';
+  xwhintCtx.fillText('AILERON ' + dirWord, W/2, H - 18);
+  xwhintCtx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
+  xwhintCtx.fillStyle = 'rgba(232,139,232,0.85)';
+  xwhintCtx.fillText('CROSSWIND', W/2, H - 4);
 }
 
 // ====== Mini-map ======
@@ -9949,7 +10147,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','xwhint','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
