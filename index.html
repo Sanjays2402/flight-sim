@@ -49,7 +49,7 @@
   #intro .tip { font-size:12px; color:#9bb; line-height:1.6; }
   #intro .go { text-align:center; color:#ffd166; font-size:13px; margin-top:14px; animation:blink 1s steps(2) infinite; }
   #intro kbd { background:#1a2a3a; color:#cfe; padding:1px 6px; border-radius:3px; font-size:12px; border:1px solid #2a4a6a; }
-  #intro .missions { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-bottom:14px; }
+  #intro .missions { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:14px; }
   #intro .mbtn { background:rgba(20,40,60,.7); border:1px solid #2a4a6a; border-radius:8px; padding:10px 8px; text-align:center; cursor:pointer; color:#cfe; transition:all .15s ease; }
   #intro .mbtn:hover { background:rgba(40,80,110,.85); border-color:#7ee787; transform:translateY(-1px); }
   #intro .mbtn.sel { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
@@ -213,6 +213,7 @@
       <div class="mbtn sel" data-mode="free"><div class="mt">FREE FLIGHT</div><div class="md">Roam the world<br>no objective</div></div>
       <div class="mbtn" data-mode="tng"><div class="mt">TOUCH &amp; GO</div><div class="md">Rack up landings<br>chase best score</div></div>
       <div class="mbtn" data-mode="hop"><div class="mt">AIRPORT HOP</div><div class="md">Visit all 3 fields<br>in sequence</div></div>
+      <div class="mbtn" data-mode="ring"><div class="mt">RING CHASE</div><div class="md">Fly the chain of rings<br>against the clock</div></div>
     </div>
     <div class="ctrls">
       <span>Throttle</span><span><kbd>W</kbd> up / <kbd>S</kbd> down</span>
@@ -1162,6 +1163,155 @@ function updateAITraffic(dt){
   aiPlane.visible = distToPlayer < 12000;
 }
 
+// ====== RING-CHASE CHALLENGE ======
+// A chain of glowing torus rings strung in a loose loop around the world.
+// Each ring is oriented so the pilot flies through its hole along a known
+// world-space normal. The mission tracks `state.ringIdx` (next ring to hit)
+// and the active ring pulses green; later rings sit dim. On completion the
+// elapsed time is compared to the best stored in localStorage.
+const RING_KEY = 'flightsim.ring.v1';
+const RING_RADIUS = 70;          // hole radius — generous, this is meant to be fun, not punishing
+const RING_TUBE = 4;             // torus tube thickness
+const RING_HIT_DEPTH = 18;       // how thick the trigger slab is along the ring's normal
+const ringChain = [];            // populated below; each entry { group, mesh, pos, normal, alt }
+
+// Persisted best time (ms). 0 means "no best yet".
+try {
+  const raw = localStorage.getItem(RING_KEY);
+  if (raw){
+    const v = JSON.parse(raw);
+    if (typeof v.bestMs === 'number' && v.bestMs > 0) state.ringBestMs = v.bestMs;
+  }
+} catch(e){ /* ignore corrupt prefs */ }
+function saveRingBest(){
+  try { localStorage.setItem(RING_KEY, JSON.stringify({ bestMs: state.ringBestMs })); } catch(e){}
+}
+
+// Ring placement: a hand-tuned loop that starts off MAIN_AP's departure end,
+// climbs out, swings past the other two airfields, then drops back toward home.
+// Heights are absolute world Y. Headings are radians (atan2(x, -z) like the HUD).
+// `hdg` is the direction the pilot is flying THROUGH the ring; the ring sits
+// perpendicular to that vector. Layout aims for visible ring-to-ring sight
+// lines so the next gate is easy to find from inside the current one.
+const RING_DEFS = [
+  { x:    0, z: -1400, alt:  120, hdg: 0.00 },   // climb-out off MAIN_AP runway
+  { x:  900, z: -3000, alt:  220, hdg: 0.55 },   // banking right toward hills
+  { x: 3200, z: -4500, alt:  360, hdg: 0.90 },
+  { x: 5800, z: -5600, alt:  500, hdg: 1.10 },   // pass north of KHIL ridge
+  { x: 7800, z: -3800, alt:  620, hdg: 2.00 },   // turn back south-west
+  { x: 5200, z: -1200, alt:  480, hdg: 2.60 },
+  { x: 1200, z:  2400, alt:  340, hdg: 3.30 },   // sweep across to lake side
+  { x:-3800, z:  5200, alt:  280, hdg: 3.90 },
+  { x:-6000, z:  7600, alt:  220, hdg: 4.70 },   // close to KLAK
+  { x:-2000, z:  3000, alt:  160, hdg: 5.40 },
+  { x:    0, z:   600, alt:  100, hdg: 6.10 }    // final ring, lined up with MAIN_AP runway entry
+];
+
+(function buildRingChain(){
+  // Each ring is a torus rotated so its hole faces along the requested heading.
+  // A torus is built in the XY plane (axis = +Z); rotating by hdg around Y
+  // aligns its axis with (sin hdg, 0, -cos hdg). That matches the HUD heading
+  // convention used everywhere else in the file.
+  const ringGeom = new THREE.TorusGeometry(RING_RADIUS, RING_TUBE, 8, 36);
+  for (let i = 0; i < RING_DEFS.length; i++){
+    const d = RING_DEFS[i];
+    const g = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0xffd166, emissive: 0xffd166, emissiveIntensity: 0.6, transparent: true, opacity: 0.85
+    });
+    const m = new THREE.Mesh(ringGeom, mat);
+    // Torus axis is local +Z; rotate around X so its plane is vertical (pilot flies through it),
+    // then around Y to point the axis along the requested heading.
+    m.rotation.x = Math.PI / 2;
+    g.rotation.y = d.hdg;
+    g.position.set(d.x, d.alt, d.z);
+    g.add(m);
+    g.visible = false;
+    scene.add(g);
+    // Pre-compute the world-space normal (axis) for cheap hit testing.
+    const normal = new THREE.Vector3(Math.sin(d.hdg), 0, -Math.cos(d.hdg)).normalize();
+    ringChain.push({ group: g, mesh: m, mat, pos: new THREE.Vector3(d.x, d.alt, d.z), normal, alt: d.alt, hdg: d.hdg });
+  }
+})();
+
+function setRingMissionVisible(on){
+  for (const r of ringChain) r.group.visible = on;
+}
+
+function updateRingChase(dt){
+  // Active only when the player picked the mission and hasn't finished it.
+  if (state.mode !== 'ring' || !state.ringActive || state.ringDone) return;
+  if (state.replayActive) return;
+  if (state.ringIdx >= ringChain.length) return;
+
+  const tNow = performance.now();
+  state.ringElapsedMs = tNow - state.ringStartMs;
+
+  // Pulse + recolor every ring based on its role: next = bright green, future
+  // = dim amber, already-hit = invisible. Pulse keeps the active one easy to
+  // spot from a distance.
+  const pulse = 0.55 + 0.35 * Math.sin(tNow * 0.006);
+  for (let i = 0; i < ringChain.length; i++){
+    const r = ringChain[i];
+    if (i < state.ringIdx){
+      r.group.visible = false;
+    } else {
+      r.group.visible = true;
+      if (i === state.ringIdx){
+        r.mat.color.setHex(0x7ee787);
+        r.mat.emissive.setHex(0x7ee787);
+        r.mat.emissiveIntensity = pulse;
+        r.mat.opacity = 0.95;
+      } else {
+        r.mat.color.setHex(0xffd166);
+        r.mat.emissive.setHex(0xffd166);
+        r.mat.emissiveIntensity = 0.35;
+        r.mat.opacity = 0.6;
+      }
+    }
+  }
+
+  // Hit test against the next ring. We treat the ring as a disc of radius
+  // RING_RADIUS sitting on a plane with the ring's normal. The plane is hit
+  // when the plane-to-ring vector projected onto the normal flips sign while
+  // we're inside the disc (|perp| < RING_RADIUS) AND within a small slab
+  // along the normal so we only catch it on the actual fly-through, not from
+  // far away. We sample current + previous position to avoid tunneling at
+  // high speed.
+  const target = ringChain[state.ringIdx];
+  const cur = plane.position;
+  const rel = tmpV1.copy(cur).sub(target.pos);
+  const along = rel.dot(target.normal);
+  // Perpendicular component = rel - along*normal; its length is the in-plane radius.
+  tmpV2.copy(target.normal).multiplyScalar(along);
+  tmpV3.copy(rel).sub(tmpV2);
+  const inPlaneR = tmpV3.length();
+
+  // Stored previous "along" lives on the ring so we don't need extra state.
+  if (target._lastAlong === undefined) target._lastAlong = along;
+  const crossed = (target._lastAlong < 0 && along >= 0) || (target._lastAlong > 0 && along <= 0);
+  target._lastAlong = along;
+  if (crossed && Math.abs(along) < RING_HIT_DEPTH && inPlaneR < RING_RADIUS){
+    // HIT — advance.
+    state.ringIdx += 1;
+    if (state.ringIdx >= ringChain.length){
+      state.ringDone = true;
+      state.ringElapsedMs = tNow - state.ringStartMs;
+      let extra = '';
+      if (state.ringBestMs === 0 || state.ringElapsedMs < state.ringBestMs){
+        state.ringBestMs = state.ringElapsedMs;
+        saveRingBest();
+        extra = ' · NEW BEST';
+      } else {
+        extra = ' · best ' + fmtHopTime(state.ringBestMs);
+      }
+      showStatus('RING CHASE COMPLETE', fmtHopTime(state.ringElapsedMs) + extra, 'good');
+    } else {
+      showStatus('RING ' + state.ringIdx + '/' + ringChain.length, 'time ' + fmtHopTime(state.ringElapsedMs), 'good');
+    }
+  }
+}
+
 // ====== WINGTIP VORTEX TRAILS ======
 // Tapered ribbon trail behind each wingtip; visible when pulling Gs or near stall.
 const VORTEX_SEGS = 28;            // ribbon segments (points along the trail)
@@ -1404,6 +1554,15 @@ const state = {
   hopDone: false,
   hopStartMs: 0,
   hopElapsedMs: 0,
+  // Ring-chase mission state. Plane flies through `ringChain` in order; first
+  // ring is armed at mission start, an axis-plane hit detector inside the
+  // ring's loop advances `ringIdx`. Best time persisted to localStorage.
+  ringActive: false,
+  ringIdx: 0,
+  ringDone: false,
+  ringStartMs: 0,
+  ringElapsedMs: 0,
+  ringBestMs: 0,
   // Time of day in 0..24 hours; advances with TOD_SPEED. Starts near sunrise
   // so the first frames show off the cycle without waiting.
   todHours: 9.0,
@@ -1689,13 +1848,24 @@ function resetPlane(){
   // Replay buffer also resets so the next session's replay starts clean.
   stopReplay();
   clearReplayBuffer();
+  // If we're in ring-chase mode, restart the run from gate 1 with a fresh timer.
+  // Best time is preserved (localStorage) so each retry has a target to beat.
+  if (state.mode === 'ring'){
+    state.ringActive = true;
+    state.ringIdx = 0;
+    state.ringDone = false;
+    state.ringStartMs = performance.now();
+    state.ringElapsedMs = 0;
+    for (const r of ringChain) r._lastAlong = undefined;
+    setRingMissionVisible(true);
+  }
   hideStatus();
 }
 resetPlane();
 
 const intro = document.getElementById('intro');
 const missionEl = document.getElementById('mission');
-const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP' };
+const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP', ring:'RING CHASE' };
 function startMission(mode){
   state.mode = mode;
   // Reset T&G stats per run so each session has its own scoreboard.
@@ -1709,6 +1879,21 @@ function startMission(mode){
     state.hopDone = false;
     state.hopStartMs = performance.now();
     state.hopElapsedMs = 0;
+  }
+  // Ring chase: arm the chain, reset hit index + timer, show all rings.
+  // Switching away from ring mode tucks the rings back out of the world so
+  // they don't litter other missions.
+  if (mode === 'ring'){
+    state.ringActive = true;
+    state.ringIdx = 0;
+    state.ringDone = false;
+    state.ringStartMs = performance.now();
+    state.ringElapsedMs = 0;
+    for (const r of ringChain) r._lastAlong = undefined;
+    setRingMissionVisible(true);
+  } else {
+    state.ringActive = false;
+    setRingMissionVisible(false);
   }
   document.getElementById('msTtl').textContent = missionTitles[mode] || 'MISSION';
   missionEl.style.display = (mode === 'free') ? 'none' : 'block';
@@ -2274,7 +2459,27 @@ function step(dt){
         document.getElementById('msVal').textContent = (dtKm/1000).toFixed(1) + ' km';
       }
     }
+  } else if (state.mode === 'ring'){
+    // Ring chase HUD: which ring you're on, live timer, distance to next gate.
+    // Best time (if any) lives in the target line so the pace target is always visible.
+    const bestTxt = state.ringBestMs > 0 ? ' · best ' + fmtHopTime(state.ringBestMs) : '';
+    if (state.ringDone){
+      document.getElementById('msTgt').textContent = 'DONE · ' + fmtHopTime(state.ringElapsedMs) + bestTxt;
+      document.getElementById('msLbl').textContent = 'Rings';
+      document.getElementById('msVal').textContent = ringChain.length + '/' + ringChain.length;
+    } else {
+      document.getElementById('msTgt').textContent = 'Ring ' + (state.ringIdx+1) + '/' + ringChain.length + ' · ' + fmtHopTime(state.ringElapsedMs) + bestTxt;
+      document.getElementById('msLbl').textContent = 'To gate';
+      const tgt = ringChain[state.ringIdx];
+      if (tgt){
+        const dRing = Math.hypot(plane.position.x - tgt.pos.x, plane.position.z - tgt.pos.z);
+        document.getElementById('msVal').textContent = (dRing/1000).toFixed(2) + ' km';
+      }
+    }
   }
+
+  // Advance ring-chase mission (hit detect, advance index, pulse the active ring).
+  updateRingChase(dt);
 
   // PAPI for nearest runway when on approach
   let showPAPI = false, reds = 0;
@@ -2625,6 +2830,27 @@ function drawMinimap(hdgDeg){
       minimapCtx.beginPath();
       minimapCtx.arc(px, py, ringR, 0, Math.PI*2);
       minimapCtx.stroke();
+    }
+  }
+  // Ring-chase: draw the whole chain on the minimap so the upcoming gates are
+  // visible at a glance. Hit rings are skipped; the active ring pulses green.
+  if (state.mode === 'ring' && !state.ringDone){
+    const pulseT = (performance.now() * 0.004) % 1;
+    for (let i = state.ringIdx; i < ringChain.length; i++){
+      const r = ringChain[i];
+      const rx = cx + (r.pos.x - plane.position.x) * scale;
+      const ry = cy + (r.pos.z - plane.position.z) * scale;
+      if (i === state.ringIdx){
+        const rR = 5 + pulseT * 8;
+        minimapCtx.strokeStyle = 'rgba(126,231,135,' + (1 - pulseT).toFixed(3) + ')';
+        minimapCtx.lineWidth = 1.5;
+        minimapCtx.beginPath(); minimapCtx.arc(rx, ry, rR, 0, Math.PI*2); minimapCtx.stroke();
+        minimapCtx.fillStyle = '#7ee787';
+        minimapCtx.beginPath(); minimapCtx.arc(rx, ry, 2.5, 0, Math.PI*2); minimapCtx.fill();
+      } else {
+        minimapCtx.fillStyle = 'rgba(255,209,102,0.7)';
+        minimapCtx.beginPath(); minimapCtx.arc(rx, ry, 1.6, 0, Math.PI*2); minimapCtx.fill();
+      }
     }
   }
   // Plane (centre): yellow triangle pointing along current heading. Forward
