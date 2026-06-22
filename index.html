@@ -4562,7 +4562,17 @@ const state = {
   // they tick inside step(). Stall horn is silenced on entry so it doesn't
   // hold its last gain target. Gated off during intro / photo / replay so
   // those modes keep their existing Esc behavior.
-  paused: false
+  paused: false,
+  // Pattern entry guide: when the player approaches an airport within ~5 km
+  // and below 1500m AGL in free flight or touch-and-go, drawMinimap() paints
+  // a faint dashed magenta box representing the standard left-hand traffic
+  // pattern (downwind / base / final at ~600m AGL, 1.5 km out). The first
+  // time each airport meets the condition this session we also fire a toast
+  // ("Enter on 45° to downwind") so new pilots learn the pattern instead of
+  // diving straight at the strip. Tracked per-airport-id so each field gets
+  // its own one-shot toast; the Set survives mission resets but resets on
+  // page reload (no localStorage — this is a teaching cue, not a stat).
+  patternHinted: Object.create(null)
 };
 (function setupAirshowSmokeBtn(){
   // Wire the on-screen `~` HUD button to the same toggle the keyboard uses.
@@ -8140,6 +8150,91 @@ function drawMinimap(hdgDeg){
       minimapCtx.restore();
     }
     minimapCtx.restore();
+  }
+  // Pattern entry guide — standard left-hand traffic pattern around the
+  // nearest airport when the player is on a teaching-friendly profile:
+  // within 5 km, below 1500m AGL, and in free flight or touch-and-go.
+  // The box marks the four legs (crosswind / downwind / base / final) on
+  // the LEFT side of the runway at ~1.5 km out so newcomers can see where
+  // they're "supposed" to be flying. Pure HUD overlay — no physics impact.
+  if (!state.crashed && !state.introOpen && !state.photoMode && !state.replayActive
+      && !state.paused && (state.mode === 'free' || state.mode === 'tng')){
+    // Find the nearest real airport (carrier deck excluded — it's not a
+    // traffic-pattern training aid).
+    let pgAp = null, pgD = 1e9;
+    for (const a of AIRPORTS){
+      const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+      if (d < pgD){ pgD = d; pgAp = a; }
+    }
+    if (pgAp && pgD < 5000){
+      const pgAgl = plane.position.y - pgAp.elev;
+      if (pgAgl < 1500 && pgAgl > -50){
+        // Pattern geometry in runway-local coordinates.
+        //   along = distance along the runway centerline (+ = forward / north end)
+        //   lat   = perpendicular offset, NEGATIVE = LEFT side of the runway
+        //           (standard left-hand pattern). All four legs live on the
+        //           left half so the box hugs one side of the strip instead
+        //           of straddling it.
+        const PG_LAT = 1500;       // metres from centerline to downwind leg
+        const PG_FINAL = 2000;     // metres beyond threshold for final entry
+        const halfLen = pgAp.len / 2;
+        // Corners traced in order around the pattern (counter-clockwise
+        // when viewed from above for left-hand traffic). The fourth corner
+        // sits ON the runway centerline so final + crosswind meet the strip
+        // instead of cutting across the other side.
+        const corners = [
+          // Final entry: outside the approach end, on the runway centerline.
+          [ halfLen + PG_FINAL, 0       ],
+          // Base turn: outside the approach end, displaced left.
+          [ halfLen + PG_FINAL, -PG_LAT ],
+          // Downwind start / crosswind end: past the departure end, displaced left.
+          [-halfLen - PG_FINAL, -PG_LAT ],
+          // Departure end on the centerline (crosswind start).
+          [-halfLen - PG_FINAL, 0       ]
+        ];
+        // Convert local (along, lateral) into world (x, z) using airport hdg.
+        // hdg=0 means runway points north (-z), so forward unit (along +) =
+        // (sin hdg, -cos hdg). Left unit (lateral -) = (-cos hdg, -sin hdg).
+        const cosH = Math.cos(pgAp.hdg), sinH = Math.sin(pgAp.hdg);
+        const pts = corners.map(([al, la]) => {
+          const wx = pgAp.x + sinH * al + (-cosH) * la;
+          const wz = pgAp.z + (-cosH) * al + (-sinH) * la;
+          const dx = wx - plane.position.x;
+          const dz = wz - plane.position.z;
+          return [cx + dx * scale, cy + dz * scale];
+        });
+        // Fade out at both ends: a faint cue past 4 km, fade-in under 800 m
+        // so it doesn't overlap the runway line when the player is on short
+        // final and the strip itself is the better reference.
+        const fade = pgD > 4000 ? Math.max(0, 1 - (pgD - 4000) / 1000) * 0.55
+                                : (pgD < 800 ? Math.max(0, pgD / 800) * 0.55
+                                             : 0.55);
+        if (fade > 0.02){
+          minimapCtx.save();
+          minimapCtx.strokeStyle = 'rgba(255,108,247,' + fade.toFixed(3) + ')';
+          minimapCtx.lineWidth = 1.2;
+          minimapCtx.setLineDash([3, 3]);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(pts[0][0], pts[0][1]);
+          for (let i = 1; i < pts.length; i++){
+            minimapCtx.lineTo(pts[i][0], pts[i][1]);
+          }
+          minimapCtx.closePath();
+          minimapCtx.stroke();
+          minimapCtx.setLineDash([]);
+          minimapCtx.restore();
+        }
+        // One-shot teaching toast per airport per session. Fire when the
+        // player is between 1 and 5 km out so they have time to react.
+        if (pgD > 1000 && pgD < 5000 && !state.patternHinted[pgAp.id]){
+          state.patternHinted[pgAp.id] = true;
+          if (typeof showToast === 'function'){
+            showToast('\u{1F6E9}\uFE0F', pgAp.id + ' PATTERN',
+              'Enter on 45\u00b0 to downwind (left-hand traffic)');
+          }
+        }
+      }
+    }
   }
   // Plane (centre): yellow triangle pointing along current heading. Forward
   // heading 0° = north (up on screen, -z), 90° = east (+x).
