@@ -87,10 +87,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Opposite-end runway in quick-jump (Shift+digit) — the `J` overlay teleports you to one canonical threshold per airport. Hold Shift with the digit (or Shift+click the row) to drop in at the *other* end of the same runway with the plane already rotated 180°, so wind-favored takeoff is one keystroke instead of a long backtaxi. HUD pill reads `JUMPED TO <id> (REV)` and the ATC line tacks on "opposite end" so it's obvious which way you're pointed.
 
+- [x] Carrier deck mini-mission — anchored CV-01 a few km offshore (240×38 m deck at 14 m elev) with hull, markings, four arrestor wires, a touchdown box, and an island superstructure. New CARRIER mode on the intro screen sets a trap inside the ±40 m midship box as the win condition; landing anywhere on the deck adds an arrestor-strength friction multiplier (`+7.5`) so the rollout is brutally short, hook or no hook. Mini-map gets a `CV` symbol; glideslope tape still works thanks to the deck registering as a synthetic runway.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Carrier deck mini-mission — anchor a small flat carrier deck a few km offshore on the water (just a long thin runway-shaped plane with vertical sides + deck markings). New "Carrier Landing" mission requires touching down inside an 80 m box with hard arrestor-style deceleration. New flavor of landing with zero new physics.
 - [ ] Weather radar mini-panel — small dark canvas next to the mini-map showing top-down fuzzy blobs for current cloud-layer positions plus a soft green sweep wedge. Doesn't need to be physically accurate — it just has to read as "weather radar" so the player can see which way weather is drifting in the wind. Pairs naturally with the existing rain toggle.
 
 ## How the ship loop works

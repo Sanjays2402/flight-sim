@@ -510,6 +510,7 @@
       <div class="mbtn" data-mode="tng"><div class="mt">TOUCH &amp; GO</div><div class="md">Rack up landings<br>chase best score</div></div>
       <div class="mbtn" data-mode="hop"><div class="mt">AIRPORT HOP</div><div class="md">Visit all 3 fields<br>in sequence</div></div>
       <div class="mbtn" data-mode="ring"><div class="mt">RING CHASE</div><div class="md">Fly the chain of rings<br>against the clock</div></div>
+      <div class="mbtn" data-mode="carrier"><div class="mt">CARRIER</div><div class="md">Trap on CV-01<br>offshore deck</div></div>
     </div>
     <div class="menurow">
       <button id="introStats" type="button">📊 PILOT STATS</button>
@@ -943,6 +944,35 @@ const AIRPORTS = [
   { id:'KLAK', name:'Lakeshore', x:-6500, z: 8800, len:1500, w:46, hdg:1.55, isMain:false, elev:5   }
 ];
 
+// Carrier deck — a flat anchored "runway" sitting on the ocean a few km west
+// of the main field. Kept OUT of AIRPORTS so it never gets flattened into the
+// terrain or counted as a hop target, but registered into runwayInfos below so
+// the existing landingProj / on-runway / skidmark / scoring path Just Works.
+// hdg matches Lakeshore so the wind picker still spits out realistic approach
+// crosswinds; long axis runs roughly east-west so the player approaches over
+// open water from the west. Touchdown box = ±40m around midship (3-wire-ish).
+const CARRIER = {
+  id: 'CV01', name: 'CV-01 Pacific',
+  x: -13800, z: 4200,
+  len: 240, w: 38, hdg: 1.55,
+  elev: 14,
+  // mission touchdown box: trap inside ±40m of midship to clear the mission.
+  boxHalfLen: 40
+};
+
+// Returns deck height if (x,z) is inside the carrier deck footprint, else
+// null. Called from terrainHeight so the plane rests on the deck and would
+// fall in the water on a miss. Small margin (1m) lines up with the visible
+// hull so the deck edge is a hard cliff.
+function carrierDeckHeight(x, z){
+  const cs = Math.cos(-CARRIER.hdg), sn = Math.sin(-CARRIER.hdg);
+  const dx = x - CARRIER.x, dz = z - CARRIER.z;
+  const lx = dx*cs - dz*sn;
+  const lz = dx*sn + dz*cs;
+  if (Math.abs(lx) <= CARRIER.w/2 + 1 && Math.abs(lz) <= CARRIER.len/2 + 1) return CARRIER.elev;
+  return null;
+}
+
 const LAKE = { x:-5200, z: 6800, rx:1900, rz:1400 };
 const OCEAN_X = -14000;
 
@@ -964,6 +994,11 @@ function nearestRunwayInfo(x, z){
 }
 
 function terrainHeight(x, z){
+  // Carrier deck overrides everything — it's a hard, isolated platform on
+  // top of the ocean. Outside the deck footprint, fall through to normal
+  // terrain/water logic.
+  const dh = carrierDeckHeight(x, z);
+  if (dh !== null) return dh;
   const fr = nearestRunwayInfo(x, z);
   if (fr.d < 80) return fr.ap.elev;
   if (x < OCEAN_X + 600) {
@@ -1382,6 +1417,99 @@ function clearSkidmarks(){
 
 for (const a of AIRPORTS) makeAirport(a);
 const MAIN_AP = AIRPORTS[0];
+
+// ====== CARRIER DECK ======
+// Anchored flat-top a few km offshore. Built as a hull box + flat deck + deck
+// markings (centerline dashes, threshold band, four arrestor wires, a touchdown
+// box, and CV-01 lettering). Registered into runwayInfos as a synthetic "runway"
+// so the existing landingProj / on-runway / skidmark / scoring path treats it
+// like any other strip — minimum-diff approach.
+const carrierGroup = (function buildCarrier(){
+  const a = CARRIER;
+  const g = new THREE.Group();
+  g.position.set(a.x, 0, a.z);
+  g.rotation.y = a.hdg;
+  scene.add(g);
+  // Hull — dark gray box sitting just above the waterline, hollow visual
+  // (single box is plenty at fog distance).
+  const hullMat = new THREE.MeshLambertMaterial({ color: 0x555a60 });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(a.w + 6, a.elev, a.len + 20), hullMat);
+  hull.position.y = a.elev/2 - 0.5; // slight overlap into water for waterline
+  g.add(hull);
+  // Deck top — flat plate the plane actually lands on. Slight overhang fore
+  // and aft so the silhouette reads as a real carrier.
+  const deckMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+  const deck = new THREE.Mesh(new THREE.PlaneGeometry(a.w, a.len), deckMat);
+  deck.rotation.x = -Math.PI/2;
+  deck.position.y = a.elev + 0.01;
+  g.add(deck);
+  // Centerline dashes (white) so the pilot can line up.
+  const wMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const dashGeo = new THREE.PlaneGeometry(0.8, 10);
+  const numDash = Math.floor(a.len / 28);
+  for (let i=0;i<numDash;i++){
+    const d = new THREE.Mesh(dashGeo, wMat);
+    d.rotation.x = -Math.PI/2;
+    d.position.set(0, a.elev + 0.04, a.len/2 - 14 - i*28);
+    g.add(d);
+  }
+  // Threshold bands at both deck ends so the touchdown zone reads at a glance.
+  for (const end of [-1, 1]){
+    const band = new THREE.Mesh(new THREE.PlaneGeometry(a.w - 4, 2), wMat);
+    band.rotation.x = -Math.PI/2;
+    band.position.set(0, a.elev + 0.04, end * (a.len/2 - 4));
+    g.add(band);
+  }
+  // Four arrestor-wire stripes (yellow) spaced through midship + the touchdown
+  // box outline so the player can see exactly where to trap. Box matches the
+  // mission gate (±boxHalfLen of midship).
+  const yMat = new THREE.MeshBasicMaterial({ color: 0xffd166 });
+  for (let i=-1; i<=2; i++){
+    const wire = new THREE.Mesh(new THREE.PlaneGeometry(a.w - 6, 0.6), yMat);
+    wire.rotation.x = -Math.PI/2;
+    wire.position.set(0, a.elev + 0.05, i * 12);
+    g.add(wire);
+  }
+  // Touchdown box outline — two long side stripes flanking the trap zone.
+  for (const side of [-1, 1]){
+    const sl = new THREE.Mesh(new THREE.PlaneGeometry(0.5, a.boxHalfLen * 2), yMat);
+    sl.rotation.x = -Math.PI/2;
+    sl.position.set(side * (a.w/2 - 4), a.elev + 0.04, 0);
+    g.add(sl);
+  }
+  // Island superstructure on the starboard side so the deck silhouette reads
+  // unambiguously as a carrier, not a runway barge.
+  const islMat = new THREE.MeshLambertMaterial({ color: 0x40454c });
+  const island = new THREE.Mesh(new THREE.BoxGeometry(8, 14, 36), islMat);
+  island.position.set(a.w/2 - 5, a.elev + 7, -a.len/2 + 80);
+  g.add(island);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 10, 6), new THREE.MeshLambertMaterial({ color: 0xdddddd }));
+  mast.position.set(a.w/2 - 5, a.elev + 19, -a.len/2 + 80);
+  g.add(mast);
+  // Painted bow ID so the deck reads as CV-01 from final approach.
+  const idCv = document.createElement('canvas'); idCv.width = 256; idCv.height = 128;
+  const idCtx = idCv.getContext('2d');
+  idCtx.fillStyle = 'rgba(0,0,0,0)'; idCtx.fillRect(0,0,256,128);
+  idCtx.fillStyle = '#ffffff'; idCtx.font = 'bold 96px ui-monospace, monospace';
+  idCtx.textAlign = 'center'; idCtx.textBaseline = 'middle';
+  idCtx.fillText('01', 128, 64);
+  const idTex = new THREE.CanvasTexture(idCv);
+  idTex.colorSpace = THREE.SRGBColorSpace;
+  const idMat = new THREE.MeshBasicMaterial({ map: idTex, transparent: true });
+  const idPlane = new THREE.Mesh(new THREE.PlaneGeometry(14, 7), idMat);
+  idPlane.rotation.x = -Math.PI/2;
+  idPlane.position.set(0, a.elev + 0.06, a.len/2 - 24);
+  g.add(idPlane);
+  // Skidmark group so deck landings paint rubber like real runways.
+  const skidGrp = new THREE.Group();
+  skidGrp.position.y = a.elev + 0.06;
+  g.add(skidGrp);
+  a._skidGrp = skidGrp;
+  // Register in runwayInfos so landingProj treats the deck like a strip.
+  // No aim point needed (carrier doesn't get PAPI / taxi arrows / lights).
+  runwayInfos.push({ ap: a, aimX: a.x, aimZ: a.z, lights: null });
+  return g;
+})();
 // Prime time-of-day so the very first frame matches the starting hour (sky/sun/lights).
 applyTimeOfDay(9.0);
 
@@ -3393,6 +3521,11 @@ const state = {
   ringStartMs: 0,
   ringElapsedMs: 0,
   ringBestMs: 0,
+  // Carrier-deck mission state. carrierTraps = total deck landings this run
+  // (any deck touchdown, even outside the box); carrierDone latches true on
+  // the first trap inside the touchdown box so the fanfare only fires once.
+  carrierTraps: 0,
+  carrierDone: false,
   // Time of day in 0..24 hours; advances with TOD_SPEED. Starts near sunrise
   // so the first frames show off the cycle without waiting.
   todHours: 9.0,
@@ -4227,11 +4360,11 @@ resetPlane();
 
 const intro = document.getElementById('intro');
 const missionEl = document.getElementById('mission');
-const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP', ring:'RING CHASE' };
+const missionTitles = { free:'FREE FLIGHT', tng:'TOUCH & GO', hop:'AIRPORT HOP', ring:'RING CHASE', carrier:'CARRIER' };
 function startMission(mode){
   state.mode = mode;
   // Reset T&G stats per run so each session has its own scoreboard.
-  if (mode === 'tng' || mode === 'hop'){
+  if (mode === 'tng' || mode === 'hop' || mode === 'carrier'){
     state.scoreLast = null; state.scoreBest = 0; state.scoreTotal = 0; state.scoreCount = 0;
   }
   if (mode === 'hop'){
@@ -4241,6 +4374,13 @@ function startMission(mode){
     state.hopDone = false;
     state.hopStartMs = performance.now();
     state.hopElapsedMs = 0;
+  }
+  // Carrier mission: clear the trap-counter so a fresh run starts at zero.
+  // First trap inside the deck touchdown box fires the ceremonial banner;
+  // subsequent traps still count toward the per-flight tally.
+  if (mode === 'carrier'){
+    state.carrierTraps = 0;
+    state.carrierDone = false;
   }
   // Ring chase: arm the chain, reset hit index + timer, show all rings.
   // Switching away from ring mode tucks the rings back out of the world so
@@ -4275,6 +4415,7 @@ function dismissIntro(){
   const greet = state.mode === 'tng'  ? 'Cleared for the option, runway 27.'
               : state.mode === 'hop'  ? 'Flight plan active, departure approved.'
               : state.mode === 'ring' ? 'Ring course armed, timer running on gate 1.'
+              : state.mode === 'carrier' ? 'Pacific actual, signal Charlie, deck is ready.'
               :                         'Ground to tower, cleared to taxi at your discretion.';
   pushATC(greet, { now:true });
 }
@@ -5273,6 +5414,25 @@ function step(dt){
             extra = ' · wrong field, want ' + want;
           }
         }
+        // Carrier mission: any deck touchdown bumps the trap counter so
+        // chasing repeats stays satisfying. First trap inside the deck box
+        // (±boxHalfLen of midship) latches carrierDone and fires the fanfare;
+        // landings outside the box still count toward total traps and score
+        // but don't satisfy the mission gate, so the player has a reason to
+        // hit the wires instead of float halfway down the deck.
+        if (land && land.ri && land.ri.ap === CARRIER){
+          state.carrierTraps += 1;
+          const inBox = Math.abs(land.lz) <= CARRIER.boxHalfLen;
+          if (state.mode === 'carrier' && !state.carrierDone && inBox){
+            state.carrierDone = true;
+            extra = ' · TRAPPED — wire engaged';
+            showMissionDone('TRAPPED', 'CV-01 · wire engaged · +' + (state.scoreTotal + score));
+          } else if (state.mode === 'carrier' && !inBox){
+            extra = ' · deck landing, missed the box';
+          } else if (state.mode === 'carrier' && state.carrierDone){
+            extra = ' · trap #' + state.carrierTraps;
+          }
+        }
         const title = (sinkRate < 2.5 ? 'GREASED IT' : 'GOOD LANDING') + ' · +' + score;
         const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
         showStatus(title, sub, 'good');
@@ -5346,8 +5506,14 @@ function step(dt){
       // Wheel-brake friction. Reverser doubles as a strong decel by raising the
       // effective friction coefficient — stacks with wheel brakes (real pilots
       // use both) so holding B + Z together shortens rollout dramatically.
+      // Carrier deck is short — simulate an arrestor wire by piling on heavy
+      // friction whenever wheels are on the deck so the rollout is brutally
+      // short, hook or no hook. Trips for any deck landing, not just the
+      // mission gate, so chasing repeat traps stays satisfying.
+      const onCarrier = onRunway && land && land.ri && land.ri.ap === CARRIER;
+      const arrestor = onCarrier ? 7.5 : 0;
       const brakeFric = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
-      const friction = brakeFric + (revActive ? 2.5 : 0);
+      const friction = brakeFric + (revActive ? 2.5 : 0) + arrestor;
       const sp = groundSp;
       if (sp > 0.01){
         const newSp = Math.max(0, sp - friction*dt*Math.max(2, sp*0.1));
@@ -5802,6 +5968,23 @@ function step(dt){
         const dRing = Math.hypot(plane.position.x - tgt.pos.x, plane.position.z - tgt.pos.z);
         document.getElementById('msVal').textContent = (dRing/1000).toFixed(2) + ' km';
       }
+    }
+  } else if (state.mode === 'carrier'){
+    // Carrier HUD: distance/bearing to the deck plus the running trap count.
+    // Once the player traps inside the box the target line latches "TRAPPED";
+    // each extra deck landing bumps the counter so chasing repeats stays fun.
+    const dxC = CARRIER.x - plane.position.x;
+    const dzC = CARRIER.z - plane.position.z;
+    const dC = Math.hypot(dxC, dzC);
+    const trapTxt = state.carrierTraps > 0 ? ' · traps ' + state.carrierTraps : '';
+    if (state.carrierDone){
+      document.getElementById('msTgt').textContent = 'TRAPPED · CV-01' + trapTxt;
+      document.getElementById('msLbl').textContent = 'To deck';
+      document.getElementById('msVal').textContent = (dC/1000).toFixed(1) + ' km';
+    } else {
+      document.getElementById('msTgt').textContent = 'CV-01 · ' + (dC/1000).toFixed(1) + ' km' + trapTxt;
+      document.getElementById('msLbl').textContent = 'Score';
+      document.getElementById('msVal').textContent = '+' + state.scoreTotal;
     }
   }
 
@@ -6338,6 +6521,37 @@ function drawMinimap(hdgDeg){
     minimapCtx.textAlign = 'left';
     minimapCtx.textBaseline = 'top';
     minimapCtx.fillText(a.id, px + 5, py + 4);
+  }
+  // Carrier deck: thin gray rectangle oriented to the deck heading so the
+  // pilot can read distance/bearing to the trap target straight off the map.
+  // Labelled "CV" in white; off-map ticks reuse the airport rim treatment
+  // so it still shows direction when out of range.
+  {
+    const cdx = CARRIER.x - plane.position.x;
+    const cdz = CARRIER.z - plane.position.z;
+    const cpx = cx + cdx * scale;
+    const cpy = cy + cdz * scale;
+    if (cpx < 4 || cpx > W-4 || cpy < 4 || cpy > H-4){
+      const ang = Math.atan2(cdz, cdx);
+      const ex = cx + Math.cos(ang) * (R - 6);
+      const ey = cy + Math.sin(ang) * (R - 6);
+      minimapCtx.fillStyle = '#9bb';
+      minimapCtx.fillRect(ex - 2, ey - 2, 4, 4);
+    } else {
+      const cs = Math.cos(CARRIER.hdg), sn = Math.sin(CARRIER.hdg);
+      const hLen = Math.max(5, (CARRIER.len * scale) * 0.5);
+      minimapCtx.strokeStyle = '#9bb';
+      minimapCtx.lineWidth = 3;
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(cpx - sn * hLen, cpy + cs * hLen);
+      minimapCtx.lineTo(cpx + sn * hLen, cpy - cs * hLen);
+      minimapCtx.stroke();
+      minimapCtx.fillStyle = '#9bb';
+      minimapCtx.font = 'bold 9px ui-monospace, monospace';
+      minimapCtx.textAlign = 'left';
+      minimapCtx.textBaseline = 'top';
+      minimapCtx.fillText('CV', cpx + 5, cpy + 4);
+    }
   }
   // AI traffic dot: small cyan triangle pointing along its heading. Draws
   // after airports so the symbol sits on top when colocated.
