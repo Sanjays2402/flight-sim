@@ -2478,6 +2478,10 @@ const RING_DEFS = [
 
 function setRingMissionVisible(on){
   for (const r of ringChain) r.group.visible = on;
+  // Ghost is bound to the same lifecycle as the rings themselves — switching
+  // away from Ring Chase hides everything in one shot. updateGhostPlayback
+  // owns the in-mission visibility decisions (no ghost loaded, replay, etc.).
+  if (!on) ghostPlane.visible = false;
 }
 
 function updateRingChase(dt){
@@ -2544,6 +2548,12 @@ function updateRingChase(dt){
       if (state.ringBestMs === 0 || state.ringElapsedMs < state.ringBestMs){
         state.ringBestMs = state.ringElapsedMs;
         saveRingBest();
+        // New personal best — persist this run's path so the NEXT attempt
+        // races against it. Slice-copy so the live working buffer can keep
+        // being reused. Reload immediately so the same session's next
+        // restart already has the ghost armed without a page refresh.
+        saveGhostToStorage(ghostRecord.slice());
+        loadGhostFromStorage();
         extra = ' · NEW BEST';
       } else {
         extra = ' · best ' + fmtHopTime(state.ringBestMs);
@@ -2557,6 +2567,162 @@ function updateRingChase(dt){
     }
   }
 }
+
+// ====== RING-CHASE GHOST REPLAY ======
+// Race-your-best-self: every time the player sets a new Ring Chase best, we
+// snapshot the plane pose every GHOST_SAMPLE_MS into localStorage. On the
+// next attempt a translucent magenta ghost plane flies the exact same path
+// in lockstep with the run timer, so the pilot can literally watch where
+// they were faster (ghost ahead) or slower (ghost behind). Reuses the
+// existing replay-buffer idea — fixed-rate samples + lerp/slerp interp —
+// but persists across reloads and is keyed to mission-elapsed time, not
+// wall-clock. Sample cadence (~150ms) is coarser than the 50ms touchdown
+// replay because a 10-minute joyride still has to fit in localStorage.
+const GHOST_KEY = 'flightsim.ring.ghost.v1';
+const GHOST_SAMPLE_MS = 150;
+const GHOST_MAX_SAMPLES = 4000; // ~10 min hard cap so a bad run can't blow up storage
+// Working buffer for the run currently in progress. Plain numeric arrays
+// (no THREE objects) so we can JSON-serialise straight to localStorage on
+// a new best, and a slice-copy on save is essentially free.
+const ghostRecord = [];
+let ghostNextSampleAt = 0;
+// Loaded best-run path (or null if no ghost stored yet). Same shape as
+// ghostRecord. Refreshed at mission start so a brand-new best from the
+// just-finished run can race the next attempt.
+let ghostPlayback = null;
+
+// Translucent stand-in plane. Built once, hidden by default, made visible
+// only while a Ring Chase run is live AND a ghost path is loaded. Mesh
+// silhouette mirrors the AI traffic plane so it reads as "another aircraft"
+// at a glance, but everything is magenta + transparent so it never gets
+// mistaken for the player or the AI circuit plane.
+const ghostPlane = new THREE.Group();
+{
+  // depthWrite:false on every material so the ghost never carves z-buffer
+  // holes through clouds / smoke — it always reads as a soft overlay.
+  const matSolid = new THREE.MeshBasicMaterial({
+    color: 0xff66cc, transparent: true, opacity: 0.42, depthWrite: false
+  });
+  const matGlass = new THREE.MeshBasicMaterial({
+    color: 0xffaaee, transparent: true, opacity: 0.30, depthWrite: false
+  });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 4.6, 12), matSolid);
+  body.rotation.x = Math.PI/2; ghostPlane.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 12), matSolid);
+  nose.rotation.x = -Math.PI/2; nose.position.z = -2.9; ghostPlane.add(nose);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 12), matSolid);
+  tail.rotation.x = Math.PI/2; tail.position.z = 3.1; ghostPlane.add(tail);
+  const cp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 8, 0, Math.PI*2, 0, Math.PI/2), matGlass);
+  cp.position.set(0, 0.42, -0.9); cp.scale.set(1.0, 0.9, 1.7); ghostPlane.add(cp);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.12, 1.4), matSolid);
+  wing.position.set(0, 0.05, -0.2); ghostPlane.add(wing);
+  const tp = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.1, 0.9), matSolid);
+  tp.position.set(0, 0.3, 3.4); ghostPlane.add(tp);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 1.1), matSolid);
+  fin.position.set(0, 0.7, 3.4); ghostPlane.add(fin);
+}
+ghostPlane.visible = false;
+scene.add(ghostPlane);
+
+function loadGhostFromStorage(){
+  ghostPlayback = null;
+  try {
+    const raw = localStorage.getItem(GHOST_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const arr = parsed && Array.isArray(parsed.samples) ? parsed.samples : null;
+    if (!arr || arr.length < 2) return;
+    // Soft validation: each sample must have the eight numeric fields we
+            // recorded. Reject the whole ghost if any sample is malformed so we
+    // never crash the playback path on a corrupt entry.
+    for (let i = 0; i < arr.length; i++){
+      const s = arr[i];
+      if (!s || typeof s.t !== 'number'
+          || typeof s.px !== 'number' || typeof s.py !== 'number' || typeof s.pz !== 'number'
+          || typeof s.qx !== 'number' || typeof s.qy !== 'number' || typeof s.qz !== 'number' || typeof s.qw !== 'number'){
+        return;
+      }
+    }
+    ghostPlayback = arr;
+  } catch(e){ /* corrupt prefs — ignore, no ghost this run */ }
+}
+function saveGhostToStorage(samples){
+  // Caller passes a fresh slice so we never persist the live working buffer
+  // (which would mutate after the save). Soft cap by GHOST_MAX_SAMPLES.
+  try {
+    const capped = samples.length > GHOST_MAX_SAMPLES
+      ? samples.slice(0, GHOST_MAX_SAMPLES)
+      : samples;
+    localStorage.setItem(GHOST_KEY, JSON.stringify({ samples: capped }));
+  } catch(e){ /* quota / private mode — silently drop */ }
+}
+function resetGhostRecord(){
+  ghostRecord.length = 0;
+  ghostNextSampleAt = 0;
+}
+function recordGhostFrame(now){
+  // Only sample while a Ring Chase run is actually being flown. We sample
+  // by mission-elapsed (not wall-clock) so a pause / replay between
+  // samples doesn't smear the path. Bail out cheaply on the common case
+  // where the player isn't in ring mode.
+  if (state.mode !== 'ring' || !state.ringActive || state.ringDone) return;
+  if (state.replayActive || state.paused || state.introOpen || state.photoMode) return;
+  if (ghostRecord.length >= GHOST_MAX_SAMPLES) return;
+  const elapsed = now - state.ringStartMs;
+  if (elapsed < 0) return;
+  if (ghostRecord.length > 0 && elapsed < ghostNextSampleAt) return;
+  ghostRecord.push({
+    t: elapsed,
+    px: plane.position.x, py: plane.position.y, pz: plane.position.z,
+    qx: plane.quaternion.x, qy: plane.quaternion.y,
+    qz: plane.quaternion.z, qw: plane.quaternion.w
+  });
+  ghostNextSampleAt = elapsed + GHOST_SAMPLE_MS;
+}
+const _ghostQA = new THREE.Quaternion();
+const _ghostQB = new THREE.Quaternion();
+function updateGhostPlayback(now){
+  // Ghost is only ever shown while a live Ring Chase run is in progress and
+  // we actually have a saved best to race against. Everything else hides it.
+  if (!ghostPlayback || ghostPlayback.length < 2
+      || state.mode !== 'ring' || !state.ringActive || state.ringDone
+      || state.replayActive || state.paused || state.introOpen || state.photoMode){
+    if (ghostPlane.visible) ghostPlane.visible = false;
+    return;
+  }
+  const elapsed = now - state.ringStartMs;
+  if (elapsed < 0){ ghostPlane.visible = false; return; }
+  const last = ghostPlayback[ghostPlayback.length - 1];
+  if (elapsed > last.t + 250){
+    // Player is now slower than the best run by enough that the ghost has
+    // already crossed the finish line — tuck it away so it doesn't sit
+    // frozen on the final ring.
+    ghostPlane.visible = false;
+    return;
+  }
+  // Find the two samples bracketing `elapsed`. Linear walk is fine because
+  // elapsed advances monotonically and the ghost rarely exceeds a few
+  // thousand entries; the ring count keeps it small in practice.
+  let i1 = 1;
+  while (i1 < ghostPlayback.length && ghostPlayback[i1].t < elapsed) i1++;
+  if (i1 >= ghostPlayback.length) i1 = ghostPlayback.length - 1;
+  const a = ghostPlayback[i1 - 1];
+  const b = ghostPlayback[i1];
+  const span = Math.max(1, b.t - a.t);
+  const f = Math.max(0, Math.min(1, (elapsed - a.t) / span));
+  ghostPlane.position.set(
+    a.px + (b.px - a.px) * f,
+    a.py + (b.py - a.py) * f,
+    a.pz + (b.pz - a.pz) * f
+  );
+  _ghostQA.set(a.qx, a.qy, a.qz, a.qw);
+  _ghostQB.set(b.qx, b.qy, b.qz, b.qw);
+  ghostPlane.quaternion.copy(_ghostQA).slerp(_ghostQB, f);
+  ghostPlane.visible = true;
+}
+// Initial load so a returning pilot already has a ghost queued up the
+// first time they pick Ring Chase from the menu.
+loadGhostFromStorage();
 
 // ====== WINGTIP VORTEX TRAILS ======
 // Tapered ribbon trail behind each wingtip; visible when pulling Gs or near stall.
@@ -4044,6 +4210,10 @@ function resetPlane(){
     state.ringElapsedMs = 0;
     for (const r of ringChain) r._lastAlong = undefined;
     setRingMissionVisible(true);
+    // Each restart gets a fresh recording buffer (this attempt's path will
+    // overwrite the saved ghost only if it sets a new best). The loaded
+    // ghostPlayback is left in place so the ghost keeps racing this attempt.
+    resetGhostRecord();
   }
   hideStatus();
   // Cold-start ritual: arm AFTER hideStatus so the "press I" banner sticks
@@ -4083,6 +4253,11 @@ function startMission(mode){
     state.ringElapsedMs = 0;
     for (const r of ringChain) r._lastAlong = undefined;
     setRingMissionVisible(true);
+    // Fresh recording for this attempt, and re-read the stored best in case
+    // a previous Ring Chase session (or another tab) wrote one out since
+    // page load. Per-frame updateGhostPlayback handles visibility from here.
+    resetGhostRecord();
+    loadGhostFromStorage();
   } else {
     state.ringActive = false;
     setRingMissionVisible(false);
@@ -7127,10 +7302,22 @@ function loop(now){
       step(dt);
       // Record after the physics step so the buffered frame matches what was just rendered.
       recordReplayFrame(now);
+      // Ring-chase ghost: sample the live run after physics, then place the
+      // ghost stand-in at the matching mission-elapsed pose. Both no-op when
+      // the player isn't in an active Ring Chase, so non-ring sessions pay
+      // basically nothing per frame.
+      recordGhostFrame(now);
+      updateGhostPlayback(now);
     }
   } else {
     propGroup.rotation.z += 0.4*dt;
     updateCamera(dt);
+  }
+  // Make sure the ghost is hidden any frame we didn't run the live update
+  // path above (paused / replay / photo / intro). Cheap idempotent toggle.
+  if (state.mode !== 'ring' || !state.ringActive || state.ringDone
+      || state.replayActive || state.paused || state.introOpen || state.photoMode){
+    if (ghostPlane.visible) ghostPlane.visible = false;
   }
   if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed && !state.coldStart){
     hideStatus();
