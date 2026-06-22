@@ -85,10 +85,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] In-air ghost replay for Ring Chase — every time you set a new best time on Ring Chase, sample plane pose every ~150ms into localStorage. On the next attempt, render a translucent ghost plane following that exact path. Turns the stopwatch into a race against yourself; reuses replay-buffer plumbing.
 
+- [x] Opposite-end runway in quick-jump (Shift+digit) — the `J` overlay teleports you to one canonical threshold per airport. Hold Shift with the digit (or Shift+click the row) to drop in at the *other* end of the same runway with the plane already rotated 180°, so wind-favored takeoff is one keystroke instead of a long backtaxi. HUD pill reads `JUMPED TO <id> (REV)` and the ATC line tacks on "opposite end" so it's obvious which way you're pointed.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Opposite-end runway in quick-jump (Shift+digit) — `J` overlay teleports you to one canonical threshold per airport. Add Shift+digit to drop you at the *other* end of the same runway so wind-favored takeoff is one keystroke instead of a long backtaxi. Pure quality-of-life win; ~25 LOC, reuses the existing teleport path.
 - [ ] Carrier deck mini-mission — anchor a small flat carrier deck a few km offshore on the water (just a long thin runway-shaped plane with vertical sides + deck markings). New "Carrier Landing" mission requires touching down inside an 80 m box with hard arrestor-style deceleration. New flavor of landing with zero new physics.
 - [ ] Weather radar mini-panel — small dark canvas next to the mini-map showing top-down fuzzy blobs for current cloud-layer positions plus a soft green sweep wedge. Doesn't need to be physically accurate — it just has to read as "weather radar" so the player can see which way weather is drifting in the wind. Pairs naturally with the existing rain toggle.
 

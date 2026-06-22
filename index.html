@@ -472,7 +472,7 @@
     <h2>QUICK JUMP</h2>
     <div class="sub">PICK A FIELD</div>
     <div class="list" id="jumpList"></div>
-    <div class="hint">press <kbd>1</kbd>–<kbd>9</kbd> to jump · <kbd>J</kbd>/<kbd>Esc</kbd> to cancel</div>
+    <div class="hint">press <kbd>1</kbd>–<kbd>9</kbd> to jump · hold <kbd>Shift</kbd> for opposite end · <kbd>J</kbd>/<kbd>Esc</kbd> to cancel</div>
   </div>
 </div>
 <div id="achievements"></div>
@@ -527,7 +527,7 @@
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
       <span>Pause menu</span><span><kbd>Esc</kbd></span>
-      <span>Quick-jump airport</span><span><kbd>J</kbd> (free flight)</span>
+      <span>Quick-jump airport</span><span><kbd>J</kbd>, <kbd>1</kbd>–<kbd>9</kbd> · <kbd>Shift</kbd>+digit = other end</span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
     <div class="tip">
@@ -7836,10 +7836,16 @@ updateCamModeUi();
   // pilot can roll straight into a takeoff instead of restarting from zero,
   // and old trails/contrails/ribbon/replay buffer are cleared so nothing
   // ghosts from the previous spot. Mission timers / scores are left alone.
-  function teleportTo(ap){
-    plane.position.set(ap.x, ap.elev + GEAR_H, ap.z + ap.len/2 - 100);
+  // `opposite` flips both the spawn end (negative-Z runway threshold) and
+  // the plane heading by 180° so a Shift+digit gives you the other end of
+  // the same strip — wind-favored takeoff is now one keystroke instead of a
+  // long backtaxi.
+  function teleportTo(ap, opposite){
+    const endSign = opposite ? -1 : 1;
+    plane.position.set(ap.x, ap.elev + GEAR_H, ap.z + endSign * (ap.len/2 - 100));
     plane.quaternion.identity();
     if (ap.hdg !== 0) plane.rotateY(ap.hdg);
+    if (opposite) plane.rotateY(Math.PI);
     state.vel.set(0,0,0);
     state.throttle = 0.30;
     state.flaps = 0;
@@ -7911,10 +7917,11 @@ updateCamModeUi();
         if (!Number.isFinite(idx)) return;
         const ap = AIRPORTS[idx];
         if (!ap) return;
+        const opp = !!e.shiftKey;
         closePanel();
-        teleportTo(ap);
-        showStatus('JUMPED TO ' + ap.id, ap.name + ' · throttle 30%', 'good');
-        pushATC('Repositioning to ' + ap.id + ', taxi at your discretion.', { tag:'TOWER', now:true });
+        teleportTo(ap, opp);
+        showStatus('JUMPED TO ' + ap.id + (opp ? ' (REV)' : ''), ap.name + ' · throttle 30%', 'good');
+        pushATC('Repositioning to ' + ap.id + (opp ? ', opposite end' : '') + ', taxi at your discretion.', { tag:'TOWER', now:true });
       });
     }
   }
@@ -7967,10 +7974,11 @@ updateCamModeUi();
     e.preventDefault();
     const ap = AIRPORTS[n - 1];
     if (!ap) return;
+    const opp = !!e.shiftKey;
     closePanel();
-    teleportTo(ap);
-    showStatus('JUMPED TO ' + ap.id, ap.name + ' · throttle 30%', 'good');
-    pushATC('Repositioning to ' + ap.id + ', taxi at your discretion.', { tag:'TOWER', now:true });
+    teleportTo(ap, opp);
+    showStatus('JUMPED TO ' + ap.id + (opp ? ' (REV)' : ''), ap.name + ' · throttle 30%', 'good');
+    pushATC('Repositioning to ' + ap.id + (opp ? ', opposite end' : '') + ', taxi at your discretion.', { tag:'TOWER', now:true });
   });
 })();
 
