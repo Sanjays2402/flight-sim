@@ -3981,6 +3981,14 @@ const state = {
   // chirps a few times per second instead of every frame. Timestamp in ms
   // (performance.now) of the last beep; 0 means "ready to beep now".
   gpwsBeepAt: 0,
+  // Short-final radalt callouts ("500", "300", "MINIMUMS", "100", "50", "30",
+  // "20", "10"). `approachLastAGL` tracks the previous frame's AGL so we can
+  // detect downward threshold crossings and fire each call exactly once per
+  // approach. `approachArmed` arms after we climb back above 200m AGL so a
+  // touch-and-go re-arms the callouts for the next pattern. Reset on
+  // resetPlane() / takeoff so a fresh sortie starts clean.
+  approachLastAGL: 9999,
+  approachArmed: true,
   // Engine fire emergency. Rare random event in normal flight, or guaranteed
   // when a bird strike hits at high throttle. While `engineFire` is true,
   // `engineFireT` counts up the seconds since ignition (drives the cowl flame
@@ -4867,6 +4875,10 @@ function resetPlane(){
   state.peakG = 0;
   state.peakSink = 0;
   state.gLoad = 1.0;
+  // Short-final callouts: fresh sortie re-arms the radalt voice and clears
+  // the last-AGL latch so the first descent through 500ft fires cleanly.
+  state.approachLastAGL = 9999;
+  state.approachArmed = true;
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
@@ -5123,6 +5135,27 @@ function playTerrainBeep(){
   g.gain.setValueAtTime(0.0, t0);
   g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
   g.gain.setValueAtTime(vol, t0 + 0.16);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.24);
+}
+// Short-final callout chime — a soft, single sine "bong" that layers under
+// each radalt callout ("500", "100", "MINIMUMS", etc.) without stomping the
+// ATC tag the same frame. Lower + warmer than the GPWS chirp so the pilot's
+// ear naturally separates "informational callout" from "emergency warning".
+function playCalloutChime(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.22 * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(660, t0);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.015);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
   osc.connect(g).connect(ctx.destination);
   osc.start(t0);
@@ -6608,6 +6641,61 @@ function step(dt){
   for (let i=1;i<=4;i++){
     const el = document.getElementById('p'+i);
     el.className = 'light ' + (showPAPI ? (i <= reds ? 'red' : 'white') : '');
+  }
+
+  // Short-final radalt callouts — fire a chime + ATC line each time AGL
+  // crosses a milestone on the way DOWN to a known runway. Gated by: gear
+  // down, descending, within 2 km of the threshold and roughly aligned with
+  // the strip, and not crashed / mid-replay / mid-photo. Re-arms after we
+  // climb back above 200m AGL so touch-and-go gives you a fresh set on each
+  // pattern. Reuses the existing pushATC ticker for the visible call so the
+  // tag/animation pipeline is unchanged.
+  if (!state.crashed && !state.onGround && !state.replayActive && !state.photoMode && nearest){
+    const ri = runwayInfos.find(r => r.ap === nearest);
+    if (ri && state.gearDown){
+      const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
+      const dx = plane.position.x - ri.ap.x, dz = plane.position.z - ri.ap.z;
+      const lx = dx*cs - dz*sn;
+      const lz = dx*sn + dz*cs;
+      const beyondSouth = lz > ri.ap.len/2 - 50;
+      const dxA = plane.position.x - ri.aimX;
+      const dzA = plane.position.z - ri.aimZ;
+      const horiz = Math.hypot(dxA, dzA);
+      const aglApp = plane.position.y - ri.ap.elev - GEAR_H;
+      // Re-arm above 200m so each pattern (touch-and-go, missed approach,
+      // go-around) gets a fresh sequence of calls.
+      if (aglApp > 200) state.approachArmed = true;
+      const onFinal = beyondSouth && Math.abs(lx) < 250 && horiz < 2000 && aglApp > 0;
+      if (onFinal && state.approachArmed && sinkNow > 0.5){
+        // Thresholds in meters, plus the spoken-style label. Order matters
+        // here for the descent crossings; we walk the list and fire each
+        // label whose meter threshold was *just* crossed downward.
+        const calls = [
+          { m: 150, label: '500' },
+          { m: 90,  label: '300' },
+          { m: 60,  label: 'Minimums' },
+          { m: 30,  label: '100' },
+          { m: 15,  label: '50'  },
+          { m: 9,   label: '30'  },
+          { m: 6,   label: '20'  },
+          { m: 3,   label: '10'  }
+        ];
+        for (const c of calls){
+          if (state.approachLastAGL > c.m && aglApp <= c.m){
+            if (typeof pushATC === 'function'){
+              pushATC(c.label, { tag: 'RA', now: true });
+            }
+            playCalloutChime();
+            break; // one call per frame is plenty
+          }
+        }
+      }
+      state.approachLastAGL = aglApp;
+    } else {
+      // Not eligible (no runway or gear up): keep the latch high so a future
+      // approach starts from "above all thresholds".
+      state.approachLastAGL = 9999;
+    }
   }
 
   // AI traffic update (visual only, runs alongside player physics).
