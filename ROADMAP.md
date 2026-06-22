@@ -124,6 +124,17 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Magnetic compass card in the cockpit panel — seventh small canvas next to the existing cockpit gauges showing a rotating compass card (the classic whiskey-compass look: floating drum with N/E/S/W cardinals and 30°/60° tick labels visible in a window). Card spins to current magnetic heading and includes the realistic ANDS lag (Accelerate North, Decelerate South — slight overshoot/undershoot on east/west turns when accelerating) for ~15 LOC of charm. Pairs with the existing compass strip up top so VFR pilots have a real backup if the HUD ever gets occluded.
+
+- [ ] ILS localizer + glideslope needles when within 8 km of a runway — cross-needle indicator on the right edge of the HUD (vertical needle for localizer left/right of centerline, horizontal needle for glideslope above/below the 3° path) that swings live as you fly the approach. Reuses the existing glideslope/centerline math from the meatball + crab indicator so it's mostly UI plumbing. Big realism win — finally a needles-driven approach instead of a meatball-only approach, and it'll teach players to fly a real chase-the-needles ILS.
+
+- [ ] Crosswind takeoff aileron-into-the-wind coaching — when starting a takeoff roll with crosswind component >4 m/s, the HUD shows a small magenta arrow over the stick area pointing the direction the pilot should hold aileron (into the wind) plus a one-shot ATC "Aileron into the wind, RWY <DD>" line. Arrow fades out above 60 km/h ground speed so it doesn't nag through rotation. Teaches the single most-missed crosswind technique and pairs with the existing wind sock + crab indicator.
+
+- [ ] Engine restart sequence after deadstick — currently `X` toggles the engine kill instantly. Make engine re-light require throttle below 30% + airspeed above 80 km/h (windmilling prop) and then press `I` to crank, mirroring cold-start: 1.6s starter motor SFX, catch thump, engine fires. If conditions aren't met, ATC fires "Restart failed, check throttle and airspeed." Turns engine-out from "X-X to bail" into a real emergency procedure pilots have to actually fly, while keeping cold-start ritual consistent everywhere.
+
+- [ ] Hangar / parking spot at each airport — small open-front hangar building (12m wide, 8m deep, 6m tall, classic curved roof) near the apron at each ground airport with one parked AI plane inside in a different livery from the player. Pure scenery — no collision, no interaction — but makes airports feel inhabited instead of just runway + control tower. Pairs with existing AI traffic + airport beacon to round out the airport-as-place feel.
+
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
