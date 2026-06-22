@@ -89,11 +89,20 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Carrier deck mini-mission — anchored CV-01 a few km offshore (240×38 m deck at 14 m elev) with hull, markings, four arrestor wires, a touchdown box, and an island superstructure. New CARRIER mode on the intro screen sets a trap inside the ±40 m midship box as the win condition; landing anywhere on the deck adds an arrestor-strength friction multiplier (`+7.5`) so the rollout is brutally short, hook or no hook. Mini-map gets a `CV` symbol; glideslope tape still works thanks to the deck registering as a synthetic runway.
 
+- [x] Weather radar mini-panel — small dark canvas next to the mini-map showing top-down fuzzy blobs for current cloud-layer positions plus a soft green sweep wedge. Doesn't need to be physically accurate — it just has to read as "weather radar" so the player can see which way weather is drifting in the wind. Pairs naturally with the existing rain toggle.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Weather radar mini-panel — small dark canvas next to the mini-map showing top-down fuzzy blobs for current cloud-layer positions plus a soft green sweep wedge. Doesn't need to be physically accurate — it just has to read as "weather radar" so the player can see which way weather is drifting in the wind. Pairs naturally with the existing rain toggle.
+- [ ] Engine fire emergency — rare random event (or triggered by sustained over-redline RPM / heavy bird strike at high throttle) sets the engine on fire: orange flicker sprite at the cowl, black smoke pouring back, fast-rising damage, ATC "Mayday, engine fire, declaring emergency," and a flashing red ENG FIRE banner. Pressing `X` to cut the engine + dropping throttle starves the fire so it puts itself out within ~10s; ignore it and the airframe melts. Turns a quiet sortie into a real deadstick scenario you have to handle.
 
+- [ ] Runway condition overlay — when rain is active, the runway surface gets a darker, slightly mirrored tint and braking friction drops noticeably (longer rollout, easier to skid through the threshold). HUD adds a small `RWY WET` pill near the wind readout. Gives the rain setting actual gameplay teeth instead of being pure visual.
+
+- [ ] Quick-look check (`V` key) — in cockpit cam, hold V to swing the head 90° left, release to return; tap-tap toggles to 90° right. Lets you actually clear final for traffic, look at the wing in a turn, or peek down at the runway during a high crosswind crab. Tiny camera change, huge "this feels like a cockpit" payoff.
+
+- [ ] Airport beacon lights — each airport gets a slow rotating green/white split beacon on a short tower near the threshold. Visible from 8+ km at night thanks to additive sprite; off during full daylight. Makes airport hunting at dusk/dawn way easier and adds a real "that's an airport over there" landmark to every approach.
+
+- [ ] Departure / arrival callouts — ATC ticker fires a one-shot line when you cross the runway threshold at takeoff ("N1234 airborne, runway 27") and again when you stop on a runway after landing ("Cleared to taxi, welcome in"). Pure flavor on top of the existing ATC line pool, but the moments now feel like events instead of "speed crossed 80 km/h, nothing happened."
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.

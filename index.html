@@ -130,6 +130,12 @@
   #mission .tgt { color:#7ee787; }
   #minimap { position:fixed; bottom:48px; right:12px; width:160px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:4px; }
   #minimap canvas { display:block; width:100%; height:100%; }
+  /* Weather radar — small dark panel just left of the minimap. Reads as a
+     radar scope: faint range arcs, fuzzy green returns where the cloud field
+     sits, plus a slow sweep wedge. Greens shift toward amber when it's
+     raining so the player can read the change at a glance. */
+  #wxradar { position:fixed; bottom:48px; right:180px; width:96px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:4px; }
+  #wxradar canvas { display:block; width:100%; height:100%; }
   #cammode { position:fixed; bottom:12px; right:12px; padding:4px 10px; font-size:11px; letter-spacing:1px; color:#cfe; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; font-weight:700; }
   #cammode .lbl { color:#6aa; font-weight:500; margin-right:6px; }
   #cammode .mode { color:#7ee787; }
@@ -359,6 +365,7 @@
   <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
+<div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
 <div id="cockpitPanel">
   <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl">AIRSPEED km/h</div></div>
@@ -6050,6 +6057,7 @@ function step(dt){
   drawVSI(vs);
   drawGlideslope(hdg);
   drawMinimap(hdg);
+  drawWeatherRadar();
   drawCockpitPanel(speedKmh, altM);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
@@ -6751,6 +6759,118 @@ function drawMinimap(hdgDeg){
     minimapCtx.textBaseline = 'top';
     minimapCtx.fillText('W', _wcx, _wcy + 13);
   }
+}
+
+// ====== Weather radar mini-panel ======
+// Small dark canvas just left of the mini-map. Doesn't pretend to be physically
+// accurate — it just has to read as "weather radar" at a glance: faint range
+// arcs, a slow green sweep wedge, and fuzzy soft-edged returns where the
+// cloud field happens to be. We sample cloudPuffs positions (already drifting
+// in the wind every frame) so the returns naturally smear with the weather.
+// Greens shift toward amber when settings.rain is on so the player can see
+// the storm change in their corner without reading the sky.
+const wxradarCv  = document.getElementById('wxradarCv');
+const wxradarCtx = wxradarCv.getContext('2d');
+const WX_RANGE = 18000; // metres of weather scanned across the panel width (north-up)
+let _wxSweepAng = 0;     // radians, 0 = pointing up, rotates clockwise
+function drawWeatherRadar(){
+  const W = wxradarCv.width, H = wxradarCv.height;
+  const cx = W/2, cy = H/2;
+  const ctx = wxradarCtx;
+  ctx.clearRect(0, 0, W, H);
+  // Scope background — dark teal so it reads as an instrument, not the
+  // minimap's slate grey.
+  ctx.save();
+  ctx.fillStyle = 'rgba(6,16,18,0.85)';
+  ctx.fillRect(0, 0, W, H);
+  // Faint range arcs every WX_RANGE/3 from centre. Drawn as full ellipses
+  // clipped to the panel so it reads as concentric rings even on the narrow
+  // (96px-wide) layout.
+  ctx.strokeStyle = 'rgba(80,180,140,0.18)';
+  ctx.lineWidth = 1;
+  const maxR = Math.min(W, H) * 0.5 - 4;
+  for (let i = 1; i <= 3; i++){
+    ctx.beginPath();
+    ctx.arc(cx, cy, (maxR * i) / 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // Cross-hair at centre.
+  ctx.strokeStyle = 'rgba(80,180,140,0.18)';
+  ctx.beginPath();
+  ctx.moveTo(cx, 4); ctx.lineTo(cx, H - 4);
+  ctx.moveTo(4, cy); ctx.lineTo(W - 4, cy);
+  ctx.stroke();
+  // Cloud returns. Convert each cloud puff's world position into panel coords
+  // (plane-centric, north-up like the minimap). Cull anything outside the
+  // panel for cheapness. Each blob is a soft additive radial gradient so a
+  // dense cluster naturally blooms into a thick "cell" while scattered puffs
+  // look like wispy returns. Heavier weather (rain on) brightens and shifts
+  // toward amber so the change is unmistakable.
+  const scale = (W - 8) / WX_RANGE;
+  ctx.globalCompositeOperation = 'lighter';
+  // Base return colour: green normally, warmer when raining. We bake two
+  // gradient stops per blob so the centre stays brighter than the edge —
+  // looks like real attenuated radar paint without any per-pixel work.
+  const inner = settings.rain ? 'rgba(255,205,80,0.55)' : 'rgba(120,220,140,0.50)';
+  const mid   = settings.rain ? 'rgba(220,150,60,0.28)' : 'rgba(90,200,120,0.26)';
+  const blobR = settings.rain ? 16 : 13;
+  for (let i = 0; i < cloudPuffs.length; i++){
+    const sp = cloudPuffs[i].spr;
+    const dx = sp.position.x - plane.position.x;
+    const dz = sp.position.z - plane.position.z;
+    const px = cx + dx * scale;
+    const py = cy + dz * scale;
+    if (px < -blobR || px > W + blobR || py < -blobR || py > H + blobR) continue;
+    const g = ctx.createRadialGradient(px, py, 1, px, py, blobR);
+    g.addColorStop(0,    inner);
+    g.addColorStop(0.55, mid);
+    g.addColorStop(1,    'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(px - blobR, py - blobR, blobR * 2, blobR * 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // Sweep wedge — a soft trailing arc that fades behind the leading edge.
+  // ~1 revolution every 4 seconds; reads clearly without distracting. The
+  // wedge runs from the leading angle backwards through ~30°, so it actually
+  // looks like a scanning beam rather than a static slice.
+  _wxSweepAng = (_wxSweepAng + 0.016) % (Math.PI * 2);
+  const lead  = _wxSweepAng;
+  const trail = lead - 0.55; // ~31° wedge
+  // Wedge: clip to panel area and fill with a radial gradient so the beam
+  // brightens toward the centre line. Convert our "0 = up, clockwise" axis
+  // into canvas angles by subtracting π/2.
+  const sweepGrad = ctx.createLinearGradient(cx, cy, cx + Math.sin(lead) * maxR, cy - Math.cos(lead) * maxR);
+  sweepGrad.addColorStop(0,    'rgba(140,255,170,0.0)');
+  sweepGrad.addColorStop(0.6,  'rgba(140,255,170,0.12)');
+  sweepGrad.addColorStop(1,    'rgba(180,255,200,0.32)');
+  ctx.fillStyle = sweepGrad;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, maxR, trail - Math.PI / 2, lead - Math.PI / 2);
+  ctx.closePath();
+  ctx.fill();
+  // Bright leading edge line so the sweep position is obvious.
+  ctx.strokeStyle = 'rgba(200,255,210,0.65)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.sin(lead) * maxR, cy - Math.cos(lead) * maxR);
+  ctx.stroke();
+  // Plane pip at centre so the player knows what they're looking at.
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  // 'WX' label top-left, 'N' tick at top so orientation reads.
+  ctx.fillStyle = 'rgba(150,200,180,0.85)';
+  ctx.font = 'bold 9px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('WX', 4, 3);
+  ctx.fillStyle = 'rgba(255,82,82,0.85)';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', cx, 2);
+  ctx.restore();
 }
 
 // ====== Mini-map waypoint input ======
@@ -7575,7 +7695,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
