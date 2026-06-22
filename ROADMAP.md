@@ -123,10 +123,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Magnetic compass card in the cockpit panel — seventh small canvas next to the existing cockpit gauges showing a rotating compass card (the classic whiskey-compass look: floating drum with N/E/S/W cardinals and 30°/60° tick labels visible in a window). Card spins to current magnetic heading and includes the realistic ANDS lag (Accelerate North, Decelerate South — slight overshoot/undershoot on east/west turns when accelerating) for ~15 LOC of charm. Pairs with the existing compass strip up top so VFR pilots have a real backup if the HUD ever gets occluded.
 
+- [x] ILS localizer + glideslope needles when within 8 km of a runway — square cross-pointer pinned under the meatball strip on the right edge: magenta vertical needle for localizer (left/right of the extended centerline, swings the way you need to fly to recapture course) and green horizontal needle for glideslope (sits high when you're above the 3° slope, low when you're below). Reuses the existing glideslope/centerline math from the meatball + crab indicator at a wider 8 km range and slightly looser alignment cone. Off-scale chevrons echo the meatball pattern, runway id labeled in the corner. Hidden in photo mode.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] ILS localizer + glideslope needles when within 8 km of a runway — cross-needle indicator on the right edge of the HUD (vertical needle for localizer left/right of centerline, horizontal needle for glideslope above/below the 3° path) that swings live as you fly the approach. Reuses the existing glideslope/centerline math from the meatball + crab indicator so it's mostly UI plumbing. Big realism win — finally a needles-driven approach instead of a meatball-only approach, and it'll teach players to fly a real chase-the-needles ILS.
 
 - [ ] Crosswind takeoff aileron-into-the-wind coaching — when starting a takeoff roll with crosswind component >4 m/s, the HUD shows a small magenta arrow over the stick area pointing the direction the pilot should hold aileron (into the wind) plus a one-shot ATC "Aileron into the wind, RWY <DD>" line. Arrow fades out above 60 km/h ground speed so it doesn't nag through rotation. Teaches the single most-missed crosswind technique and pairs with the existing wind sock + crab indicator.
 

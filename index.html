@@ -67,6 +67,14 @@
      by default — drawGlideslope() flips display:block when active. */
   #glide { position:fixed; top:308px; right:162px; width:46px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
   #glide canvas { display:block; width:100%; height:100%; }
+  /* ILS cross-needle indicator: classic square cross-pointer that pairs the
+     vertical localizer needle (left/right of runway centerline) with the
+     horizontal glideslope needle (above/below the 3° path). Tucked just below
+     the meatball strip on the right edge. Active range is wider than the
+     meatball (8 km, looser alignment cone) so the needles come alive earlier
+     on approach. Hidden by default — drawILSNeedles() flips display:block. */
+  #ils { position:fixed; top:476px; right:162px; width:96px; height:96px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
+  #ils canvas { display:block; width:100%; height:100%; }
   /* Crosswind crab indicator: short horizontal bar pinned just below the ATC
      strip. Green tick = runway centerline heading (always at bar center),
      magenta arrow = current ground track. Visual gap between them is the crab
@@ -380,6 +388,7 @@
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
+<div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
 <div id="crab"><canvas id="crabCv" width="480" height="68"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
@@ -7583,6 +7592,7 @@ function step(dt){
   drawCompass(hdg, state.ap.hdgBug);
   drawVSI(vs);
   drawGlideslope(hdg);
+  drawILSNeedles(hdg);
   drawCrabIndicator(hdg);
   drawMinimap(hdg);
   drawWeatherRadar();
@@ -7992,6 +8002,161 @@ function drawGlideslope(hdgDeg){
   glideCtx.font = '9px ui-monospace, monospace';
   const sign = devDeg >= 0 ? '+' : '−';
   glideCtx.fillText(sign + Math.abs(devDeg).toFixed(1) + '°', cx, H - 30);
+}
+
+// ====== ILS cross-needle indicator ======
+// Classic square ILS / VOR cross-pointer. Vertical needle = localizer:
+// swings to the left of center when you're left of the extended runway
+// centerline, to the right when you're right. Horizontal needle = glideslope:
+// rides above center when you're high on the 3° path, below when you're low.
+// Reuses the same alignment math as the meatball strip, but at a wider 8 km
+// activation range and a slightly looser alignment cone so the needles come
+// alive earlier on approach. Hidden in photo mode via PHOTO_HIDE_IDS.
+const ilsEl = document.getElementById('ils');
+const ilsCv = document.getElementById('ilsCv');
+const ilsCtx = ilsCv.getContext('2d');
+const ILS_MAX_DIST   = 8000;   // metres from threshold
+const ILS_ALIGN_LAT  = 1100;   // metres laterally off the centerline
+const ILS_ALIGN_HDG  = 45;     // degrees of heading off runway course
+const ILS_LOC_FULL   = 400;    // metres of lateral offset = full needle deflection
+const ILS_GS_FULL    = 1.5;    // degrees of glideslope deviation = full deflection
+function drawILSNeedles(hdgDeg){
+  // Pick the same runway the meatball would, but with the wider range / cone.
+  let best = null, bestScore = 1e9;
+  for (const ri of runwayInfos){
+    const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
+    const dx = plane.position.x - ri.ap.x;
+    const dz = plane.position.z - ri.ap.z;
+    const lx = dx*cs - dz*sn;            // lateral offset from centerline (m)
+    const lz = dx*sn + dz*cs;            // along-runway (m), +lz = approach side
+    const beyondSouth = lz > ri.ap.len/2 - 50;
+    if (!beyondSouth) continue;
+    const dxA = plane.position.x - ri.aimX;
+    const dzA = plane.position.z - ri.aimZ;
+    const horiz = Math.hypot(dxA, dzA);
+    if (horiz < 1 || horiz > ILS_MAX_DIST) continue;
+    if (Math.abs(lx) > ILS_ALIGN_LAT) continue;
+    const rwyHdg = ((ri.ap.hdg * 180/Math.PI) % 360 + 360) % 360;
+    let dh = ((hdgDeg - rwyHdg) + 540) % 360 - 180;
+    if (Math.abs(dh) > ILS_ALIGN_HDG) continue;
+    if (plane.position.y < ri.ap.elev + 5) continue;
+    const score = horiz + Math.abs(lx)*1.5 + Math.abs(dh)*40;
+    if (score < bestScore){
+      bestScore = score;
+      const dyA = plane.position.y - ri.ap.elev;
+      const glideAngle = Math.atan2(dyA, horiz) * 180/Math.PI;
+      best = { ri, horiz, glideAngle, lx, dh };
+    }
+  }
+  if (!best){
+    if (ilsEl.style.display !== 'none') ilsEl.style.display = 'none';
+    return;
+  }
+  if (ilsEl.style.display !== 'block') ilsEl.style.display = 'block';
+
+  const W = ilsCv.width, H = ilsCv.height;
+  const cx = W/2, cy = H/2;
+  // Inner square plus a bit of label margin top/bottom for runway id + tag.
+  const pad = 18;
+  const half = Math.min(W, H)/2 - pad;
+  ilsCtx.clearRect(0,0,W,H);
+
+  // Backplate inside the panel border.
+  ilsCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  ilsCtx.fillRect(cx - half - 4, cy - half - 4, (half + 4)*2, (half + 4)*2);
+  ilsCtx.strokeStyle = '#1e3548';
+  ilsCtx.lineWidth = 1;
+  ilsCtx.strokeRect(cx - half - 4, cy - half - 4, (half + 4)*2, (half + 4)*2);
+
+  // Faint reference cross + dot scale (real ILS shows 2 dots either side of
+  // center; we mirror that so pilots familiar with real cross-pointers feel
+  // at home).
+  ilsCtx.strokeStyle = '#2a4a6a';
+  ilsCtx.lineWidth = 1;
+  ilsCtx.beginPath();
+  ilsCtx.moveTo(cx - half, cy); ilsCtx.lineTo(cx + half, cy);
+  ilsCtx.moveTo(cx, cy - half); ilsCtx.lineTo(cx, cy + half);
+  ilsCtx.stroke();
+  ilsCtx.fillStyle = '#3a5a7a';
+  for (const i of [-2, -1, 1, 2]){
+    const off = (i/2) * half;
+    ilsCtx.beginPath(); ilsCtx.arc(cx + off, cy, 2.2, 0, Math.PI*2); ilsCtx.fill();
+    ilsCtx.beginPath(); ilsCtx.arc(cx, cy + off, 2.2, 0, Math.PI*2); ilsCtx.fill();
+  }
+
+  // Center reference square (the airplane symbol on a real cross-pointer).
+  ilsCtx.strokeStyle = '#7ee787';
+  ilsCtx.lineWidth = 1.5;
+  ilsCtx.strokeRect(cx - 6, cy - 6, 12, 12);
+
+  // Localizer (vertical needle): drifts to the side of the runway that you
+  // would need to fly toward to recapture centerline. best.lx > 0 means the
+  // plane is right of centerline, so the needle deflects LEFT ("fly left").
+  const locDev   = Math.max(-1, Math.min(1, -best.lx / ILS_LOC_FULL));
+  const locX     = cx + locDev * half;
+  // Glideslope (horizontal needle): canvas y grows downward, so when we're
+  // ABOVE the slope (devDeg > 0) the needle should sit LOWER on the screen
+  // ("fly down to the needle"). PAPI/meatball convention.
+  const devDeg   = best.glideAngle - GLIDE_TARGET_DEG;
+  const gsDev    = Math.max(-1, Math.min(1, devDeg / ILS_GS_FULL));
+  const gsY      = cy + gsDev * half;
+
+  // Vertical localizer bar.
+  ilsCtx.strokeStyle = '#ff66cc';
+  ilsCtx.lineWidth = 3;
+  ilsCtx.beginPath();
+  ilsCtx.moveTo(locX, cy - half + 4);
+  ilsCtx.lineTo(locX, cy + half - 4);
+  ilsCtx.stroke();
+  // Horizontal glideslope bar.
+  ilsCtx.strokeStyle = '#7ee787';
+  ilsCtx.lineWidth = 3;
+  ilsCtx.beginPath();
+  ilsCtx.moveTo(cx - half + 4, gsY);
+  ilsCtx.lineTo(cx + half - 4, gsY);
+  ilsCtx.stroke();
+
+  // Off-scale chevrons when a needle is pinned at full deflection — echoes
+  // the heading-bug / meatball off-edge cues so the language is consistent.
+  if (Math.abs(-best.lx) > ILS_LOC_FULL){
+    ilsCtx.fillStyle = '#ff66cc';
+    const side = (locDev > 0) ? 1 : -1;
+    const tipX = cx + side * (half + 2);
+    ilsCtx.beginPath();
+    ilsCtx.moveTo(tipX,           cy);
+    ilsCtx.lineTo(tipX - side*8,  cy - 6);
+    ilsCtx.lineTo(tipX - side*8,  cy + 6);
+    ilsCtx.closePath();
+    ilsCtx.fill();
+  }
+  if (Math.abs(devDeg) > ILS_GS_FULL){
+    ilsCtx.fillStyle = '#7ee787';
+    const dir = (gsDev > 0) ? 1 : -1;
+    const tipY = cy + dir * (half + 2);
+    ilsCtx.beginPath();
+    ilsCtx.moveTo(cx,             tipY);
+    ilsCtx.lineTo(cx - 6,         tipY - dir*8);
+    ilsCtx.lineTo(cx + 6,         tipY - dir*8);
+    ilsCtx.closePath();
+    ilsCtx.fill();
+  }
+
+  // Labels: ILS tag and runway id so the pilot knows what they're chasing.
+  ilsCtx.fillStyle = '#6aa';
+  ilsCtx.font = 'bold 9px ui-monospace, monospace';
+  ilsCtx.textAlign = 'left';
+  ilsCtx.textBaseline = 'top';
+  ilsCtx.fillText('ILS', 4, 4);
+  ilsCtx.fillStyle = '#cfe';
+  ilsCtx.textAlign = 'right';
+  ilsCtx.fillText(best.ri.ap.id, W - 4, 4);
+  // Bottom "L" / "R" hint for the localizer side, matching the magenta bar.
+  ilsCtx.fillStyle = '#ff66cc';
+  ilsCtx.textAlign = 'left';
+  ilsCtx.textBaseline = 'bottom';
+  ilsCtx.fillText('L', 4, H - 4);
+  ilsCtx.textAlign = 'right';
+  ilsCtx.fillText('R', W - 4, H - 4);
 }
 
 // ====== Crosswind crab indicator ======
@@ -9784,7 +9949,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','crab','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
