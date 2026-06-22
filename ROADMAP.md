@@ -144,7 +144,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-
+- [ ] Pause menu screenshot thumbnail — when the player hits Esc to pause, grab the current canvas as a small thumbnail and show it inside the pause overlay (above the Resume / Restart / Menu buttons) with a subtle frame and a `PAUSED` watermark. Makes the pause screen feel less abrupt and gives a free "oh that's a nice frame" moment that often nudges players into Photo Mode. Pure cosmetic, ~30 LOC, no new state.
+- [ ] Approach checklist popup — when within 4 km of any airport with gear up OR flaps up and descending, fade in a tiny right-side checklist panel: ☐ GEAR DOWN, ☐ FLAPS, ☐ FUEL >10%, ☐ SPEED <200 km/h. Each item ticks green live as the condition is met. Auto-hides on touchdown or when outside the cone. Pairs naturally with glideslope + crab indicator so the whole approach UI starts feeling like an actual training cockpit.
+- [ ] Pilot rank progression — derive a rank (CADET → STUDENT → PRIVATE → COMMERCIAL → ATP → INSTRUCTOR → ACE) from existing pilot-stat counters (total flights, landings, perfect landings, ring-chase best). Show the current rank on the main menu under PILOT STATS and fire a one-shot 🎖️ PROMOTION! toast in-game when a rank threshold is crossed. Gives the existing stats system a visible carrot without inventing new tracking.
+- [ ] Cabin chime on level-off — when autopilot altitude-hold captures within ±10 m of target for the first time, play the iconic two-note seatbelt ding (high → low sine pair), drop a faint top-bar `✈ CRUISING` ribbon for 2s, and fire an ATC "Cabin crew, prepare for cruise" line. Cheap audio reward, makes the AP feel like a real airline button. Suppressed in photo/replay/pause and on the ground.
+- [ ] Ground vehicles at airports — one slow tug + one fuel truck per airport drifting in a tiny ~120m loop around the apron, low-poly boxes with a flashing amber rotating beacon on top. Purely scenery, no collision, gated to ground-or-low altitude visibility like the existing taxi chevrons so air views stay clean. Pairs with the existing AI plane + windsock + beacon tower so each field finally feels populated instead of abandoned.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
