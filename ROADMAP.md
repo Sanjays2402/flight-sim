@@ -137,10 +137,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Taxiway centerline lights — a row of small yellow emissive beads down the middle of the +x taxi strip at each airport, dusk-gated by the same sun-altitude window as the runway edge lights so they're dark at noon and glow at night. Visibility reuses the existing on-ground + 700m proximity gate the chevrons use, so air views stay clean. Beads thread a touch past either end of the runway so the row continues into the apron and up to the takeoff threshold for a fully guided ground path.
 
+- [x] Pitot heat + icing at altitude (`Shift+I`) — when the plane climbs above 3000m AGL in rain or cold-weather TOD (sun low, ~19:00–07:00), the pitot tube slowly freezes over ~25s: indicated airspeed on the HUD (`#spd`) and the cockpit ASI needle lerps toward 0 while the underlying flight model (stall, AoA, audio) still uses true airspeed so behavior stays honest. Amber `⚠ PITOT ICE` pill on the SPD row lights once severity passes 0.15; ATC fires a one-shot "Pitot heat, pitot heat" the first frame ice latches past 0.5. Shift+I toggles pitot heat with a status toast — heat on melts ice in ~8s, off in clearing conditions thaws in ~16s. Pitot heat preference survives `resetPlane()` (it's a setting, not per-flight state) but pitot ice + ATC latch wipe on reset so a fresh sortie starts clear. Cockpit RPM gauge still reads true airspeed for the windmilling proxy so the tach doesn't lie when the ASI does.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Pitot heat + icing at altitude (`Shift+I`) — above 3000m AGL in rain or cold weather, airspeed indicator slowly freezes (lerps toward 0 over ~25s) unless pitot heat is on. HUD shows a `PITOT ICE` amber pill while iced, ATC fires `"Pitot heat, pitot heat"` once when ice latches. Adds a real weather hazard tied to the existing rain toggle, ~30 LOC, makes the cold-start ritual feel less arbitrary.
 - [ ] Wingman challenge mode — new mission on the intro screen where the AI plane leads a route through 3 random airports and you have to stay within 200 m of its tail for the whole flight. HUD shows a green `FORMATION LOCK` bar that drains when you drift outside the slot; lose the bar and the mission fails. Reuses the existing AI traffic, formation detection, and connecting-line glow. Turns formation flight from an Easter egg into an actual game mode.
 
 

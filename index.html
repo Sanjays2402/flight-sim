@@ -368,7 +368,7 @@
 <canvas id="sunGlare"></canvas>
 <div id="bino"></div>
 <div id="hud" class="panel">
-  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
+  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h<span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
   <div class="row"><span class="lbl">G</span><span class="val"><span id="gnow">1.0</span> <span id="gpk" style="color:#6aa;font-weight:500">pk 1.0</span></span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
   <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%</span></div>
@@ -414,7 +414,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>I</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -4367,6 +4367,57 @@ function updateOilPressure(dt){
   if (state.oilLowAtcLatch && state.oilPsi > OIL_PSI_REARM) state.oilLowAtcLatch = false;
 }
 
+// ====== Pitot icing ======
+// Slow-build hazard tied to the existing rain toggle plus the time-of-day
+// cycle: above PITOT_ICE_TRIGGER_ALT in rain or cold-weather TOD (early
+// morning / evening / night, when the sun is low or below the horizon), the
+// pitot tube freezes over and the airspeed indicator slowly lerps toward 0
+// over ~25s. Pilot toggles pitot heat with Shift+I to keep the tube clear;
+// heat on (or returning to warm/low conditions) thaws the ice off. Gives the
+// rain weather an actual gameplay teeth-pulling effect at altitude, and makes
+// the cold-start ritual / weather system feel like part of one coherent
+// hazard model instead of disconnected gadgets.
+const PITOT_ICE_TRIGGER_ALT  = 3000; // m above MAIN_AP.elev — icing starts above this
+const PITOT_ICE_FREEZE_SECS  = 25;   // seconds 0 -> 1 when fully iced-in
+const PITOT_ICE_THAW_SECS    = 8;    // seconds 1 -> 0 with pitot heat on / warm conditions
+const PITOT_ICE_LATCH        = 0.5;  // ice severity that fires the one-shot ATC nag
+const PITOT_ICE_SHOW_MIN     = 0.15; // ice severity above this lights the HUD pill
+const PITOT_ICE_CLEAR        = 0.05; // ice severity below this re-arms the ATC latch
+function updatePitotIce(dt){
+  // Skip while paused / replaying / intro so the gauge doesn't drift while the
+  // sim is frozen — mirrors updateEngineTemp's guard.
+  if (state.paused || state.replayActive || state.introOpen) return;
+  // Ground = no icing risk and any in-flight ice thaws fast on the apron.
+  if (state.onGround || state.crashed){
+    if (state.pitotIce > 0){
+      state.pitotIce = Math.max(0, state.pitotIce - dt / PITOT_ICE_THAW_SECS);
+    }
+    if (state.pitotIce <= PITOT_ICE_CLEAR) state.pitotIceAtcLatch = false;
+    return;
+  }
+  const altAgl = Math.max(0, plane.position.y - MAIN_AP.elev - GEAR_H);
+  // Cold-weather window: night + early morning + evening. Sun cycle peaks at
+  // noon, dips at midnight, so anything outside ~07-19 reads as "cold".
+  const cold = state.todHours < 7 || state.todHours > 19;
+  const icingCond = altAgl > PITOT_ICE_TRIGGER_ALT && (settings.rain || cold);
+  if (state.pitotHeatOn || !icingCond){
+    // Heat on or out of the icing envelope: thaw toward 0. Pitot heat thaws
+    // faster than passive warm conditions so the toggle feels like it does
+    // something even on a cold descent.
+    const thawSecs = state.pitotHeatOn ? PITOT_ICE_THAW_SECS : PITOT_ICE_THAW_SECS * 2;
+    state.pitotIce = Math.max(0, state.pitotIce - dt / thawSecs);
+  } else {
+    state.pitotIce = Math.min(1, state.pitotIce + dt / PITOT_ICE_FREEZE_SECS);
+  }
+  // One-shot ATC nag the first frame ice severity crosses the latch line, and
+  // re-arm once we're essentially clear again so a next freeze gets the call.
+  if (!state.pitotIceAtcLatch && state.pitotIce >= PITOT_ICE_LATCH){
+    state.pitotIceAtcLatch = true;
+    if (typeof pushATC === 'function') pushATC('Pitot heat, pitot heat.', { tag:'ATC', now:true });
+  }
+  if (state.pitotIceAtcLatch && state.pitotIce <= PITOT_ICE_CLEAR) state.pitotIceAtcLatch = false;
+}
+
 // Flame flicker sprite — single shared sprite that we re-aim at the cowl in
 // world space each frame and scale/jitter to feel like a lick of fire. Way
 // cheaper than spawning a whole pool, and the fire reads fine as a single
@@ -4793,6 +4844,17 @@ const state = {
   // low threshold, and clears with hysteresis once pressure recovers.
   oilPsi: 0,
   oilLowAtcLatch: false,
+  // Pitot icing (Shift+I toggles `pitotHeatOn`). Above PITOT_ICE_TRIGGER_ALT in
+  // rain or cold-weather TOD windows, the pitot tube slowly freezes: the
+  // airspeed indicator reading drifts toward 0 over ~25s, the player sees a
+  // PITOT ICE pill on the SPD row, and ATC fires a one-shot "Pitot heat,
+  // pitot heat" the first frame ice severity latches past PITOT_ICE_LATCH.
+  // Heat on melts the ice off; warm conditions / lower altitude also slowly
+  // thaw. resetPlane() wipes the ice + latch but preserves pitotHeatOn so the
+  // player's choice survives a hot reset.
+  pitotHeatOn: false,
+  pitotIce: 0,
+  pitotIceAtcLatch: false,
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
   // fire (or each spawn) so we don't roll the dice every frame for nothing.
   nextFireRollMs: 0,
@@ -5053,6 +5115,15 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyI'){
+    // Shift+I toggles pitot heat. Plain I keeps falling through to the
+    // cold-start / air-restart ignition path below so we don't lose either
+    // key role; the pitch-input contribution from keys['KeyI'] also still
+    // applies but a single Shift+I tap is too brief to matter.
+    if (e.shiftKey){
+      state.pitotHeatOn = !state.pitotHeatOn;
+      showStatus(state.pitotHeatOn ? 'PITOT HEAT ON' : 'PITOT HEAT OFF', null, state.pitotHeatOn ? 'good' : 'hard');
+      return;
+    }
     // Cold-start ignition. Fires when either the ground cold-start sequence
     // is armed (state.coldStart) or the in-air deadstick restart is armed
     // (state.airRestart). Otherwise this is a no-op so the I key keeps
@@ -5755,6 +5826,11 @@ function resetPlane(){
   // sortie re-arms the ATC call.
   state.oilPsi = 0;
   state.oilLowAtcLatch = false;
+  // Pitot ice clears on reset (a fresh sortie starts with a clear tube) but
+  // pitotHeatOn is intentionally preserved — it's a pilot setting, not a
+  // per-flight state, so a hot reset keeps the toggle the player chose.
+  state.pitotIce = 0;
+  state.pitotIceAtcLatch = false;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -7411,6 +7487,9 @@ function step(dt){
   // Oil pressure tracks engine state and pairs with engine-fire / overheat —
   // self-gates on pause/replay/intro to match updateEngineTemp().
   updateOilPressure(dt);
+  // Pitot icing pairs with rain + TOD as the high-altitude weather hazard.
+  // Self-gates on pause/replay/intro and ground/crash to match other systems.
+  updatePitotIce(dt);
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
@@ -7527,6 +7606,12 @@ function step(dt){
 
   // HUD
   const speedKmh = speed * 3.6;
+  // Indicated airspeed = real airspeed scaled by how clear the pitot tube is.
+  // The icing model freezes the pitot opening so the reading drifts toward 0
+  // while underlying physics still uses true airspeed. Anything downstream
+  // that does flight-model math (stall, AoA, sounds) keeps using `speedKmh`;
+  // only the pilot-facing gauges (#spd, cockpit ASI) read `indicatedKmh`.
+  const indicatedKmh = speedKmh * Math.max(0, 1 - state.pitotIce);
   const altM = Math.max(0, plane.position.y - GEAR_H);
   if (altM >= 1000 && !state.onGround) unlockAchievement('highFlyer');
   let hdg = Math.atan2(fwd.x, -fwd.z) * 180/Math.PI;
@@ -7537,7 +7622,7 @@ function step(dt){
   const todM = Math.floor((state.todHours - todH) * 60);
   $('#tod').textContent = String(todH).padStart(2,'0') + ':' + String(todM).padStart(2,'0');
 
-  $('#spd').textContent  = Math.round(speedKmh);
+  $('#spd').textContent  = Math.round(indicatedKmh);
   $('#alt').textContent  = Math.round(altM);
   $('#hdg').textContent  = String(Math.round(hdg)).padStart(3,'0');
   $('#vs').textContent   = vs.toFixed(1);
@@ -7736,6 +7821,11 @@ function step(dt){
   // pilot sees the warning the same frame the wind vector slams over.
   const shearEl = document.getElementById('shearWarn');
   if (shearEl) shearEl.style.display = (state.shear && state.shear.phase === 'active') ? 'inline' : 'none';
+  // Pitot icing pill — amber on the SPD row whenever the iced fraction is over
+  // the show floor so brief excursions don't flash the pill on/off; latches off
+  // once heat thaws the tube back to clear.
+  const pitotEl = document.getElementById('pitotIce');
+  if (pitotEl) pitotEl.style.display = (state.pitotIce > PITOT_ICE_SHOW_MIN) ? 'inline' : 'none';
 
   // Touch-and-go score panel
   document.getElementById('scLast').textContent  = state.scoreLast == null ? '—' : ('+'+state.scoreLast);
@@ -7971,7 +8061,7 @@ function step(dt){
   drawXwTakeoffHint();
   drawMinimap(hdg);
   drawWeatherRadar();
-  drawCockpitPanel(speedKmh, altM, hdg, dt);
+  drawCockpitPanel(indicatedKmh, altM, hdg, dt, speedKmh);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -9989,14 +10079,17 @@ function drawCockpitMag(hdgDeg, dt){
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.fillText('MAG', cx, cy - R * 0.35);
 }
-function drawCockpitPanel(speedKmh, altM, hdgDeg, dt){
+function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
   if (!cpEl || !cpEl.classList.contains('show')) return;
-  drawCockpitAsi(speedKmh);
+  // ASI reads pilot-facing indicated airspeed (drops with pitot icing); RPM
+  // gauge is mechanical and uses real airspeed for the windmilling proxy so
+  // ice doesn't fake out the tach.
+  drawCockpitAsi(indicatedKmh);
   drawCockpitAi(plane.quaternion);
   drawCockpitAlt(altM);
-  drawCockpitRpm(speedKmh);
+  drawCockpitRpm(typeof trueKmh === 'number' ? trueKmh : indicatedKmh);
   drawCockpitCht(state.engineTempC);
   drawCockpitOil(state.oilPsi);
   drawCockpitMag(hdgDeg || 0, dt || 0);
