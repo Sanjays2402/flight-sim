@@ -3015,6 +3015,90 @@ function updateAirshowSmoke(dt){
   }
 }
 
+// ====== AI PLANE SMOKE TRAIL ======
+// Permanent thin white smoke plume off the AI circuit plane so the player can
+// spot it from 3+ km out (and line up formation) at a glance instead of
+// squinting. Reuses the airshow sprite texture and the same fixed-pool /
+// ring-buffer pattern so there's no runtime allocation. Smaller pool + slower
+// emit than the airshow trail since the AI plane plods around the pattern at
+// ~38 m/s and we don't need the dense Red-Arrows look.
+const AI_SMOKE_MAX = 90;              // pool size (~9s of trail at the emit rate below)
+const AI_SMOKE_LIFE = 9.0;            // seconds before a puff fully fades out
+const AI_SMOKE_START_R = 0.6;         // initial puff radius (m)
+const AI_SMOKE_GROW = 2.6;            // additional radius growth over lifetime (m)
+const AI_SMOKE_EMIT_PER_SEC = 10;     // puffs per second — lighter than the airshow plume
+// AI plane tail offset: AI plane forward is -z, so the tail sits at +z. Matches
+// the visual tail position roughly at the back of the fuselage cone.
+const AI_SMOKE_TAIL_OFFSET = new THREE.Vector3(0, 0.4, 3.6);
+const aiSmokePool = [];
+let aiSmokeHead = 0;
+for (let i = 0; i < AI_SMOKE_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xffffff
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(AI_SMOKE_START_R);
+  spr.visible = false;
+  spr.renderOrder = 4;
+  scene.add(spr);
+  aiSmokePool.push({ spr, mat, age: AI_SMOKE_LIFE + 1, life: AI_SMOKE_LIFE });
+}
+let aiSmokeAccum = 0;
+const _aiSmTmpOff = new THREE.Vector3();
+const _aiSmTmpWorld = new THREE.Vector3();
+function spawnAISmokePuff(world){
+  const p = aiSmokePool[aiSmokeHead];
+  aiSmokeHead = (aiSmokeHead + 1) % AI_SMOKE_MAX;
+  p.spr.position.copy(world);
+  p.spr.scale.setScalar(AI_SMOKE_START_R);
+  // Always white — the AI plane isn't the player's livery, and a neutral
+  // plume reads as "that's not you" against the sky.
+  p.mat.color.setRGB(1, 1, 1);
+  p.age = 0;
+  p.spr.visible = true;
+}
+function updateAISmoke(dt){
+  // Emit while the AI plane is actually visible in the world and the sim is
+  // running. Same suppression list as the airshow plume so paused / replay /
+  // photo / intro don't spawn new puffs (already-alive puffs keep aging out
+  // either way for a natural trailing tail).
+  const allowEmit = aiPlane.visible && !state.paused && !state.replayActive
+    && !state.photoMode && !state.introOpen;
+  if (allowEmit){
+    aiSmokeAccum += AI_SMOKE_EMIT_PER_SEC * dt;
+    while (aiSmokeAccum >= 1){
+      aiSmokeAccum -= 1;
+      _aiSmTmpWorld.copy(_aiSmTmpOff.copy(AI_SMOKE_TAIL_OFFSET))
+        .applyQuaternion(aiPlane.quaternion).add(aiPlane.position);
+      spawnAISmokePuff(_aiSmTmpWorld);
+    }
+  } else {
+    aiSmokeAccum = 0;
+  }
+  // Age every puff, drift gently with wind, grow, fade. Mirrors the airshow
+  // loop so behavior stays familiar / predictable.
+  for (const p of aiSmokePool){
+    if (!p.spr.visible) continue;
+    p.age += dt;
+    if (p.age >= p.life){
+      p.spr.visible = false;
+      p.mat.opacity = 0;
+      continue;
+    }
+    const t = p.age / p.life;
+    p.spr.position.x += state.wind.x * 0.25 * dt;
+    p.spr.position.z += state.wind.z * 0.25 * dt;
+    const r = AI_SMOKE_START_R + AI_SMOKE_GROW * t;
+    p.spr.scale.setScalar(r);
+    // Thinner plume than airshow: gentler peak opacity so it reads as a
+    // wispy contrail-style stream, not a fat display-smoke bloom.
+    const fadeIn = Math.min(1, t / 0.08);
+    const fadeOut = Math.min(1, (1 - t) / 0.5);
+    p.mat.opacity = 0.55 * fadeIn * fadeOut;
+  }
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -5579,6 +5663,10 @@ function step(dt){
 
   // AI traffic update (visual only, runs alongside player physics).
   updateAITraffic(dt);
+  // Thin white smoke plume off the AI plane — emitted from the AI plane's
+  // tail so the player can spot it from 3+ km out at a glance. Runs after
+  // updateAITraffic so the puff spawns from the freshly-updated AI pose.
+  updateAISmoke(dt);
   // Formation tracker — watch for sustained close + parallel flight next to
   // the AI plane; fires a toast + bumps pilotStats + flashes a connecting line.
   updateFormation(dt);
