@@ -121,10 +121,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Airport restaurant / "100-dollar hamburger" mini-objective — one of the three ground airports is designated OPEN FOR LUNCH each session with a pulsing 🍔 next to its mini-map label (and a tiny 🍔 glyph next to its rim tick when off-map). Full-stop a landing there (any mode, any runway) to score a one-shot "🍔 100-DOLLAR HAMBURGER!" toast + bump a permanent `BURGERS EATEN` counter in pilot stats. Designation rotates to a different field after each eat so there's always a fresh destination. Piggybacks the existing rollout-stop latch so no new physics, no new UI plumbing — just a soft goal hook for free-flight pilots and the joke name every real pilot will instantly recognize.
 
+- [x] Magnetic compass card in the cockpit panel — seventh small canvas next to the existing cockpit gauges showing a rotating compass card (the classic whiskey-compass look: floating drum with N/E/S/W cardinals and 30°/60° tick labels visible in a window). Card spins to current magnetic heading and includes the realistic ANDS lag (Accelerate North, Decelerate South — slight overshoot/undershoot on east/west turns when accelerating) for ~15 LOC of charm. Pairs with the existing compass strip up top so VFR pilots have a real backup if the HUD ever gets occluded.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Magnetic compass card in the cockpit panel — seventh small canvas next to the existing cockpit gauges showing a rotating compass card (the classic whiskey-compass look: floating drum with N/E/S/W cardinals and 30°/60° tick labels visible in a window). Card spins to current magnetic heading and includes the realistic ANDS lag (Accelerate North, Decelerate South — slight overshoot/undershoot on east/west turns when accelerating) for ~15 LOC of charm. Pairs with the existing compass strip up top so VFR pilots have a real backup if the HUD ever gets occluded.
 
 - [ ] ILS localizer + glideslope needles when within 8 km of a runway — cross-needle indicator on the right edge of the HUD (vertical needle for localizer left/right of centerline, horizontal needle for glideslope above/below the 3° path) that swings live as you fly the approach. Reuses the existing glideslope/centerline math from the meatball + crab indicator so it's mostly UI plumbing. Big realism win — finally a needles-driven approach instead of a meatball-only approach, and it'll teach players to fly a real chase-the-needles ILS.
 

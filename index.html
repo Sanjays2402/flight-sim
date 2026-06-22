@@ -407,6 +407,7 @@
   <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
   <div class="gauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
   <div class="gauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
+  <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -7585,7 +7586,7 @@ function step(dt){
   drawCrabIndicator(hdg);
   drawMinimap(hdg);
   drawWeatherRadar();
-  drawCockpitPanel(speedKmh, altM);
+  drawCockpitPanel(speedKmh, altM, hdg, dt);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -8791,12 +8792,14 @@ const cpAltCv = document.getElementById('cpAlt');
 const cpRpmCv = document.getElementById('cpRpm');
 const cpChtCv = document.getElementById('cpCht');
 const cpOilCv = document.getElementById('cpOil');
+const cpMagCv = document.getElementById('cpMag');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
 const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
 const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
+const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -9186,7 +9189,92 @@ function drawCockpitOil(psi){
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(p), cx, cy + R*0.55);
 }
-function drawCockpitPanel(speedKmh, altM){
+function drawCockpitMag(hdgDeg, dt){
+  if (!cpMagCtx) return;
+  const W = cpMagCv.width, H = cpMagCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpMagCtx;
+  _cpBezel(ctx, W, H);
+  // ANDS lag (Accelerate North, Decelerate South). In the northern
+  // hemisphere a whiskey compass on east/west headings reads a fake
+  // northerly bias when you speed up and a southerly bias when you slow
+  // down. We track a smoothed indicated-heading offset that grows with
+  // longitudinal accel and the sine of the current heading (east/west
+  // peak, zero on N/S). Tiny, but it gives the gauge the classic "why
+  // is it lying to me" personality every VFR pilot recognises.
+  const sp = Math.hypot(state.vel.x, state.vel.z);
+  if (typeof state._magPrevSp !== 'number') state._magPrevSp = sp;
+  if (typeof state._magErr    !== 'number') state._magErr = 0;
+  const accel = (dt > 0) ? (sp - state._magPrevSp) / dt : 0;
+  state._magPrevSp = sp;
+  const eastWest = Math.sin(hdgDeg * Math.PI / 180); // +east, -west
+  const targetErr = THREE.MathUtils.clamp(accel * eastWest * -1.6, -18, 18);
+  // Ease toward target so the offset doesn't jitter on noisy accel.
+  state._magErr += (targetErr - state._magErr) * Math.min(1, dt * 2.2);
+  const indicated = hdgDeg + state._magErr;
+  // Inner drum: dark disc that rotates so the current indicated heading
+  // sits under a fixed lubber line at top.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R - 18, 0, Math.PI*2); ctx.clip();
+  ctx.translate(cx, cy);
+  ctx.rotate(-indicated * Math.PI / 180); // rotate drum opposite to heading
+  ctx.fillStyle = '#0a0d12';
+  ctx.beginPath(); ctx.arc(0, 0, R - 18, 0, Math.PI*2); ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Major cardinals + 30°/60° tick labels printed around the drum so they
+  // sweep past the lubber line as the plane turns.
+  for (let d = 0; d < 360; d += 10){
+    const a = (d - 90) * Math.PI / 180; // 0° heading at top of drum
+    const r1 = R - 22;
+    const r2 = (d % 30 === 0) ? R - 36 : R - 30;
+    ctx.strokeStyle = '#dfe';
+    ctx.lineWidth = (d % 90 === 0) ? 2.6 : (d % 30 === 0 ? 1.6 : 0.9);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+    ctx.stroke();
+    if (d % 30 === 0){
+      let label = '';
+      if      (d === 0)   label = 'N';
+      else if (d === 90)  label = 'E';
+      else if (d === 180) label = 'S';
+      else if (d === 270) label = 'W';
+      else label = String(d / 10);
+      const isCard = (d % 90 === 0);
+      ctx.fillStyle = (d === 0) ? '#ff7b7b' : (isCard ? '#ffd166' : '#dfe');
+      ctx.font = 'bold ' + (isCard ? 22 : 14) + 'px ui-monospace, monospace';
+      const rt = R - 52;
+      const ax = Math.cos(a) * rt, ay = Math.sin(a) * rt;
+      // Counter-rotate the label so it reads upright as the drum spins.
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(indicated * Math.PI / 180);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  // Fixed lubber line + glass at the top of the gauge so the pilot reads
+  // the heading directly under it.
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - R + 8);
+  ctx.lineTo(cx, cy - R + 28);
+  ctx.stroke();
+  // Digital readout below center, mirroring the other gauges' style.
+  const shown = ((Math.round(indicated) % 360) + 360) % 360;
+  ctx.fillStyle = '#7ee787';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(String(shown).padStart(3, '0') + '°', cx, cy + R * 0.55);
+  // Tiny "MAG" unit hint up top, matching the °C/PSI labels on neighbors.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('MAG', cx, cy - R * 0.35);
+}
+function drawCockpitPanel(speedKmh, altM, hdgDeg, dt){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
   if (!cpEl || !cpEl.classList.contains('show')) return;
@@ -9196,6 +9284,7 @@ function drawCockpitPanel(speedKmh, altM){
   drawCockpitRpm(speedKmh);
   drawCockpitCht(state.engineTempC);
   drawCockpitOil(state.oilPsi);
+  drawCockpitMag(hdgDeg || 0, dt || 0);
 }
 
 // ====== Camera ======
