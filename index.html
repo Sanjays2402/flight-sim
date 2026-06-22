@@ -25,6 +25,17 @@
   #hud .warn-red   { color:#ff3030; font-weight:800; animation:blink 0.32s steps(2) infinite; }
   #compass { position:fixed; top:12px; left:50%; transform:translateX(-50%); width:360px; height:42px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #compass canvas { display:block; width:100%; height:100%; }
+  /* ATC chatter strip: thin rectangular bar sitting just below the compass at
+     the top of the screen. Shows a single rotating canned radio call ("Cleared
+     to land 27", "Winds 240 at 12", etc.). Event-driven calls (gear up, flaps,
+     touchdown, ring hit) jump the queue; idle filler ticks every ~12s so the
+     strip never feels dead. Pure flavor — no gameplay effect. Hidden in photo
+     mode via PHOTO_HIDE_IDS. */
+  #atc { position:fixed; top:62px; left:50%; transform:translateX(-50%); width:520px; max-width:calc(100% - 24px); padding:4px 10px; font-size:11px; color:#7ee787; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); letter-spacing:1px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:inherit; z-index:5; }
+  #atc .tag { color:#ffd166; font-weight:700; margin-right:8px; }
+  #atc .msg { color:#cfe; }
+  #atc.flash { animation:atcFlash 0.45s ease-out; }
+  @keyframes atcFlash { 0% { background:rgba(40,90,55,.92); border-color:#7ee787; } 100% { background:rgba(8,14,22,.78); border-color:#1e3548; } }
   #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #vsi canvas { display:block; width:100%; height:100%; }
   @keyframes blink { 50% { opacity: 0.25; } }
@@ -90,7 +101,7 @@
   #cammode.flash { animation: cmflash 0.35s ease-out; }
   @keyframes cmflash { 0% { background:rgba(40,90,55,.95); border-color:#7ee787; } 100% { background:rgba(8,14,22,.72); border-color:#1e3548; } }
   /* Replay overlay: subtle banner top-center, plus a click-anywhere hint to skip. */
-  #replay { position:fixed; top:64px; left:50%; transform:translateX(-50%); padding:6px 14px; font-size:12px; letter-spacing:2px; color:#ffd166; background:rgba(8,14,22,.78); border:1px solid #ffd166; border-radius:6px; font-weight:700; display:none; z-index:9; text-align:center; }
+  #replay { position:fixed; top:100px; left:50%; transform:translateX(-50%); padding:6px 14px; font-size:12px; letter-spacing:2px; color:#ffd166; background:rgba(8,14,22,.78); border:1px solid #ffd166; border-radius:6px; font-weight:700; display:none; z-index:9; text-align:center; }
   #replay .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#ff3030; margin-right:8px; vertical-align:middle; animation: blink 1s steps(2) infinite; }
   #replay small { display:block; font-size:10px; letter-spacing:1px; color:#9bb; font-weight:500; margin-top:2px; }
   /* Mobile touch controls: virtual stick bottom-left (pitch/roll), throttle slider bottom-right.
@@ -207,6 +218,7 @@
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
+<div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
@@ -434,6 +446,11 @@ function onTakeoff(){
   pilotStats.totalFlights += 1;
   savePilotStats();
   unlockAchievement('firstFlight');
+  // Best-effort ATC call. pushATC may not exist yet at module-load order if
+  // the strip DOM is wired later; guard so this never throws.
+  if (typeof pushATC === 'function'){
+    pushATC('Positive climb, contact departure.', { tag:'TWR' });
+  }
 }
 function closeFlightTime(){
   if (flightStartMs == null) return 0;
@@ -1651,8 +1668,10 @@ function updateRingChase(dt){
         extra = ' · best ' + fmtHopTime(state.ringBestMs);
       }
       showStatus('RING CHASE COMPLETE', fmtHopTime(state.ringElapsedMs) + extra, 'good');
+      pushATC('Ring chase complete in ' + fmtHopTime(state.ringElapsedMs) + '.', { now:true });
     } else {
       showStatus('RING ' + state.ringIdx + '/' + ringChain.length, 'time ' + fmtHopTime(state.ringElapsedMs), 'good');
+      pushATC('Gate ' + state.ringIdx + ' clear, ' + (ringChain.length - state.ringIdx) + ' to go.');
     }
   }
 }
@@ -2059,11 +2078,13 @@ addEventListener('keydown', e=>{
       if (state.fuel > 0.001){
         state.engineOut = false;
         showStatus('ENGINE RESTARTED', null, 'good');
+        pushATC('Engine restart confirmed.', { now:true });
       }
     } else {
       state.engineOut = true;
       state.throttle = 0;
       showStatus('ENGINE OUT', 'Deadstick — glide her in', 'hard');
+      pushATC('Mayday, engine out, declaring emergency.', { tag:'PILOT', now:true });
     }
   }
   if (e.code==='KeyR'){
@@ -2079,6 +2100,7 @@ addEventListener('keydown', e=>{
     if (state.ap.on){
       state.ap.on = false;
       showStatus('AUTOPILOT OFF', null, 'hard');
+      pushATC('Autopilot disengaged, hand-flying.', { tag:'PILOT' });
     } else if (!state.crashed && !state.onGround){
       state.ap.alt = plane.position.y;
       const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
@@ -2086,6 +2108,7 @@ addEventListener('keydown', e=>{
       state.ap.on = true;
       const hdgDeg = ((state.ap.hdgRad * 180/Math.PI) % 360 + 360) % 360;
       showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(Math.round(hdgDeg)).padStart(3,'0'), 'good');
+      pushATC('Autopilot engaged, holding ' + Math.round(state.ap.alt - GEAR_H) + 'm.', { tag:'PILOT' });
     }
   }
   if (e.code==='KeyP'){
@@ -2213,6 +2236,113 @@ function showStatus(title, sub, cls){
 }
 function hideStatus(){ statusEl.style.display = 'none'; }
 
+// ====== ATC CHATTER ======
+// Fake radio strip at the top of the HUD. Two queues:
+//   * eventQueue — high-priority calls fired from game events (gear up, flap
+//     change, touchdown, ring hit, autopilot toggle, engine out, etc.). These
+//     jump the line and flash the strip green for a beat so the pilot notices.
+//   * idle filler — if nothing's been pushed for ATC_IDLE_MS, we pick a canned
+//     line from `atcIdleLines()` that's keyed off current sim state (wind,
+//     nearest field, time of day, mission). Keeps the strip alive on long
+//     cruises so it doesn't go silent.
+// Each shown line sticks for at least ATC_MIN_HOLD_MS so fast-fire events
+// (e.g. flap + gear in the same second) don't blur into unreadable strobes.
+const atcEl = document.getElementById('atc');
+const atcTagEl = document.getElementById('atcTag');
+const atcMsgEl = document.getElementById('atcMsg');
+const ATC_MIN_HOLD_MS = 2200;     // a line stays on screen at least this long
+const ATC_IDLE_MS     = 11000;    // if no calls, push a filler this often
+const atcQueue = [];
+let atcLastShownMs = 0;
+let atcNextIdleMs = 0;
+function pushATC(text, opts){
+  // opts.tag overrides the yellow tag (default "ATC"). opts.now=true displaces
+  // anything queued so urgent calls don't sit behind chit-chat.
+  if (!text) return;
+  const entry = { text: text, tag: (opts && opts.tag) || 'ATC' };
+  if (opts && opts.now) atcQueue.unshift(entry); else atcQueue.push(entry);
+}
+function _renderATC(entry){
+  if (!atcEl || !atcMsgEl) return;
+  atcTagEl.textContent = entry.tag;
+  atcMsgEl.textContent = entry.text;
+  // Retrigger the flash animation by toggling the class off and back on.
+  atcEl.classList.remove('flash');
+  // Force a reflow so the animation restarts even when class is reapplied same frame.
+  void atcEl.offsetWidth;
+  atcEl.classList.add('flash');
+  atcLastShownMs = performance.now();
+  // Push the next idle filler back so we don't double up right after an event.
+  atcNextIdleMs = atcLastShownMs + ATC_IDLE_MS;
+}
+function _runwayFor(hdgRad){
+  // Convert runway heading (radians, 0 = north along +z) into a 2-digit
+  // runway designator (heading / 10, rounded). Aviation rounds to nearest 10°
+  // and uses 01..36; we keep it simple.
+  let deg = hdgRad * 180/Math.PI;
+  // Runway numbers reflect the direction you land, which is opposite the
+  // takeoff vector for the +z layout we use. Pilot reads either end the same
+  // way; pick the one closest to the plane's heading later when we render.
+  deg = ((deg % 360) + 360) % 360;
+  let n = Math.round(deg / 10);
+  if (n === 0) n = 36;
+  return String(n).padStart(2,'0');
+}
+function _windCall(){
+  // "Winds 240 at 12" style. Uses the same FROM convention as the HUD readout.
+  const spd = Math.hypot(state.wind.x, state.wind.z);
+  const kt = Math.round(spd * 1.94384);
+  let from = Math.atan2(-state.wind.x, -state.wind.z) * 180/Math.PI;
+  if (from < 0) from += 360;
+  const dir = String(Math.round(from / 10) * 10 % 360).padStart(3,'0');
+  if (kt < 3) return 'Winds calm.';
+  return 'Winds ' + dir + ' at ' + kt + '.';
+}
+function _nearestApId(){
+  let best = null, bestD = 1e9;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < bestD){ bestD = d; best = a; }
+  }
+  return best ? best.id : 'KSEA';
+}
+function atcIdleLines(){
+  // Pool of filler lines, biased toward current state. Each entry is just a
+  // string; we pick one at random when the idle timer fires. Keeping the pool
+  // mixed (weather + traffic + chatter + flavor) so it doesn't feel repetitive.
+  const out = [];
+  const ap = _nearestApId();
+  const todH = Math.floor(state.todHours);
+  out.push(_windCall());
+  out.push('Traffic in the pattern, eyes out.');
+  out.push(ap + ', altimeter 30.06.');
+  out.push('Cessna on left base, you are number two.');
+  out.push('Hold short of taxiway, expect departure 27.');
+  out.push('Be advised, mountain wave reported to the east.');
+  out.push('Squawk 1200, frequency change approved.');
+  out.push(ap + ' tower, contact departure on 124.2.');
+  out.push('VFR traffic, 2 o\u2019clock, three miles.');
+  if (todH >= 19 || todH < 6) out.push('Runway lights are on, visibility good.');
+  if (todH >= 6 && todH < 9) out.push('Morning haze burning off, ceiling unrestricted.');
+  if (settings.rain) out.push('Field reports light rain, braking action good.');
+  if (state.mode === 'ring') out.push('Ring chase telemetry nominal, keep it tight.');
+  if (state.mode === 'hop')  out.push('Flight plan filed, cleared as requested.');
+  return out[Math.floor(Math.random() * out.length)];
+}
+function tickATC(now){
+  // Pump the queue: if nothing has been shown yet, show the next line.
+  // Otherwise wait out the min-hold before showing the next, and emit a
+  // filler when the idle window passes.
+  if (now - atcLastShownMs < ATC_MIN_HOLD_MS) return;
+  if (atcQueue.length){
+    _renderATC(atcQueue.shift());
+    return;
+  }
+  if (now >= atcNextIdleMs){
+    _renderATC({ tag:'ATC', text: atcIdleLines() });
+  }
+}
+
 function resetPlane(){
   plane.position.set(MAIN_AP.x, MAIN_AP.elev + GEAR_H, MAIN_AP.z + MAIN_AP.len/2 - 100);
   plane.quaternion.identity();
@@ -2304,6 +2434,13 @@ function dismissIntro(){
   state.introOpen = false; intro.style.display = 'none';
   startMission(state.mode);
   initStallAudio();
+  // Kick the ATC strip with a mode-flavored greeting so the first line you
+  // see matches what you signed up for. Idle filler takes over a few seconds in.
+  const greet = state.mode === 'tng'  ? 'Cleared for the option, runway 27.'
+              : state.mode === 'hop'  ? 'Flight plan active, departure approved.'
+              : state.mode === 'ring' ? 'Ring course armed, timer running on gate 1.'
+              :                         'Ground to tower, cleared to taxi at your discretion.';
+  pushATC(greet, { now:true });
 }
 intro.addEventListener('click', e => {
   // Don't dismiss when clicking a mission button — let the button handler manage selection.
@@ -2432,10 +2569,12 @@ function playFlapWhoosh(){
 function toggleGear(){
   state.gearDown = !state.gearDown;
   playGearClunk();
+  pushATC(state.gearDown ? 'Gear down and locked.' : 'Positive rate, gear up.');
 }
 function cycleFlaps(){
   state.flaps = (state.flaps + 1) % 3;
   playFlapWhoosh();
+  pushATC('Flaps ' + state.flaps + ', configured.');
 }
 
 // ====== PHYSICS ======
@@ -2630,6 +2769,7 @@ function step(dt){
       state.engineOut = true;
       state.throttle = 0;
       showStatus('FUEL EXHAUSTED', 'Deadstick — glide her in', 'hard');
+      pushATC('Fuel exhausted, declaring emergency.', { tag:'PILOT', now:true });
     }
   }
   // Refuel on the ground at an airport apron. Conditions: wheels on the deck,
@@ -2742,11 +2882,13 @@ function step(dt){
         if (sinkRate > 10 || !state.gearDown || !onRunway){
           state.damage = 1;
           showStatus('CRASHED', reason, 'bad');
+          pushATC('Crash, crash, crash — rolling the trucks.', { now:true });
           state.crashed = true;
           onCrash();
           startReplay();
         } else {
           showStatus('HARD LANDING', reason + ' · +' + Math.round(dmgAdd*100) + '% dmg', 'hard');
+          pushATC('Tower copies hard landing, maintenance advised.', { now:true });
           startReplay();
         }
       } else {
@@ -2786,6 +2928,7 @@ function step(dt){
         const title = (sinkRate < 2.5 ? 'GREASED IT' : 'GOOD LANDING') + ' · +' + score;
         const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
         showStatus(title, sub, 'good');
+        pushATC(apid + ', cleared to land confirmed. Welcome in.', { now:true });
         state.landed = true;
         onLanding(score);
         startReplay();
@@ -2841,6 +2984,7 @@ function step(dt){
   // Hitting 100% damage in the air = catastrophic. Trip the crash branch.
   if (state.damage >= 0.999 && !state.crashed && !state.onGround){
     showStatus('AIRFRAME FAILURE', 'damage 100%', 'bad');
+    pushATC('Airframe failure, going down!', { tag:'PILOT', now:true });
     state.crashed = true;
     onCrash();
     startReplay();
@@ -3858,6 +4002,11 @@ function loop(now){
   if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed){
     hideStatus();
   }
+  // ATC chatter strip: pump queued/idle lines. Skipped while the intro or
+  // photo mode is up so saved screenshots stay clean and the menu is quiet.
+  if (!state.introOpen && !state.photoMode){
+    tickATC(now);
+  }
   updateRainOverlay(dt);
   renderer.render(scene, camera);
 }
@@ -3886,7 +4035,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel','rainOverlay'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','ai','apinfo','score','papi','help','minimap','cammode','setbtn','mission','replay','mctrl','status','cockpitPanel','rainOverlay'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;

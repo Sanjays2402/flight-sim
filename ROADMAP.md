@@ -44,10 +44,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Rain weather toggle — settings option for rain, adds tilted streaks across the screen, dims the sky toward overcast gray, persisted to localStorage. Hidden in photo mode so saved PNGs stay clean.
 - [x] Landing gear stress indicator — HUD warning that flashes amber when sink rate is high enough to risk damage on touchdown, red when guaranteed damage, gives pilots a flare cue.
 - [x] Achievement popups — quick toast in the corner when player hits milestones (first flight, first landing, 10 landings, perfect landing score 300+, ring chase under 60s, climbed above 1000m), stored in localStorage so each only fires once.
+- [x] ATC chatter ticker — fake radio strip at top of HUD with rotating canned ATC lines tied to the current event ("Cleared to land 27", "Traffic, 2 o'clock", "Winds 240 at 12"). Pure flavor, big immersion bump for ~30 LOC.
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-- [ ] ATC chatter ticker — fake radio strip at top of HUD with rotating canned ATC lines tied to the current event ("Cleared to land 27", "Traffic, 2 o'clock", "Winds 240 at 12"). Pure flavor, big immersion bump for ~30 LOC.
 - [ ] Pause menu (Esc) — overlay with Resume / Restart Mission / Back to Menu, freezes sim + audio, also pauses the autopilot tick so nothing drifts. Currently there's no graceful way to bail mid-flight.
 - [ ] Runway taxi guidance arrows — when on the ground near an airport, draw a faint chevron line on the taxiway pointing to the active runway threshold so new players can find where to take off from.
 - [ ] Hard-deck altitude warning ("PULL UP") — when descending fast toward terrain below 150m AGL outside an airport zone, flash red "TERRAIN — PULL UP" with a sharp beep. Saves a lot of dumb crashes into mountains.
