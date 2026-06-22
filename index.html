@@ -413,7 +413,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also ignites on cold start) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -606,6 +606,7 @@
       <span>Reverse thrust (ground)</span><span><kbd>Z</kbd></span>
       <span>Camera cycle</span><span><kbd>C</kbd></span>
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
+      <span>Ignition crank (cold start / restart)</span><span><kbd>I</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
       <span>Pause menu</span><span><kbd>Esc</kbd></span>
       <span>Quick-jump airport</span><span><kbd>J</kbd>, <kbd>1</kbd>–<kbd>9</kbd> · <kbd>Shift</kbd>+digit = other end</span>
@@ -4432,6 +4433,15 @@ const state = {
   // toggle is honored mid-flight (off-by-toggle clears any pending ritual).
   coldStart: false,
   ignitionT: -1,
+  // In-air deadstick restart ritual. Parallel to coldStart for ground starts:
+  // when the player presses X with engineOut while airborne, we check that
+  // throttle is low (<30%) and airspeed is high enough to windmill the prop
+  // (>80 km/h). If so, airRestart latches and the player must press I to
+  // crank the same way cold-start works — shared ignitionT clock + SFX +
+  // catch thump. Unlike coldStart, airRestart does NOT pin the throttle (the
+  // pilot is gliding and needs full control). Cleared by resetPlane(), by
+  // finishIgnition(), or by pulling the mixture again (X while engineOut).
+  airRestart: false,
   // Refueling on the apron: when the plane is stopped on an airport ramp with
   // throttle at idle, fuel ticks back up. Set each frame by step(); HUD shows
   // a small ▲ FUEL tag while it's happening.
@@ -4817,10 +4827,12 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyI'){
-    // Cold-start ignition. Only fires when the cold-start sequence is armed —
-    // otherwise this is a no-op so the I key keeps working as pitch input on
-    // the existing keys[] map (which the step() loop reads each frame).
-    if (state.coldStart) beginIgnition();
+    // Cold-start ignition. Fires when either the ground cold-start sequence
+    // is armed (state.coldStart) or the in-air deadstick restart is armed
+    // (state.airRestart). Otherwise this is a no-op so the I key keeps
+    // working as pitch input on the existing keys[] map (which the step()
+    // loop reads each frame).
+    if (state.coldStart || state.airRestart) beginIgnition();
   }
   if (e.code==='KeyX'){
     // Toggle the engine. Lets the pilot deliberately practice deadstick approaches,
@@ -4834,6 +4846,22 @@ addEventListener('keydown', e=>{
           armColdStart();
           showStatus('IGNITION ARMED', 'press I to crank', 'hard');
           pushATC('Restart attempt, cranking on your call.', { tag:'PILOT', now:true });
+        } else if (!state.onGround && !state.crashed){
+          // In-air deadstick restart: require throttle pulled back and enough
+          // airspeed to windmill the prop. Mirrors the real-world engine-out
+          // procedure (throttle idle, dive for speed, then crank). Use the
+          // simple ground-velocity magnitude as airspeed — a coarse but fair
+          // stand-in for the airVel computed deeper in step().
+          const spdKmh = Math.hypot(state.vel.x, state.vel.y, state.vel.z) * 3.6;
+          if (state.throttle < 0.30 && spdKmh > 80){
+            state.airRestart = true;
+            state.ignitionT = -1;
+            showStatus('IGNITION ARMED', 'press I to crank', 'hard');
+            pushATC('Restart attempt, cranking on your call.', { tag:'PILOT', now:true });
+          } else {
+            // Conditions wrong — stay engine-out, nudge the pilot.
+            pushATC('Restart failed, check throttle and airspeed.', { tag:'PILOT', now:true });
+          }
         } else {
           state.engineOut = false;
           showStatus('ENGINE RESTARTED', null, 'good');
@@ -4846,6 +4874,7 @@ addEventListener('keydown', e=>{
       // Pilot pulled the mixture — abort any in-progress crank so the sequence
       // doesn't fire the engine back on a couple ticks later.
       state.coldStart = false;
+      state.airRestart = false;
       state.ignitionT = -1;
       showStatus('ENGINE OUT', 'Deadstick — glide her in', 'hard');
       pushATC('Mayday, engine out, declaring emergency.', { tag:'PILOT', now:true });
@@ -5121,9 +5150,9 @@ function lookAllowed(){
   if (bGear) bGear.addEventListener('click', e => { e.preventDefault(); toggleGear(); });
   if (bFlap) bFlap.addEventListener('click', e => { e.preventDefault(); cycleFlaps(); });
   if (bCam)  bCam.addEventListener('click',  e => { e.preventDefault(); state.cam = (state.cam + 1) % 4; updateCamModeUi(); });
-  // Ignition: only fires when the cold-start sequence is armed. Same gate as
+  // Ignition: only fires when either ignition sequence is armed. Same gate as
   // the I key handler so the button can't sneak around the rules.
-  if (bIgn)  bIgn.addEventListener('click',  e => { e.preventDefault(); if (state.coldStart) beginIgnition(); });
+  if (bIgn)  bIgn.addEventListener('click',  e => { e.preventDefault(); if (state.coldStart || state.airRestart) beginIgnition(); });
   // Brakes are a hold-to-engage action so a quick taxi stop feels natural.
   if (bBrk){
     const press = e => { e.preventDefault(); touch.brake = true; };
@@ -5579,6 +5608,7 @@ function resetPlane(){
   // around for the player to actually read. armColdStart() is a no-op when
   // settings.coldStart is off, so impatient pilots get the legacy hot start.
   state.coldStart = false;
+  state.airRestart = false;
   state.ignitionT = -1;
   armColdStart();
 }
@@ -5895,13 +5925,18 @@ function armColdStart(){
   showStatus('COLD START', 'press I to ignite', 'hard');
 }
 function beginIgnition(){
-  // Crank gate: only valid while the cold-start sequence is armed and we're
-  // safely parked. Already-cranking presses are ignored (the SFX would stack).
-  if (!state.coldStart || state.ignitionT >= 0) return;
-  if (state.introOpen || state.crashed || !state.onGround) return;
+  // Crank gate: only valid while either ignition sequence is armed (ground
+  // cold-start OR in-air deadstick restart). Already-cranking presses are
+  // ignored (the SFX would stack).
+  if (!(state.coldStart || state.airRestart) || state.ignitionT >= 0) return;
+  // No cranking from the menu or after a crash. Ground cold-start additionally
+  // requires being parked; in-air restart by definition is airborne, so we
+  // only block the ground sequence from firing while in the air.
+  if (state.introOpen || state.crashed) return;
+  if (state.coldStart && !state.onGround) return;
   // No fuel = no fire. Bail with a helpful nudge instead of silently faking it.
   if (state.fuel <= 0){
-    showStatus('NO FUEL', 'taxi onto the apron to refuel', 'hard');
+    showStatus('NO FUEL', state.onGround ? 'taxi onto the apron to refuel' : 'glide her in', 'hard');
     return;
   }
   state.ignitionT = 0;
@@ -5912,12 +5947,13 @@ function beginIgnition(){
 }
 function finishIgnition(){
   state.coldStart = false;
+  state.airRestart = false;
   state.ignitionT = -1;
   // If the engine was killed (X) AND we're going through cold-start to bring
   // it back, also clear the engine-out so thrust returns when the player
   // pushes the throttle. Pure mission-start path already has engineOut=false.
   state.engineOut = false;
-  showStatus('ENGINE ONLINE', 'cleared to taxi', 'good');
+  showStatus('ENGINE ONLINE', state.onGround ? 'cleared to taxi' : 'power restored', 'good');
   pushATC('Engine running, all gauges green.', { tag:'PILOT' });
 }
 // Starter-motor whir + a quick catch thump. Cheap WebAudio nodes; mirrors
@@ -6431,7 +6467,7 @@ function step(dt){
   // Cold-start ritual: tick the ignition timer here so the legacy throttle
   // path stays untouched. Throttle pinning lives inside the throttle branch
   // below; this just advances the spool clock when the player has cranked.
-  if (state.coldStart && state.ignitionT >= 0){
+  if ((state.coldStart || state.airRestart) && state.ignitionT >= 0){
     state.ignitionT += dt;
     if (state.ignitionT >= COLD_START_SPOOL_S) finishIgnition();
   }
@@ -9381,7 +9417,14 @@ function drawCockpitRpm(speedKmh){
   } else if (engineLive){
     rpm = 600 + state.throttle * 2200;
   } else {
+    // Windmilling deadstick — use airspeed as a proxy for prop RPM.
     rpm = Math.min(900, speedKmh * 4);
+    // While the in-air restart is cranking, layer the starter spool on top of
+    // the windmilling RPM so the needle visibly kicks during the 1.6s crank.
+    if (state.airRestart && state.ignitionT >= 0){
+      const spool = Math.min(300, state.ignitionT / COLD_START_SPOOL_S * 320);
+      rpm = Math.max(rpm, spool + rpm * 0.5);
+    }
   }
   ctx.strokeStyle = '#dfe';
   ctx.fillStyle = '#dfe';
@@ -10105,7 +10148,7 @@ function loop(now){
       || state.replayActive || state.paused || state.introOpen || state.photoMode){
     if (ghostPlane.visible) ghostPlane.visible = false;
   }
-  if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed && !state.coldStart){
+  if (statusEl.style.display === 'block' && (now - state.msgT) > 4500 && !state.crashed && !state.coldStart && !state.airRestart){
     hideStatus();
   }
   // ATC chatter strip: pump queued/idle lines. Skipped while the intro or
