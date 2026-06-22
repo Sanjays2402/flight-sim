@@ -88,6 +88,12 @@
   #status.hard { background:rgba(100,70,10,.85); color:#ffd166; border-color:#ffd166; }
   #status.bad  { background:rgba(120,20,20,.85); color:#ff5252; border-color:#ff5252; }
   #status small { display:block; font-size:13px; font-weight:500; letter-spacing:0; margin-top:6px; opacity:0.85; }
+  /* Mission-complete ceremonial banner: bigger and brighter than #status, fires
+     when Airport Hop / Touch & Go / Ring Chase finishes. Paired with the
+     three-note fanfare in playMissionFanfare(). Auto-hides after ~3s. */
+  #missionDone { position:fixed; top:34%; left:50%; transform:translate(-50%,-50%); padding:22px 44px; border-radius:14px; font-size:38px; font-weight:900; letter-spacing:3px; display:none; border:3px solid #ffd166; background:rgba(20,30,10,.92); color:#ffd166; text-align:center; text-shadow:0 0 14px rgba(255,209,102,.6); box-shadow:0 0 40px rgba(255,209,102,.4), 0 6px 30px rgba(0,0,0,.6); z-index:14; animation:missionPop .35s ease-out; }
+  #missionDone small { display:block; font-size:15px; font-weight:600; letter-spacing:1px; margin-top:8px; opacity:0.9; color:#fff5cc; }
+  @keyframes missionPop { 0%{transform:translate(-50%,-50%) scale(.7); opacity:0;} 100%{transform:translate(-50%,-50%) scale(1); opacity:1;} }
   /* Achievement toasts: small popups in the top-left below the HUD panel that
      fire once when the pilot unlocks a milestone (first landing, 10 landings,
      perfect score, ring chase under 60s, etc.). Unlocked ids are persisted to
@@ -447,6 +453,7 @@
   </div>
 </div>
 <div id="status"></div>
+<div id="missionDone"></div>
 <div id="pause">
   <div class="card">
     <h2>PAUSED</h2>
@@ -2540,6 +2547,7 @@ function updateRingChase(dt){
         extra = ' · best ' + fmtHopTime(state.ringBestMs);
       }
       showStatus('RING CHASE COMPLETE', fmtHopTime(state.ringElapsedMs) + extra, 'good');
+      showMissionDone('MISSION COMPLETE', 'Ring Chase · ' + fmtHopTime(state.ringElapsedMs) + extra);
       pushATC('Ring chase complete in ' + fmtHopTime(state.ringElapsedMs) + '.', { now:true });
     } else {
       showStatus('RING ' + state.ringIdx + '/' + ringChain.length, 'time ' + fmtHopTime(state.ringElapsedMs), 'good');
@@ -4117,8 +4125,65 @@ function playTerrainBeep(){
   osc.start(t0);
   osc.stop(t0 + 0.24);
 }
-// Centralized toggle helpers so keyboard + touch + any future binding all
-// trigger the same animation + SFX path.
+// Mission-complete fanfare: a quick three-note ascending sine triad (C5-E5-G5,
+// roughly a major chord arpeggio) with a soft attack/release so it feels
+// ceremonial rather than alarming. Reuses the same WebAudio context as the
+// stall horn so we don't pile up hardware nodes. Volume scales with the audio
+// slider so the user's master mute still wins.
+function playMissionFanfare(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.32 * settings.volume;
+  if (vol <= 0) return;
+  const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+  const noteDur = 0.22;
+  const step = 0.16;
+  notes.forEach((freq, i) => {
+    const tNote = t0 + i * step;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, tNote);
+    // A tiny detuned partial layered an octave up gives the chime body without
+    // sounding harsh — keeps the triad warm rather than synthy.
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(freq * 2, tNote);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, tNote);
+    g.gain.linearRampToValueAtTime(vol, tNote + 0.02);
+    g.gain.setValueAtTime(vol, tNote + noteDur - 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, tNote + noteDur);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0, tNote);
+    g2.gain.linearRampToValueAtTime(vol * 0.35, tNote + 0.02);
+    g2.gain.exponentialRampToValueAtTime(0.0001, tNote + noteDur);
+    osc.connect(g).connect(ctx.destination);
+    osc2.connect(g2).connect(ctx.destination);
+    osc.start(tNote);
+    osc.stop(tNote + noteDur + 0.02);
+    osc2.start(tNote);
+    osc2.stop(tNote + noteDur + 0.02);
+  });
+}
+// Ceremonial "MISSION COMPLETE" banner: bigger, brighter, and longer-lived
+// than the normal #status pill. Pairs with playMissionFanfare() so the
+// finish line gets both audio and visual payoff. Auto-hides after ~3s; the
+// regular #status pill keeps showing the per-event detail underneath.
+let missionDoneTimer = 0;
+function showMissionDone(title, sub){
+  const el = document.getElementById('missionDone');
+  if (!el) return;
+  el.innerHTML = title + (sub ? '<small>' + sub + '</small>' : '');
+  el.style.display = 'block';
+  // Restart the pop animation so re-firing within 3s still feels punchy.
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = '';
+  if (missionDoneTimer) clearTimeout(missionDoneTimer);
+  missionDoneTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+  playMissionFanfare();
+}
 function toggleGear(){
   state.gearDown = !state.gearDown;
   playGearClunk();
@@ -4765,6 +4830,9 @@ function step(dt){
               state.hopDone = true;
               state.hopElapsedMs = performance.now() - state.hopStartMs;
               extra = ' · HOP COMPLETE in ' + fmtHopTime(state.hopElapsedMs);
+              // Fire ceremonial banner + fanfare on the very last leg — the
+              // existing #status pill still shows the per-landing score detail.
+              showMissionDone('MISSION COMPLETE', 'Airport Hop · ' + fmtHopTime(state.hopElapsedMs) + ' · +' + state.scoreTotal);
             } else {
               extra = ' · next: ' + state.hopOrder[state.hopIdx];
             }
@@ -6712,7 +6780,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
