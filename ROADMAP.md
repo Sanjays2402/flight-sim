@@ -52,6 +52,12 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
+- [ ] Aerobatic ribbon trail (T key) — toggleable colored smoke trail off the tail when doing tricks. Draws a fading line behind the plane for ~5s, great for loops/rolls and screenshots. Off by default so it doesn't clutter normal flights.
+- [ ] Loop / roll detector — quietly track pitch and roll over time; when the plane completes a full 360° loop or aileron roll, fire an achievement-style toast ("LOOP!" / "AILERON ROLL!") and bump pilot stats. Tiny LOC, huge "wait, it noticed!" payoff.
+- [ ] Airshow smoke on/off button on the HUD — small `~` toggle (and tap target on mobile) that turns on a permanent colored smoke trail in the player's livery accent color. Pairs with the ribbon trail or stands alone.
+- [ ] Hot-air balloons drifting over the world — 3-4 lazy procedural balloons floating between airports, gentle bob, harmless. Pure scenery, makes the world feel less empty between airports.
+- [ ] Quick-restart hotkey (R outside replay) — when on the ground / crashed / paused, R restarts the current mission immediately instead of going through the menu. Skips replays too. Big quality-of-life win for repeat practice.
+
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
