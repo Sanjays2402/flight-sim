@@ -22,6 +22,11 @@
      Hidden in photo mode via PHOTO_HIDE_IDS. */
   #birdSplat { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #birdSplat.show { display:block; }
+  /* Soft additive sun glare. Sits above the 3D canvas but below the HUD,
+     pointer-events off so clicks go through, hidden in photo mode so saved
+     PNGs stay clean. */
+  #sunGlare { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; mix-blend-mode:screen; }
+  #sunGlare.show { display:block; }
   /* Binoculars overlay: dark vignette + faint reticle ring that fades in while
      the player holds B in an external cam. Sits above the 3D world and rain but
      below all HUD chrome (z-index:2) so the gauges and minimap stay readable
@@ -302,6 +307,7 @@
 <canvas id="c"></canvas>
 <canvas id="rainOverlay"></canvas>
 <canvas id="birdSplat"></canvas>
+<canvas id="sunGlare"></canvas>
 <div id="bino"></div>
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
@@ -5991,6 +5997,115 @@ function updateRainOverlay(dt){
   rainCtx.globalAlpha = 1.0;
 }
 
+// ====== SUN GLARE ======
+// Soft additive glare disc plus a faint streak across the frame whenever the
+// camera looks roughly toward the sun. Fades out as the angle widens and as
+// the sun drops below the horizon. Pure 2D overlay above the 3D world, below
+// the HUD; hidden in photo mode so saved PNGs stay clean.
+const sunGlareCanvas = document.getElementById('sunGlare');
+const sunGlareCtx = sunGlareCanvas && sunGlareCanvas.getContext('2d');
+function sizeSunGlareCanvas(){
+  if (!sunGlareCanvas) return;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio, 2);
+  sunGlareCanvas.width = Math.max(1, Math.floor(w * dpr));
+  sunGlareCanvas.height = Math.max(1, Math.floor(h * dpr));
+  sunGlareCanvas.style.width = w + 'px';
+  sunGlareCanvas.style.height = h + 'px';
+  if (sunGlareCtx) sunGlareCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+sizeSunGlareCanvas();
+const _glareSunWorld = new THREE.Vector3();
+const _glareSunNdc   = new THREE.Vector3();
+const _glareCamFwd   = new THREE.Vector3();
+const _glareSunDirN  = new THREE.Vector3();
+function updateSunGlare(dt){
+  if (!sunGlareCanvas || !sunGlareCtx) return;
+  // Skip overlay entirely in photo mode / intro so screenshots and the menu stay clean.
+  if (state.photoMode || state.introOpen){
+    sunGlareCanvas.classList.remove('show');
+    return;
+  }
+  // Sun is essentially off when its directional intensity is near zero
+  // (night). applyTimeOfDay drives sun.intensity from the TOD keys.
+  const sunI = sun.intensity || 0;
+  if (sunI <= 0.05){
+    sunGlareCanvas.classList.remove('show');
+    return;
+  }
+  // Direction from camera to sun (sun.position is already in world space,
+  // multiplied to ~8000m by applyTimeOfDay).
+  _glareSunWorld.copy(sun.position);
+  _glareSunDirN.copy(_glareSunWorld).sub(camera.position).normalize();
+  camera.getWorldDirection(_glareCamFwd);
+  const facing = _glareCamFwd.dot(_glareSunDirN); // 1 = looking straight at sun
+  if (facing <= 0.05){
+    // Sun is behind the camera — no flare.
+    sunGlareCanvas.classList.remove('show');
+    return;
+  }
+  // Project the sun into NDC and bail if it's behind the camera (z>1).
+  _glareSunNdc.copy(_glareSunWorld).project(camera);
+  if (_glareSunNdc.z >= 1){
+    sunGlareCanvas.classList.remove('show');
+    return;
+  }
+  const w = innerWidth, h = innerHeight;
+  const sx = (_glareSunNdc.x * 0.5 + 0.5) * w;
+  const sy = (1 - (_glareSunNdc.y * 0.5 + 0.5)) * h;
+  // Strength ramps with facing^2 (so it's only really bright when the sun is
+  // near the center of the frame) and scales with the TOD sun intensity so
+  // dawn/dusk glares are warmer + softer than noon.
+  const facingK = Math.pow(Math.max(0, (facing - 0.05) / 0.95), 1.6);
+  const sunIK   = Math.min(1, sunI / 1.15);
+  const strength = facingK * sunIK;
+  if (strength <= 0.02){
+    sunGlareCanvas.classList.remove('show');
+    return;
+  }
+  sunGlareCanvas.classList.add('show');
+  sunGlareCtx.clearRect(0, 0, w, h);
+  // Tint the flare from the live sun color so sunrise reads orange and noon
+  // reads near-white, without driving a separate color picker.
+  const sc = sun.color;
+  const r = Math.max(0, Math.min(255, Math.round(sc.r * 255)));
+  const g = Math.max(0, Math.min(255, Math.round(sc.g * 255)));
+  const b = Math.max(0, Math.min(255, Math.round(sc.b * 255)));
+  // 1) Big soft glare disc centered on the sun's projected position.
+  const radius = Math.min(w, h) * (0.18 + 0.10 * facingK);
+  const a1 = (0.55 * strength).toFixed(3);
+  const a2 = (0.22 * strength).toFixed(3);
+  const disc = sunGlareCtx.createRadialGradient(sx, sy, 0, sx, sy, radius);
+  disc.addColorStop(0,   'rgba(' + r + ',' + g + ',' + b + ',' + a1 + ')');
+  disc.addColorStop(0.35,'rgba(' + r + ',' + g + ',' + b + ',' + a2 + ')');
+  disc.addColorStop(1,   'rgba(' + r + ',' + g + ',' + b + ',0)');
+  sunGlareCtx.fillStyle = disc;
+  sunGlareCtx.fillRect(0, 0, w, h);
+  // 2) Faint horizontal streak running through the sun's screen position,
+  //    only when the sun is near-center (strength gates this).
+  const streakA = (0.25 * facingK * sunIK).toFixed(3);
+  if (parseFloat(streakA) > 0.02){
+    const streakLen = w * 0.9;
+    const streak = sunGlareCtx.createLinearGradient(sx - streakLen * 0.5, sy, sx + streakLen * 0.5, sy);
+    streak.addColorStop(0,   'rgba(' + r + ',' + g + ',' + b + ',0)');
+    streak.addColorStop(0.5, 'rgba(' + r + ',' + g + ',' + b + ',' + streakA + ')');
+    streak.addColorStop(1,   'rgba(' + r + ',' + g + ',' + b + ',0)');
+    sunGlareCtx.fillStyle = streak;
+    const streakH = Math.max(4, Math.min(h, h * 0.018));
+    sunGlareCtx.fillRect(0, sy - streakH * 0.5, w, streakH);
+  }
+  // 3) Bright hot core so the sun reads as a punchy point, not just a wash.
+  const coreR = Math.max(6, Math.min(w, h) * 0.018 * (0.6 + 0.4 * facingK));
+  const coreA = (0.85 * strength).toFixed(3);
+  const core = sunGlareCtx.createRadialGradient(sx, sy, 0, sx, sy, coreR);
+  core.addColorStop(0, 'rgba(255,255,255,' + coreA + ')');
+  core.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+  sunGlareCtx.fillStyle = core;
+  sunGlareCtx.beginPath();
+  sunGlareCtx.arc(sx, sy, coreR, 0, Math.PI * 2);
+  sunGlareCtx.fill();
+}
+
 // ====== BINOCULARS ======
 // Spotter zoom: hold B in an external cam (chase / flyby / orbit) while airborne
 // to crank the camera FOV way in and overlay a soft vignette. Designed to spot
@@ -6083,6 +6198,7 @@ function loop(now){
   updateRainOverlay(dt);
   updateBirdSplat(dt);
   updateBinoculars(dt);
+  updateSunGlare(dt);
   renderer.render(scene, camera);
 }
 
@@ -6092,6 +6208,7 @@ addEventListener('resize', ()=>{
   renderer.setSize(innerWidth, innerHeight);
   sizeRainCanvas();
   sizeBirdSplatCanvas();
+  sizeSunGlareCanvas();
 });
 
 // Click anywhere on the replay banner to dismiss it.
@@ -6111,7 +6228,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','birdSplat','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ai','apinfo','score','papi','help','minimap','cammode','setbtn','airshow','mission','replay','mctrl','status','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
