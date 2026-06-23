@@ -450,8 +450,15 @@
   #cpPitotHeat { pointer-events:none; }
   #cockpitPanel.show { display:flex; }
   #cockpitPanel .gauge { display:flex; flex-direction:column; align-items:center; }
-  #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); }
-  #cockpitPanel .glbl { margin-top:4px; font-size:10px; letter-spacing:2px; color:#6aa; font-weight:700; }
+  #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); transition:filter .25s ease, border-color .25s ease; }
+  #cockpitPanel .glbl { margin-top:4px; font-size:10px; letter-spacing:2px; color:#6aa; font-weight:700; transition:color .25s ease, text-shadow .25s ease; }
+  /* Night-mode (Shift+;): tint every gauge canvas + the panel chrome red so the
+     instruments stay readable without nuking the pilot's night vision. CSS filter
+     does the per-gauge tint pass in one place so no gauge-draw code changes.
+     Glow under the panel edge sells the "red instrument lighting" vibe. */
+  #cockpitPanel.night canvas { filter: saturate(.15) sepia(1) hue-rotate(-45deg) brightness(.85) contrast(1.15); border-color:#5a1818; }
+  #cockpitPanel.night { box-shadow: 0 0 22px rgba(220,40,30,.45), inset 0 0 12px rgba(140,10,10,.35); border-color:#5a1818; background:rgba(14,4,4,.78); }
+  #cockpitPanel.night .glbl { color:#d56a6a; text-shadow:0 0 6px rgba(220,50,40,.45); }
   /* Pause menu: press Esc mid-flight to freeze the sim. Same modal vibe as
      Settings / Pilot Stats so the player gets a consistent feel — dimmed
      backdrop, centered card, big readable buttons. Sits at a high z-index
@@ -657,7 +664,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1003,7 +1010,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, aerobaticBest: 0, voice: 'radio' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, aerobaticBest: 0, voice: 'radio', nightPanel: false };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1072,6 +1079,7 @@ try {
     if (typeof saved.carbHeat === 'boolean') settings.carbHeat = saved.carbHeat;
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
     if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
+    if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -7523,6 +7531,14 @@ const state = {
   // key exists; cleared on resetPlane().
   landingLight: !!settings.landingLight,
   landingLightSuggested: false,
+  // Night-mode panel suggest latch. Shift+; toggles the red-tinted cockpit
+  // panel. First time TOD crosses past 20:00 with the player in cockpit cam
+  // and night mode still OFF, we fire a one-shot ATC "Recommend night panel"
+  // line so the pilot learns the key exists. Cleared on resetPlane() so each
+  // sortie can re-arm the prompt; tracks the previous-frame TOD so the gate
+  // only fires on the actual sunset crossing (not while loitering past 20:00).
+  nightPanelSuggested: false,
+  nightPanelLastTod: 0,
   ribbonOn: false,
   // Airshow smoke: HUD-toggleable permanent colored smoke trail off the tail
   // in the livery accent color (toggle via the `~` button or key). Pairs with
@@ -8272,6 +8288,23 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='Semicolon' || e.code==='Quote'){
+    // Shift+; toggles the cockpit instrument panel's red night-mode tint.
+    // Runs ahead of the trim path so the shifted variant is consumed cleanly;
+    // unshifted ; / ' still nudge trim, and Shift+' still nudges fine nose-up
+    // trim (the only paired binding we give up is fine nose-down trim, which
+    // most pilots reach for far less than nose-up cruise trim anyway).
+    if (e.code === 'Semicolon' && e.shiftKey){
+      if (state.introOpen) return;
+      e.preventDefault();
+      settings.nightPanel = !settings.nightPanel;
+      applyNightPanelVisible();
+      saveSettings();
+      showStatus('COCKPIT ' + (settings.nightPanel ? 'NIGHT MODE' : 'DAY MODE'), null, settings.nightPanel ? 'good' : 'hard');
+      // Toggling counts as acknowledging the prompt — latch so the auto-suggest
+      // line doesn't shout later in the same sortie.
+      state.nightPanelSuggested = true;
+      return;
+    }
     // Pitch trim wheel. `;` = nose down, `'` = nose up. Plain = 5% coarse,
     // Shift = 1% fine. Skip while the intro modal is up (no flight yet) and
     // while autopilot is on (AP owns pitch — trim would just fight it).
@@ -9497,6 +9530,10 @@ function resetPlane(){
   // on/off bit stays where the pilot left it (mirrors how pitot heat is
   // intentionally preserved across reset).
   state.landingLightSuggested = false;
+  // Night-mode panel suggest re-arms per sortie: the actual settings.nightPanel
+  // bit stays where the pilot left it (mirrors landing light + pitot heat).
+  state.nightPanelSuggested = false;
+  state.nightPanelLastTod = state.todHours || 0;
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
@@ -11649,6 +11686,29 @@ const BIRD_WARN_HORIZ_M  = 200;   // m — horizontal radius for the warning
 const BIRD_WARN_VERT_M   = 40;    // m — ± vertical band around flock altitude
 const BIRD_WARN_CLOSE_MS = 4000;  // ms — per-flock cooldown between warnings
 const BIRD_WARN_MIN_CLOSURE = 5;  // m/s — must be closing this fast to fire
+// Cockpit night-mode auto-suggest: first time TOD crosses past 20:00 in
+// cockpit cam with night mode still off, fire a one-shot "Recommend night
+// panel" ATC line + status banner so the pilot learns the Shift+; key.
+// Edge-triggered on the 20:00 crossing (uses state.nightPanelLastTod) so we
+// only nudge once per crossing, not every frame the player loiters past 20:00.
+function tickNightPanelSuggest(){
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return;
+  if (state.crashed) return;
+  const todPrev = state.nightPanelLastTod;
+  const todNow  = state.todHours || 0;
+  state.nightPanelLastTod = todNow;
+  if (state.nightPanelSuggested) return;
+  if (settings.nightPanel) return;          // already on — nothing to suggest
+  if (state.cam !== 1) return;              // cockpit cam only
+  // Edge-trigger on 20:00 crossing. Skip wrap-around (todPrev > todNow)
+  // so the daily wrap from 23:59 → 00:00 doesn't masquerade as a sunset.
+  if (!(todPrev < 20 && todNow >= 20 && todPrev <= todNow)) return;
+  state.nightPanelSuggested = true;
+  showStatus('NIGHT PANEL', 'press Shift+; to dim', 'hard');
+  if (typeof pushATC === 'function'){
+    pushATC('Recommend night panel.', { tag: 'PILOT', now: true });
+  }
+}
 function tickBirdProximity(){
   // Same gate as birdStrikeAllowed(): no warnings during intro / photo /
   // pause / replay / crashed / on-ground. We deliberately do NOT reuse the
@@ -13425,6 +13485,9 @@ function step(dt){
   // BIRDS — 11 O'CLOCK" with a clock-position bearing so the player has
   // a chance to break away before eating the strike.
   tickBirdProximity();
+  // Cockpit night-mode suggest (Shift+; toggles the red gauge tint): one-shot
+  // ATC nudge the first time TOD crosses past 20:00 in cockpit cam.
+  tickNightPanelSuggest();
   // TCAS-lite mid-air contact warning vs the AI plane: yellow ping +
   // bearing arrow as we close, red beep + ATC "Traffic, traffic — resolve"
   // if the geometry threatens a real collision.
@@ -17311,6 +17374,16 @@ function applyFogVisible(){
   }
 }
 applyFogVisible();
+// Cockpit night-mode tint. Toggling settings.nightPanel just adds/removes
+// the `night` class on #cockpitPanel — the CSS does the per-gauge red filter
+// + the under-panel glow. Re-applied on resetPlane via syncInputs() chain
+// and on initial settings load so the panel comes up in the saved state.
+function applyNightPanelVisible(){
+  const cpEl = document.getElementById('cockpitPanel');
+  if (!cpEl) return;
+  cpEl.classList.toggle('night', !!settings.nightPanel);
+}
+applyNightPanelVisible();
 function updateRainOverlay(dt){
   if (!settings.rain || !rainCtx || state.photoMode) return;
   const w = innerWidth, h = innerHeight;
