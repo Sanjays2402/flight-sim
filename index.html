@@ -404,6 +404,33 @@
   #jumpsel .ap.here .num { color:#7ee787; }
   #jumpsel .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
   #jumpsel kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
+  /* First-flight tutorial overlay: shows once on the very first launch (latch
+     persisted in localStorage as `flightsim.tutorial.v1`) above the intro
+     menu, so brand-new players see the core control list before they pick
+     a mission. Same modal vibe as #stats / #pause so the chrome stays
+     consistent — dimmed backdrop, centered card, big GOT IT primary button.
+     Sits above the intro (z-index 35) so it covers it without disturbing
+     mode selection state. Settings panel exposes a button that clears the
+     latch so returning pilots can re-arm it for the next launch. */
+  #tutorial { position:fixed; inset:0; background:rgba(0,5,12,.88); display:none; align-items:center; justify-content:center; z-index:35; }
+  #tutorial.show { display:flex; }
+  #tutorial .card { width:520px; max-width:92vw; padding:24px 28px 20px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; }
+  #tutorial h2 { font-size:22px; color:#7ee787; margin-bottom:4px; letter-spacing:2px; font-weight:800; text-align:center; }
+  #tutorial .sub { font-size:11px; color:#9bb; margin-bottom:14px; letter-spacing:1px; text-align:center; }
+  #tutorial .cols { display:grid; grid-template-columns:1fr 1fr; gap:14px 24px; margin-bottom:14px; }
+  #tutorial .col h3 { font-size:11px; color:#6aa; letter-spacing:2px; font-weight:700; margin-bottom:6px; border-bottom:1px solid rgba(30,53,72,.6); padding-bottom:3px; }
+  #tutorial .col .line { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; gap:8px; }
+  #tutorial .col .nm { color:#cfe; font-size:12px; }
+  #tutorial .col .keys { color:#9bb; font-size:11px; text-align:right; }
+  #tutorial kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:11px; border:1px solid #2a4a6a; font-family:inherit; }
+  #tutorial .tip { font-size:11px; color:#9bb; line-height:1.5; margin:8px 0 12px; padding:8px 10px; background:rgba(20,40,60,.5); border:1px solid rgba(30,53,72,.6); border-radius:6px; }
+  #tutorial .opt { display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:11px; color:#9bb; cursor:pointer; user-select:none; }
+  #tutorial .opt input { accent-color:#7ee787; cursor:pointer; }
+  #tutorial .actions { display:flex; gap:8px; }
+  #tutorial button { flex:1; padding:10px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:2px; cursor:pointer; transition:all .15s ease; }
+  #tutorial button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #tutorial button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; transform:translateY(-1px); }
+  #tutorial button.primary:hover { background:rgba(60,120,75,.95); }
 </style>
 </head>
 <body>
@@ -525,6 +552,11 @@
       <div class="top"><span class="name">SMOKE TRAIL COLOR</span><span class="val" id="setTrailV">LIVERY</span></div>
       <select id="setTrail"></select>
       <div class="hint">Ribbon (<kbd>Y</kbd>) and airshow smoke (<kbd>~</kbd>) color. LIVERY follows your paint scheme.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">TUTORIAL</span><span class="val" id="setTutV">SEEN</span></div>
+      <button id="setTutBtn" type="button" style="width:100%">SHOW TUTORIAL NEXT LAUNCH</button>
+      <div class="hint">Re-arm the welcome card so it pops above the menu on your next page load.</div>
     </div>
     <div class="actions">
       <button id="setReset">RESET</button>
@@ -682,6 +714,36 @@
       Watch the <b>WIND</b> readout — a stiff crosswind on final means you’ll need rudder (<kbd>Q</kbd>/<kbd>E</kbd>) to crab the nose into the breeze.
     </div>
     <div class="go">CLICK or press SPACE to fly</div>
+  </div>
+</div>
+<div id="tutorial">
+  <div class="card">
+    <h2>WELCOME, PILOT</h2>
+    <div class="sub">Quick rundown before your first sortie</div>
+    <div class="cols">
+      <div class="col">
+        <h3>FLY THE PLANE</h3>
+        <div class="line"><span class="nm">Throttle</span><span class="keys"><kbd>W</kbd> / <kbd>S</kbd></span></div>
+        <div class="line"><span class="nm">Pitch</span><span class="keys"><kbd>I</kbd> / <kbd>K</kbd></span></div>
+        <div class="line"><span class="nm">Roll</span><span class="keys"><kbd>A</kbd> / <kbd>D</kbd></span></div>
+        <div class="line"><span class="nm">Yaw (rudder)</span><span class="keys"><kbd>Q</kbd> / <kbd>E</kbd></span></div>
+      </div>
+      <div class="col">
+        <h3>USE THE COCKPIT</h3>
+        <div class="line"><span class="nm">Camera cycle</span><span class="keys"><kbd>C</kbd></span></div>
+        <div class="line"><span class="nm">Autopilot hold</span><span class="keys"><kbd>H</kbd></span></div>
+        <div class="line"><span class="nm">Gear up/down</span><span class="keys"><kbd>G</kbd></span></div>
+        <div class="line"><span class="nm">Flaps cycle</span><span class="keys"><kbd>F</kbd></span></div>
+        <div class="line"><span class="nm">Brakes (ground)</span><span class="keys"><kbd>B</kbd></span></div>
+        <div class="line"><span class="nm">Kill engine</span><span class="keys"><kbd>X</kbd></span></div>
+        <div class="line"><span class="nm">Ignition crank</span><span class="keys"><kbd>I</kbd></span></div>
+      </div>
+    </div>
+    <div class="tip">Throttle to ~80%, hold <kbd>I</kbd> at ~140 km/h to rotate. Press <kbd>,</kbd> any time for full settings, <kbd>Esc</kbd> for the pause menu. You can re-open this guide later from Settings.</div>
+    <label class="opt"><input type="checkbox" id="tutSkip"> Don't show this again</label>
+    <div class="actions">
+      <button id="tutGotIt" class="primary" type="button">GOT IT</button>
+    </div>
   </div>
 </div>
 
@@ -6847,7 +6909,15 @@ for (const btn of document.querySelectorAll('#intro .mbtn')){
   });
   btn.addEventListener('dblclick', e => { e.stopPropagation(); dismissIntro(); });
 }
-addEventListener('keydown', e=>{ if (state.introOpen && (e.code==='Space' || e.code==='Enter')) dismissIntro(); });
+addEventListener('keydown', e=>{
+  if (!state.introOpen) return;
+  if (e.code !== 'Space' && e.code !== 'Enter') return;
+  // Don't launch the sim while the first-flight tutorial is sitting on top of
+  // the intro — the player needs to dismiss the welcome card first.
+  const tut = document.getElementById('tutorial');
+  if (tut && tut.classList.contains('show')) return;
+  dismissIntro();
+});
 
 // ====== Stall warning audio (short repeating beep) ======
 let stallAudio = null;
@@ -12285,6 +12355,87 @@ addEventListener('keydown', e => {
       if (panel.classList.contains('show')){ e.preventDefault(); closePanel(); }
     }
   });
+})();
+
+// ====== FIRST-FLIGHT TUTORIAL OVERLAY ======
+// On the very first launch (latched in localStorage as `flightsim.tutorial.v1`)
+// pop a centered card with the core controls and a GOT IT button before the
+// player ever picks a mission. The card sits on top of the intro at a higher
+// z-index so the existing mission-select state isn't disturbed. Closing it
+// (button click / Escape / backdrop click) sets the latch; the in-card
+// "Don't show again" checkbox starts CHECKED so the default GOT IT path
+// silences future launches, but unchecking it before closing leaves the latch
+// off so the card re-pops next session. Settings panel exposes a button that
+// clears the latch so returning pilots can re-arm it deliberately.
+(function setupTutorialUi(){
+  const TUTORIAL_KEY = 'flightsim.tutorial.v1';
+  const panel = document.getElementById('tutorial');
+  const btnGotIt = document.getElementById('tutGotIt');
+  const skipCb = document.getElementById('tutSkip');
+  const setBtn = document.getElementById('setTutBtn');
+  const setV = document.getElementById('setTutV');
+  if (!panel) return;
+  // Latch read: any stored value (truthy parse) means the tutorial has been
+  // dismissed at least once. Corrupt / private-mode failures fall through to
+  // "unseen" so brand-new browsers always get the overlay.
+  function readSeen(){
+    try { return localStorage.getItem(TUTORIAL_KEY) === '1'; } catch(e){ return false; }
+  }
+  function writeSeen(seen){
+    try {
+      if (seen) localStorage.setItem(TUTORIAL_KEY, '1');
+      else localStorage.removeItem(TUTORIAL_KEY);
+    } catch(e){ /* private mode — skip */ }
+  }
+  function refreshSettingsPill(){
+    if (!setV) return;
+    setV.textContent = readSeen() ? 'SEEN' : 'NEXT LAUNCH';
+    if (setBtn){
+      setBtn.classList.toggle('primary', !readSeen());
+      setBtn.textContent = readSeen()
+        ? 'SHOW TUTORIAL NEXT LAUNCH'
+        : 'TUTORIAL ARMED (CLICK TO CANCEL)';
+    }
+  }
+  function openPanel(){
+    // Skip checkbox defaults to CHECKED so the GOT IT path silences future
+    // launches by default — unchecking it leaves the card re-armed.
+    if (skipCb) skipCb.checked = true;
+    panel.classList.add('show');
+  }
+  function closePanel(){
+    const skip = !skipCb || skipCb.checked;
+    writeSeen(skip);
+    panel.classList.remove('show');
+    refreshSettingsPill();
+  }
+  // First-launch trigger. We pop it after the intro is wired up so the menu
+  // is visible behind the tutorial — makes it obvious what's underneath.
+  if (!readSeen()) openPanel();
+  refreshSettingsPill();
+  if (btnGotIt) btnGotIt.addEventListener('click', e => { e.stopPropagation(); closePanel(); });
+  // Backdrop click dismisses the same way as GOT IT (respects the checkbox).
+  panel.addEventListener('click', e => { if (e.target === panel) closePanel(); });
+  // Esc closes too, but only while the tutorial is the topmost modal.
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'Escape' && panel.classList.contains('show')){
+      e.preventDefault();
+      closePanel();
+    }
+  });
+  // Settings panel button: toggles the latch off (re-arm) or back on (cancel)
+  // without re-opening the card mid-session — the player explicitly asked for
+  // "next launch" behavior, so we don't surprise them with an immediate pop.
+  if (setBtn){
+    setBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      // If currently SEEN, clear the latch (arm for next launch).
+      // If currently ARMED, set the latch (cancel the re-arm).
+      writeSeen(!readSeen());
+      refreshSettingsPill();
+    });
+  }
 })();
 
 camera.position.set(MAIN_AP.x, MAIN_AP.elev + GEAR_H + 5, MAIN_AP.z + MAIN_AP.len/2 - 80);
