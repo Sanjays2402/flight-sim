@@ -4190,6 +4190,184 @@ function updateWindSocks(){
 }
 updateWindSocks(); // prime so first paint matches current wind, not the limp default
 
+// ====== WIND TEE + SIGNAL SQUARE ======
+// Real uncontrolled airports cluster a small "segmented circle" of wind aids
+// near the windsock so a circling pilot can read BOTH wind direction AND
+// active runway from one glance without a radio. Wind tee = thin horizontal
+// arrow on a low pivoting post that points the way the wind is going FROM
+// (i.e. nose into the wind = wind-favoured takeoff direction). Signal
+// square = 6x6 m painted ground panel next to the tee whose long axis lines
+// up with the wind-favoured runway, with the runway designator + a direction
+// arrow painted on it. Both pair with the existing windsock + compass-rose
+// disc + beacon tower to finish the "this is a real airport, you don't need
+// a radio" pre-landing read.
+const windTees = [];        // [{ ap, yawGrp, lastYaw }]
+const signalSquares = [];   // [{ ap, mesh, mat, tex, ctx, canvas, lastDesig, lastYaw, lastFlip }]
+const SIGNAL_SQUARE_SIZE = 6;  // metres on a side (matches real ICAO 6x6 m panels)
+
+function _makeSignalSquareTexture(canvas, ctx, designator){
+  const SIZE = canvas.width;
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  // White-ish painted square base, slight off-white so it reads as paint on
+  // grass rather than a glowing decal.
+  ctx.fillStyle = 'rgba(240, 240, 240, 0.92)';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  // Dark border so the edge reads from low altitude.
+  ctx.strokeStyle = 'rgba(40, 40, 40, 0.95)';
+  ctx.lineWidth = Math.max(6, SIZE * 0.025);
+  ctx.strokeRect(ctx.lineWidth/2, ctx.lineWidth/2, SIZE - ctx.lineWidth, SIZE - ctx.lineWidth);
+  // Arrow running along the canvas +y axis (which we'll align with the
+  // favoured-runway landing direction when the mesh is yawed). Big chunky
+  // arrow so it's legible from 1500 m AGL.
+  const cx = SIZE/2;
+  ctx.fillStyle = 'rgba(30, 30, 30, 0.95)';
+  // Shaft
+  const shaftHalfW = SIZE * 0.06;
+  const shaftTop = SIZE * 0.22;
+  const shaftBot = SIZE * 0.74;
+  ctx.fillRect(cx - shaftHalfW, shaftTop, shaftHalfW * 2, shaftBot - shaftTop);
+  // Head (triangle pointing toward canvas -y = landing direction once placed)
+  ctx.beginPath();
+  ctx.moveTo(cx, SIZE * 0.08);
+  ctx.lineTo(cx - SIZE * 0.18, shaftTop + 4);
+  ctx.lineTo(cx + SIZE * 0.18, shaftTop + 4);
+  ctx.closePath();
+  ctx.fill();
+  // Runway designator label below the shaft so a pilot looking down sees
+  // both "land that way" + the runway number on one panel.
+  ctx.fillStyle = 'rgba(20, 20, 20, 0.98)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `bold ${Math.round(SIZE * 0.18)}px sans-serif`;
+  ctx.fillText(designator || '--', cx, SIZE * 0.87);
+}
+
+function makeWindTee(a){
+  // Place on the LEFT of the runway like the windsock cluster, but ~10 m
+  // inboard toward mid-strip so the tee and the sock don't overlap. Local
+  // -x is pilot's left when rolling toward -z; same as the windsock side.
+  const stripX = -(a.w/2 + 9);
+  const teeZ   =   a.len/2 - 28;  // 10 m inboard of the windsock pole
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Short stubby post — kept low so it doesn't fight the windsock pole.
+  const postMat = new THREE.MeshLambertMaterial({ color: 0xdddddd });
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 1.6, 6), postMat);
+  post.position.set(stripX, 0.8, teeZ);
+  grp.add(post);
+  // Yaw group sits at the top of the post and pivots horizontally.
+  const yawGrp = new THREE.Group();
+  yawGrp.position.set(stripX, 1.7, teeZ);
+  grp.add(yawGrp);
+  // Tee body — flat horizontal arrow built from a shaft + triangular head
+  // pointing along local +x (the direction the tee "nose" points). The
+  // updater rotates yawGrp so +x ends up aimed INTO the wind.
+  const teeMat = new THREE.MeshLambertMaterial({
+    color: 0xff7a1a, side: THREE.DoubleSide, emissive: 0x331400
+  });
+  // Shaft: long thin bar along +x.
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.05, 0.22), teeMat);
+  shaft.position.set(0.2, 0, 0); // slight forward bias so head sits past the post
+  yawGrp.add(shaft);
+  // Tail crossbar (small "T" foot at the back, so the tee reads as a
+  // weathervane silhouette and not just a thin stick).
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.9), teeMat);
+  tail.position.set(-0.85, 0, 0);
+  yawGrp.add(tail);
+  // Arrow head: triangular cone-ish prism pointing +x. Use a 4-sided cone
+  // rotated so its apex points along +x.
+  const headGeo = new THREE.ConeGeometry(0.32, 0.85, 6);
+  const head = new THREE.Mesh(headGeo, teeMat);
+  head.rotation.z = -Math.PI/2; // apex points +x
+  head.position.set(1.6, 0, 0);
+  yawGrp.add(head);
+  windTees.push({ ap: a, yawGrp, lastYaw: null });
+}
+
+function makeSignalSquare(a){
+  const stripX = -(a.w/2 + 9);
+  const squareZ =  a.len/2 - 40;  // ~12 m inboard of the wind tee
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Per-square CanvasTexture so each airport gets its own designator paint.
+  // 256 px is plenty for a 6 m panel viewed from 1500 m AGL; keeps GPU
+  // footprint small (~256 KB per airport, redrawn rarely).
+  const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const mat = new THREE.MeshLambertMaterial({
+    map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide
+  });
+  // Flat quad lying on the ground at the same height as the painted compass
+  // rose so they read as one cluster of ground markings.
+  const geo = new THREE.PlaneGeometry(SIGNAL_SQUARE_SIZE, SIGNAL_SQUARE_SIZE);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI/2;  // lay flat on the XZ plane
+  mesh.position.set(stripX, 0.025, squareZ);  // 0.025 m above ground, below the windsock disc (0.02) but +1 mm for z-fighting safety
+  grp.add(mesh);
+  // Initial paint with a placeholder; the updater fills in the real
+  // designator + yaw on the first tick.
+  _makeSignalSquareTexture(canvas, ctx, '--');
+  tex.needsUpdate = true;
+  signalSquares.push({
+    ap: a, mesh, mat, tex, ctx, canvas,
+    lastDesig: '--', lastYaw: null, lastFlip: 0
+  });
+}
+
+for (const a of AIRPORTS){ makeWindTee(a); makeSignalSquare(a); }
+
+function updateWindTeesAndSquares(){
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const spd = Math.hypot(wx, wz);
+  // Wind tee: arrow points INTO the wind (the direction wind comes FROM),
+  // so the nose shows which way to take off / land. Wind vector points the
+  // way wind is going TO, so "into the wind" reverses sign:
+  //   yaw = atan2(-(-wz), -wx) = atan2(wz, -wx)
+  // Hold the previous yaw on dead-calm to avoid jitter, mirroring the
+  // windsock convention.
+  let teeYaw = null;
+  if (spd > 0.3) teeYaw = Math.atan2(wz, -wx);
+  for (const t of windTees){
+    if (teeYaw !== null){ t.yawGrp.rotation.y = teeYaw; t.lastYaw = teeYaw; }
+  }
+  // Signal square: align long axis (canvas +y after the -π/2 flat tilt maps
+  // to local -z) with the wind-favoured runway landing direction. Use the
+  // shared _favoredRunwayFlip helper so the panel agrees with ATIS, the
+  // kneeboard, and the active-runway suggestion toast. Only re-render the
+  // CanvasTexture when the designator actually changes (almost never
+  // mid-flight) — cheap on the GPU side, free per-frame after that.
+  for (const s of signalSquares){
+    const ap = s.ap;
+    let flip = 1;
+    try { flip = _favoredRunwayFlip(ap); } catch(e){ flip = 1; }
+    const useHdg = ap.hdg + (flip < 0 ? Math.PI : 0);
+    const desig = (typeof runwayDesignator === 'function') ? runwayDesignator(useHdg) : '--';
+    // mesh.rotation.z spins the flat plane around world-up after the -π/2
+    // X tilt. Square sits in the airport local frame (already rotated by
+    // ap.hdg), so the local yaw needed to make the arrow point along the
+    // landing direction is (useHdg - ap.hdg) = 0 or π. Mirror via .z spin.
+    const localYaw = (flip < 0) ? Math.PI : 0;
+    if (localYaw !== s.lastYaw){
+      s.mesh.rotation.z = localYaw;
+      s.lastYaw = localYaw;
+    }
+    if (desig !== s.lastDesig){
+      _makeSignalSquareTexture(s.canvas, s.ctx, desig);
+      s.tex.needsUpdate = true;
+      s.lastDesig = desig;
+      s.lastFlip = flip;
+    }
+  }
+}
+updateWindTeesAndSquares(); // prime so first paint matches the favoured runway, not the placeholder
+
 // ====== AIRPORT BEACONS ======
 // Slow rotating airport beacon on a short tower near the threshold of every
 // field. Two small emissive heads (green + white) sit back-to-back and spin
@@ -18560,6 +18738,9 @@ function step(dt){
   // Wind socks at each airport tilt with wind speed and point downwind so
   // pilots can read the breeze without staring at the HUD.
   updateWindSocks();
+  // Wind tee swings into the wind and the painted signal square next to it
+  // re-aims its arrow + designator to the wind-favoured runway end.
+  updateWindTeesAndSquares();
 
   // Acrobat tracker: watch for completed 360° pitch loops / aileron rolls
   // and bump pilotStats + toast when one lands. Cheap, runs once per step.
