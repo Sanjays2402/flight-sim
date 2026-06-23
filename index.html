@@ -564,6 +564,30 @@
   #sqkeypad .pr.emerg:hover { border-color:#ff7a7a; }
   #sqkeypad .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
   #sqkeypad kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
+  /* Time-of-day quick-set keypad overlay (Shift+T in the air). Mirrors
+     the #sqkeypad / #jumpsel chrome: dim full-screen backdrop, single
+     centered card, kbd hint row at the bottom. Five preset rows show DAWN
+     / MORNING / NOON / DUSK / NIGHT with a sky-evocative label and the
+     snap-target time, plus a tiny "1"-"5" badge so the keyboard shortcut
+     is obvious. The .cur class tags whichever row is closest to the live
+     world clock so the player sees where the world sits before they snap.
+     Hidden in photo mode via PHOTO_HIDE_IDS so saved PNGs stay clean. */
+  #timekeypad { position:fixed; inset:0; background:rgba(4,8,14,.55); backdrop-filter:blur(6px); z-index:26; display:none; align-items:center; justify-content:center; padding:24px; }
+  #timekeypad.show { display:flex; }
+  #timekeypad .card { width:300px; max-width:100%; background:rgba(10,16,24,.92); border:1px solid #1e3548; border-radius:10px; padding:14px 16px 12px; color:#eaf2ff; box-shadow:0 18px 60px rgba(0,0,0,.55); font-family:inherit; }
+  #timekeypad h2 { margin:0 0 2px; font-size:14px; letter-spacing:2px; color:#ffd166; text-align:center; }
+  #timekeypad .sub { margin:0 0 10px; font-size:10px; letter-spacing:2px; color:#7a8fa8; text-align:center; }
+  #timekeypad .now { text-align:center; font-size:26px; letter-spacing:4px; color:#7ee787; font-variant-numeric:tabular-nums; margin:0 0 12px; padding:4px 0; background:rgba(8,14,22,.55); border:1px solid #1e3548; border-radius:6px; }
+  #timekeypad .presets { display:flex; flex-direction:column; gap:6px; margin:0 0 10px; }
+  #timekeypad .presets .pr { display:flex; align-items:center; gap:10px; padding:8px 10px; background:rgba(20,30,44,.7); border:1px solid #243b54; border-radius:6px; color:#eaf2ff; cursor:pointer; font:inherit; font-size:12px; letter-spacing:1px; text-align:left; transition:background .12s, border-color .12s; }
+  #timekeypad .presets .pr:hover { background:rgba(34,52,76,.85); border-color:#3a5d80; }
+  #timekeypad .presets .pr.cur { border-color:#7ee787; box-shadow:inset 0 0 0 1px rgba(126,231,135,.4); }
+  #timekeypad .presets .pnum { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:4px; background:rgba(255,209,102,.15); border:1px solid rgba(255,209,102,.5); color:#ffd166; font-size:10px; font-weight:700; }
+  #timekeypad .presets .plabel { flex:1; color:#eaf2ff; font-weight:600; }
+  #timekeypad .presets .ptime { color:#7ee787; font-variant-numeric:tabular-nums; font-size:11px; }
+  #timekeypad .hint { font-size:10px; color:#7a8fa8; letter-spacing:1px; text-align:center; margin-top:4px; }
+  #timekeypad .hint kbd { background:rgba(20,30,44,.9); border:1px solid #243b54; border-radius:3px; padding:1px 4px; color:#eaf2ff; font-size:10px; font-family:inherit; }
+
   /* First-flight tutorial overlay: shows once on the very first launch (latch
      persisted in localStorage as `flightsim.tutorial.v1`) above the intro
      menu, so brand-new players see the core control list before they pick
@@ -678,7 +702,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -876,6 +900,15 @@
     <div class="grid" id="sqGrid"></div>
     <div class="presets" id="sqPresets"></div>
     <div class="hint">type <kbd>0</kbd>–<kbd>7</kbd> · <kbd>Backspace</kbd> erase · <kbd>Enter</kbd> set · <kbd>K</kbd>/<kbd>Esc</kbd> close</div>
+  </div>
+</div>
+<div id="timekeypad">
+  <div class="card">
+    <h2>TIME OF DAY</h2>
+    <div class="sub">SET WORLD CLOCK</div>
+    <div class="now" id="tkNow">--:--</div>
+    <div class="presets" id="tkPresets"></div>
+    <div class="hint">press <kbd>1</kbd>–<kbd>5</kbd> to set · <kbd>Shift</kbd>+<kbd>T</kbd>/<kbd>Esc</kbd> close</div>
   </div>
 </div>
 <div id="achievements"></div>
@@ -7908,6 +7941,13 @@ const state = {
   // jumpOpen: the K-toggle handler and any Esc consumer check this so the
   // keypad's own close path wins cleanly before falling through to pause.
   sqkeypadOpen: false,
+  // #timekeypad time-of-day quick-set modal is visible. Same gate idea
+  // as sqkeypadOpen / jumpOpen: opens with Shift+T in the air, lets the
+  // player snap state.todHours to one of five canonical hours (dawn /
+  // morning / noon / dusk / night) so they can chain time-of-day phases
+  // without waiting on the slow real-time TOD cycle. Closed via Shift+T
+  // or Esc.
+  timekeypadOpen: false,
   // Pre-flight checklist (#preflight) overlay visible. Shift+K toggles.
   // Pure HUD panel — does NOT pause the sim and does NOT block input, so
   // it's not listed in isAnyOtherModalOpen(). Auto-closes on takeoff or
@@ -8337,12 +8377,23 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='KeyC' && !e.shiftKey) { state.cam = (state.cam + 1) % CAM_NAMES.length; updateCamModeUi(); }
-  // Shift+T runs the cockpit warning-chime self-test (stall horn / gear /
-  // GPWS / fire / oil pressure) so the pilot can verify audio settings
-  // before takeoff. Plain T still bumps the time-of-day by an hour. Gating
-  // (on the ground + parking brake set + safe state) lives inside
+  // Shift+T routes by airborne state. On the ground it fires the
+  // cockpit warning-chime self-test (stall horn / gear / GPWS / fire
+  // / oil pressure) so the pilot can verify audio settings before
+  // takeoff; gating (parking brake set + safe state) lives inside
   // startWarnTest() so the keyup handler can mirror the same checks.
-  if (e.code==='KeyT' && e.shiftKey){ startWarnTest(); return; }
+  // In the air it opens the time-of-day quick-set keypad (DAWN /
+  // MORNING / NOON / DUSK / NIGHT presets) so the player can snap
+  // the world clock without waiting on the slow real-time TOD cycle.
+  // Plain T still bumps the time-of-day by an hour. The airborne
+  // split avoids double-triggering the cold-start ritual or
+  // sunrise/sunset toasts on a fresh ground-bound mission.
+  if (e.code==='KeyT' && e.shiftKey){
+    e.preventDefault();
+    if (state.onGround){ startWarnTest(); return; }
+    if (typeof window.openTimeKeypad === 'function') window.openTimeKeypad();
+    return;
+  }
   if (e.code==='KeyT' && !e.shiftKey) state.todHours = (state.todHours + 1) % 24;
   // Shift+A fires an ATIS broadcast for the nearest airport. Plain A is
   // already mapped to roll-left via the global `keys` map, so we gate strictly
@@ -10574,7 +10625,7 @@ function startWarnTest(){
   if (state.warnTest) return;
   if (state.introOpen || state.paused || state.replayActive || state.photoMode) return;
   if (state.crashed || (state.bailout && state.bailout.phase !== 'idle')) return;
-  if (state.jumpOpen || state.sqkeypadOpen) return;
+  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen) return;
   if (!state.onGround) return;
   if (!state.parkingBrake){
     showStatus('WARNING TEST', 'set parking brake first', 'hard');
@@ -18545,7 +18596,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -19404,6 +19455,7 @@ updateCamModeUi();
     if (state.replayActive) return;
     if (state.jumpOpen) return;
     if (state.sqkeypadOpen) return;
+    if (state.timekeypadOpen) return;
     if (!state.paused && isAnyOtherModalOpen()) return;
     e.preventDefault();
     if (state.paused) closePause(); else openPause();
@@ -19555,6 +19607,8 @@ updateCamModeUi();
     if (state.photoMode) return false;
     if (state.paused) return false;
     if (state.crashed) return false;
+    if (state.sqkeypadOpen) return false;
+    if (state.timekeypadOpen) return false;
     return true;
   }
   function openPanel(){
@@ -19816,6 +19870,7 @@ updateCamModeUi();
     if (state.paused) return false;
     if (state.crashed) return false;
     if (state.jumpOpen) return false;
+    if (state.timekeypadOpen) return false;
     return true;
   }
 
@@ -19884,6 +19939,168 @@ updateCamModeUi();
     }
   });
 })();
+
+
+// ====== TIME-OF-DAY QUICK-SET KEYPAD ======
+// Press Shift+T in the air to open a small overlay with five preset hours:
+// DAWN (5:30), MORNING (9:00), NOON (12:00), DUSK (18:30), NIGHT (22:00).
+// Tapping a row (or typing 1-5) snaps state.todHours to that value so the
+// player can chain a sunset flight straight into a night approach without
+// waiting on the slow real-time TOD cycle. Ground presses of Shift+T still
+// fire the warning-chime self-test (handled in the main keydown listener);
+// the airborne-only split keeps the cold-start ritual + sunrise/sunset
+// toasts from getting double-triggered on a fresh mission. Mirrors the
+// #sqkeypad / #jumpsel modal pattern.
+(function setupTimeKeypadUi(){
+  const panel  = document.getElementById('timekeypad');
+  const nowEl  = document.getElementById('tkNow');
+  const listEl = document.getElementById('tkPresets');
+  if (!panel || !listEl) return;
+
+  // Five canonical hours. Order matches the on-screen row order so the 1-5
+  // keyboard mapping reads top-to-bottom. Each label is short and sky-
+  // evocative; the time string is what the player sees in the live #tod
+  // readout on the HUD so they can sanity-check the snap.
+  const PRESETS = [
+    { key:'1', label:'DAWN',    h: 5.5,  time:'05:30' },
+    { key:'2', label:'MORNING', h: 9.0,  time:'09:00' },
+    { key:'3', label:'NOON',    h:12.0,  time:'12:00' },
+    { key:'4', label:'DUSK',    h:18.5,  time:'18:30' },
+    { key:'5', label:'NIGHT',   h:22.0,  time:'22:00' },
+  ];
+
+  function fmtNow(){
+    const t = ((state.todHours % 24) + 24) % 24;
+    const h = Math.floor(t);
+    const m = Math.floor((t - h) * 60);
+    return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+  }
+
+  function refreshNow(){
+    if (nowEl) nowEl.textContent = fmtNow();
+    // Tag the row that matches the live hour (within ~15 min) as 'cur' so
+    // the player sees where the world clock sits before they snap.
+    const cur = ((state.todHours % 24) + 24) % 24;
+    for (const btn of listEl.querySelectorAll('.pr')){
+      const h = parseFloat(btn.dataset.h);
+      if (!Number.isFinite(h)){ btn.classList.remove('cur'); continue; }
+      const diff = Math.min(Math.abs(cur - h), 24 - Math.abs(cur - h));
+      btn.classList.toggle('cur', diff < 0.25);
+    }
+  }
+
+  function buildList(){
+    let html = '';
+    for (const p of PRESETS){
+      html += '<button type="button" class="pr" data-h="' + p.h + '" data-key="' + p.key + '">'
+           +   '<span class="pnum">' + p.key + '</span>'
+           +   '<span class="plabel">' + p.label + '</span>'
+           +   '<span class="ptime">' + p.time + '</span>'
+           + '</button>';
+    }
+    listEl.innerHTML = html;
+    for (const btn of listEl.querySelectorAll('button')){
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const h = parseFloat(btn.dataset.h);
+        const label = btn.querySelector('.plabel');
+        if (!Number.isFinite(h)) return;
+        applyPreset(h, label ? label.textContent : '');
+      });
+    }
+  }
+
+  function applyPreset(hours, label){
+    if (!state.timekeypadOpen) return;
+    // Snap the world clock. Setting todLastHours + nightPanelLastTod to
+    // the new value too keeps the per-frame sunrise/sunset cross check and
+    // the night-panel auto-suggest from firing a stale crossing on the
+    // very next frame (since both edge-trigger off the previous-frame
+    // value).
+    state.todHours          = ((hours % 24) + 24) % 24;
+    state.todLastHours      = state.todHours;
+    state.nightPanelLastTod = state.todHours;
+    // Re-paint the sky/sun/fog right away so the modal closes onto the
+    // new world look instead of waiting for the next step() tick.
+    try { if (typeof applyTimeOfDay === 'function') applyTimeOfDay(state.todHours); } catch(e){}
+    try { if (typeof showStatus === 'function') showStatus('TIME OF DAY', (label || 'SET') + ' · ' + fmtNow(), 'good'); } catch(e){}
+    refreshNow();
+    // Brief feedback, then auto-close so the modal doesn't sit on top of
+    // the sim after the player has confirmed their choice. Matches the
+    // squawk preset auto-close timing.
+    setTimeout(closePanel, 450);
+  }
+
+  function canOpen(){
+    // Airborne-only per spec: keeps the cold-start ritual and sunrise /
+    // sunset toasts from getting double-triggered on a fresh ground-bound
+    // mission.
+    if (state.onGround) return false;
+    if (state.introOpen) return false;
+    if (state.replayActive) return false;
+    if (state.photoMode) return false;
+    if (state.paused) return false;
+    if (state.crashed) return false;
+    if (state.jumpOpen) return false;
+    if (state.sqkeypadOpen) return false;
+    return true;
+  }
+
+  function openPanel(){
+    if (state.timekeypadOpen) return;
+    if (!canOpen()) return;
+    state.timekeypadOpen = true;
+    refreshNow();
+    panel.classList.add('show');
+    // Shift+T is also the chime-test binding on the ground. Clear any held
+    // KeyT entry so the keys map doesn't carry it back into the chime-test
+    // path when the player taxis to a stop with the modal still open.
+    try { if (typeof keys === 'object') keys['KeyT'] = false; } catch(e){}
+  }
+  function closePanel(){
+    if (!state.timekeypadOpen) return;
+    state.timekeypadOpen = false;
+    panel.classList.remove('show');
+    try { if (typeof keys === 'object') keys['KeyT'] = false; } catch(e){}
+  }
+
+  // Expose open/closeTimeKeypad on window so the main Shift+T handler can
+  // route airborne presses here without depending on declaration ordering
+  // inside the giant script block.
+  window.openTimeKeypad  = openPanel;
+  window.closeTimeKeypad = closePanel;
+
+  buildList();
+  refreshNow();
+
+  // Click background to dismiss; click on a row applies (handled above).
+  panel.addEventListener('click', e => {
+    if (e.target === panel) closePanel();
+  });
+
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    // Esc / Shift+T close the modal when it's open. Plain T (no shift) is
+    // the +1h time bump in the main keydown listener; we deliberately
+    // ignore it here so the bump still works while the modal is closed.
+    if (state.timekeypadOpen){
+      if (e.code === 'Escape'){ e.preventDefault(); closePanel(); return; }
+      if (e.code === 'KeyT' && e.shiftKey){ e.preventDefault(); closePanel(); return; }
+      // Digit1..Digit5 (and Numpad1..Numpad5) select a preset. Ignore 0 and
+      // 6-9 since the preset table is exactly five rows.
+      let n = -1;
+      if (e.code.startsWith('Digit'))  n = parseInt(e.code.slice(5), 10);
+      if (e.code.startsWith('Numpad')) n = parseInt(e.code.slice(6), 10);
+      if (Number.isFinite(n) && n >= 1 && n <= PRESETS.length){
+        e.preventDefault();
+        const p = PRESETS[n - 1];
+        if (p) applyPreset(p.h, p.label);
+        return;
+      }
+    }
+  });
+})();
+
 
 requestAnimationFrame(loop);
 </script>
