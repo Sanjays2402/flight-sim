@@ -157,10 +157,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Go-around toast + ATC call — missed-approach detector inside the existing radalt callout block: when the player slams throttle past 95% below 300m AGL within 2 km of a runway with positive vertical speed and gear still down, fire a one-shot "🛬 GO-AROUND" toast + PILOT ATC line "Going around, traffic acknowledged." Re-arms once AGL climbs back above 200m (mirrors the radalt arm/re-arm pattern). Gated to free-flight + touch-and-go so scored hop/ring/carrier/wing missions never pop it on a botched final. Missed approaches finally feel like a real decision instead of just "engine got loud again".
 
+- [x] Rain droplets on the windshield — cockpit-cam-only wet-glass overlay that runs when settings.rain is on. A pool of ~22 small white-blue droplets sits in the lower two-thirds of the screen with soft radial-gradient heads + trailing streaks, drifting down-and-back, fading in at the top and out near the bottom, raked sideways by airspeed (faster IAS = harder tilt) with a mild crosswind nudge. Layers above the existing #rainOverlay streaks so the glass actually reads as wet from inside the cockpit. Reuses the rain settings toggle so there's zero new UI; hidden in photo / pause / replay / intro via the same gating pattern as the bird-strike splatter so saved PNGs and frozen frames stay clean.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Rain droplets on the windshield — cockpit cam only, when rain is on. A pool of ~20 small white-blue droplet sprites that drift down-and-back across the lower-third of the screen, fade in at the top, fade out at the bottom, get blown sideways by IAS so faster speeds tilt the streaks. Reuses the existing rain-toggle gate so settings stay in one place; hidden in photo mode so saved PNGs stay clean. Cockpit view finally feels wet instead of just having a darker sky overlay.
 - [ ] First-flight tutorial overlay — on the very first launch (latched in localStorage), pop a centered card listing the core controls in two columns (Throttle/Pitch/Roll/Yaw, then C cam / H autopilot / G gear / F flaps / B brakes / X engine / I ignite). Big "GOT IT" button + a "Don't show again" checkbox; settings panel gets a "Show tutorial next launch" row so returning pilots can re-arm it. New players currently have to crash several times before they figure out what every key does — this is the cheapest possible onboarding fix.
 
 ## How the ship loop works
