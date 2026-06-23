@@ -4361,6 +4361,70 @@ const rudder = mkSurface(0.10, 0.80, 0.40);
 rudder.position.set(0, 0.70, 3.96);
 plane.add(rudder);
 
+// ====== COCKPIT YOKE ======
+// A small grey control column drawn in the lower-center of the cockpit cam
+// only. Parented under the plane so it inherits all plane motion (including
+// the head-bob, which translates the camera but not the plane — the yoke
+// still reads as physically attached to the airframe since the camera bob
+// is tiny relative to the yoke's offset from the eye). Pitches with the
+// rendered elevator input and rolls with the rendered aileron input — both
+// already smoothed via SURFACE_RATE and already include AP overrides + trim,
+// so we get a clean ~7/sec lerp "for free" without re-smoothing here.
+//
+// Geometry: a stubby cylindrical shaft (~0.10 m diameter, 0.20 m tall) with
+// a wider grip on top (~0.18 m diameter, 0.05 m tall). Plain grey matte
+// material so it reads as "yoke" instead of competing with the panel lights.
+// Visibility is gated through the existing updateCamModeUi airframe-hide
+// loop via the yokeGroup exception list so we don't need a parallel toggle.
+const yokeGroup = new THREE.Group();
+const yokePivot = new THREE.Group();
+// Pivot is positioned in plane-local space so the column sits just ahead of
+// the camera eye (which is at plane-local (0, 0.55, 0.4)) and below the
+// look-at line (which targets (0, 0.4, -20)). With pivot at (0, 0.18, 0.05)
+// the camera looks slightly down and the column appears in the lower-center
+// of the cockpit FOV. The pivot itself is the rotation root so a roll input
+// twists the shaft around its own axis (not around the cockpit floor).
+yokePivot.position.set(0, 0.18, 0.05);
+const yokeShaft = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.05, 0.05, 0.20, 16),
+  new THREE.MeshLambertMaterial({ color: 0x4a4f55 })
+);
+// Cylinder default axis is Y; we want the shaft pointing UP from the floor,
+// so the default orientation is correct. Offset by half its height so the
+// base sits at the pivot and the top extends upward.
+yokeShaft.position.y = 0.10;
+yokePivot.add(yokeShaft);
+// Grip: a flat disc on top of the shaft. A real yoke would be a horn /
+// half-circle, but a low-poly disc reads cleanly at the cockpit FOV and
+// keeps the LOC small.
+const yokeGrip = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.09, 0.09, 0.03, 20),
+  new THREE.MeshLambertMaterial({ color: 0x6a7079 })
+);
+yokeGrip.position.y = 0.215;
+yokePivot.add(yokeGrip);
+// Two small grey "horns" off the grip so the silhouette reads as a yoke and
+// not a gear-shifter. Each is a thin box on either side of the grip top.
+for (let s = -1; s <= 1; s += 2){
+  const horn = new THREE.Mesh(
+    new THREE.BoxGeometry(0.05, 0.025, 0.08),
+    new THREE.MeshLambertMaterial({ color: 0x6a7079 })
+  );
+  horn.position.set(s * 0.10, 0.215, 0);
+  yokePivot.add(horn);
+}
+yokeGroup.add(yokePivot);
+plane.add(yokeGroup);
+// Hidden by default — the per-frame tick flips it on in cockpit cam, and the
+// airframe-hide loop in updateCamModeUi skips it via the exception list so
+// the loop doesn't override our visibility decision.
+yokeGroup.visible = false;
+// Max visual deflection — kept smaller than the real surfaces because the
+// yoke is only ~0.2 m tall and bigger angles would push the grip into the
+// instrument panel below.
+const YOKE_PITCH_MAX_RAD = 0.32;  // ~18° forward/back travel
+const YOKE_ROLL_MAX_RAD  = 0.55;  // ~31° left/right wheel twist
+
 // Smoothed surface deflection state. Eased toward target each frame so a
 // stick snap doesn't make the surfaces visibly twitch. Max deflection picked
 // to read like real-world max travel (~22° aileron/elevator, ~28° rudder)
@@ -13607,6 +13671,22 @@ function step(dt){
     // yIn>0 = right rudder = TE swings to the +X side. Rudder hinge axis is
     // Y, so a NEGATIVE Y-rotation swings the TE that way.
     rudder.rotation.y   = -rudderAnim   * RUDDER_MAX_RAD;
+    // Cockpit yoke: mirror the smoothed pitch + roll inputs onto the visual
+    // control column. Cockpit cam only, hidden in photo/pause/replay/intro
+    // so saved PNGs and frozen frames stay clean. elevatorAnim<0 = pull back
+    // = yoke leans TOWARD the pilot, which is +X rotation around the pivot
+    // (top tilts back toward +Z=+rear), so flip the sign. aileronAnim>0 =
+    // right roll = wheel twists clockwise from the pilot's seat = +Z rotation.
+    if (yokeGroup){
+      const yokeVisible = state.cam === 1
+        && !state.photoMode && !state.paused
+        && !state.replayActive && !state.introOpen;
+      yokeGroup.visible = yokeVisible;
+      if (yokeVisible){
+        yokePivot.rotation.x = -elevatorAnim * YOKE_PITCH_MAX_RAD;
+        yokePivot.rotation.z = -aileronAnim  * YOKE_ROLL_MAX_RAD;
+      }
+    }
   }
 
   // Wing flex: bend the wingtip pivots upward proportional to the live G-load
@@ -17413,6 +17493,10 @@ function updateCamModeUi(){
   for (let i = 0; i < plane.children.length; i++){
     const child = plane.children[i];
     if (child === propGroup || child === propGroupL || child === propGroupR) continue;
+    // yokeGroup is owned by the per-frame cockpit-yoke tick, which sets
+    // visibility based on cockpit + photo/replay/pause/intro gates. Skip
+    // here so the airframe-hide loop doesn't fight that decision.
+    if (typeof yokeGroup !== 'undefined' && child === yokeGroup) continue;
     child.visible = !cockpit;
   }
   // Cockpit instrument panel only shows in cockpit cam. Photo mode hides it via
