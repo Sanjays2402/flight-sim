@@ -4946,7 +4946,10 @@ for (let ai = 0; ai < AIRPORTS.length; ai++){
     });
   }
   scene.add(group);
-  birdFlocks.push({ centre, birds, group, ap: a });
+  // lastWarnMs latches the per-flock proximity ATC call so a slow circle
+  // through a flock can't spam the strip. tickBirdProximity() clears these
+  // back to -Infinity on resetPlane() so each fresh sortie re-arms.
+  birdFlocks.push({ centre, birds, group, ap: a, lastWarnMs: -Infinity });
 }
 function updateBirds(dt){
   if (dt <= 0) return;
@@ -9463,6 +9466,11 @@ function resetPlane(){
   state.tcasAtcLatch = false;
   state.tcasPingAt = 0;
   state.tcasResolvedAt = 0;
+  // Bird-proximity warning — re-arm every flock's per-sortie latch so the
+  // first close pass on a new flight gets a fresh "BIRDS, BIRDS" call.
+  if (typeof birdFlocks !== 'undefined' && Array.isArray(birdFlocks)){
+    for (let i = 0; i < birdFlocks.length; i++) birdFlocks[i].lastWarnMs = -Infinity;
+  }
   // Go-around latch — fresh sortie clears it so the first missed approach of
   // the new flight can still fire its toast + ATC call.
   state.goAroundArmed = true;
@@ -11630,6 +11638,72 @@ function tickGearHorn(){
   }
 }
 
+// ====== BIRD FLOCK PROXIMITY WARNING ======
+// Leading indicator for the existing bird-strike hazard. When the player is
+// drifting into the altitude band where a flock is orbiting AND closing on
+// it, fire a single-shot ATC line with a clock-position bearing so attentive
+// pilots can break away before eating the wet thud. Per-flock 4s cooldown
+// keeps a slow circle through bird country from spamming the strip; the
+// resetPlane() rearm clears the latches on every fresh sortie.
+const BIRD_WARN_HORIZ_M  = 200;   // m — horizontal radius for the warning
+const BIRD_WARN_VERT_M   = 40;    // m — ± vertical band around flock altitude
+const BIRD_WARN_CLOSE_MS = 4000;  // ms — per-flock cooldown between warnings
+const BIRD_WARN_MIN_CLOSURE = 5;  // m/s — must be closing this fast to fire
+function tickBirdProximity(){
+  // Same gate as birdStrikeAllowed(): no warnings during intro / photo /
+  // pause / replay / crashed / on-ground. We deliberately do NOT reuse the
+  // cooldown clause from birdStrikeAllowed() — the warning has its own per-
+  // flock latch and should fire even right after a strike on a *different*
+  // flock.
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return;
+  if (state.crashed || state.onGround) return;
+  if (typeof birdFlocks === 'undefined' || !Array.isArray(birdFlocks) || birdFlocks.length === 0) return;
+  const nowMs = performance.now();
+  // Plane heading: rotation.y is the same convention used elsewhere in this
+  // file (0 = north, +Y is up). Forward unit vector in world space.
+  const hdg = plane.rotation.y || 0;
+  const fwdX = -Math.sin(hdg);
+  const fwdZ = -Math.cos(hdg);
+  for (let i = 0; i < birdFlocks.length; i++){
+    const flock = birdFlocks[i];
+    if (nowMs - flock.lastWarnMs < BIRD_WARN_CLOSE_MS) continue;
+    const dx = flock.centre.x - plane.position.x;
+    const dz = flock.centre.z - plane.position.z;
+    const dy = flock.centre.y - plane.position.y;
+    const horiz = Math.hypot(dx, dz);
+    if (horiz > BIRD_WARN_HORIZ_M) continue;
+    if (Math.abs(dy) > BIRD_WARN_VERT_M) continue;
+    // Closure rate: positive = horizontal velocity points toward the flock.
+    // Dot product of the horizontal velocity with the unit vector to the
+    // flock. Avoids div-by-zero on a near-stationary hover-near.
+    if (horiz < 1) continue;
+    const ux = dx / horiz, uz = dz / horiz;
+    const closure = state.vel.x * ux + state.vel.z * uz;
+    if (closure < BIRD_WARN_MIN_CLOSURE) continue;
+    // Clock position relative to the plane's nose. Right-hand basis: forward
+    // = 12 o'clock, the +X cross-product axis (right wing) = 3 o'clock.
+    // angle = atan2(right component, forward component); convert to 1..12.
+    const fwdComp   = dx * fwdX + dz * fwdZ;          // signed: + ahead, - behind
+    const rightComp = dx * (-fwdZ) + dz * fwdX;       // + right wing, - left wing
+    let bearing = Math.atan2(rightComp, fwdComp);      // -PI..PI, 0 = ahead
+    if (bearing < 0) bearing += Math.PI * 2;           // 0..2PI clockwise from nose
+    // 12 hours over 2PI radians; round + wrap 0 -> 12 so we never say "0 o'clock".
+    let clockHr = Math.round(bearing / (Math.PI * 2) * 12);
+    if (clockHr <= 0) clockHr = 12;
+    if (clockHr > 12) clockHr -= 12;
+    flock.lastWarnMs = nowMs;
+    if (typeof pushATC === 'function'){
+      pushATC('Birds, birds — ' + clockHr + " o'clock.", { tag: 'TWR', now: true });
+    }
+    if (typeof showStatus === 'function'){
+      showStatus('🐦 BIRDS', clockHr + " o'clock, break off", 'warn');
+    }
+    // One warning per tick — if two flocks somehow trip simultaneously we let
+    // the closer one win on the next frame, keeps the ATC strip uncluttered.
+    break;
+  }
+}
+
 // ====== TCAS-LITE (MID-AIR CONTACT WARNING) ======
 // When the player and the AI plane close on each other, fire a tiered
 // traffic alert: yellow CAUTION pill + soft repeating ping under ~600m,
@@ -13346,6 +13420,11 @@ function step(dt){
   tickWindShear();
   // Landing-gear warning horn: low + slow + descending with gear up = nag.
   tickGearHorn();
+  // Bird flock altitude warning: in the band where a flock is drifting and
+  // closing on it any quicker than a stroll, fire a one-shot ATC "BIRDS,
+  // BIRDS — 11 O'CLOCK" with a clock-position bearing so the player has
+  // a chance to break away before eating the strike.
+  tickBirdProximity();
   // TCAS-lite mid-air contact warning vs the AI plane: yellow ping +
   // bearing arrow as we close, red beep + ATC "Traffic, traffic — resolve"
   // if the geometry threatens a real collision.
