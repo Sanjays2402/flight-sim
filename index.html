@@ -1938,7 +1938,121 @@ function makeAirport(a){
 
   const aimX = a.x + Math.sin(a.hdg)*(a.len/2 - 300);
   const aimZ = a.z + Math.cos(a.hdg)*(a.len/2 - 300);
+  // PAPI light bars — physical four-light row on the left side of each
+  // runway threshold. Each light flips red/white based on the player's
+  // vertical angle to the touchdown zone vs that light's calibrated angle.
+  // Inner light targets 2.50°, outer 3.50°, so on-slope (3°) lights up as
+  // two red / two white — the classic PAPI signature. Updated each frame
+  // by tickPapiLights() and dusk-gated like the runway edge lights so the
+  // bars punch through at night and stay subtle in midday.
+  buildPapiBar(grp, a,  1, aimX, aimZ);                                                  // +z threshold (lands flying -z)
+  const aimX2 = a.x - Math.sin(a.hdg)*(a.len/2 - 300);
+  const aimZ2 = a.z - Math.cos(a.hdg)*(a.len/2 - 300);
+  buildPapiBar(grp, a, -1, aimX2, aimZ2);                                                // -z threshold (lands flying +z)
   runwayInfos.push({ ap: a, aimX, aimZ, lights: a._lights });
+}
+
+// ====== PAPI (Precision Approach Path Indicator) ======
+// One four-light bar per runway threshold. Each light has its own calibrated
+// glideslope angle; the visible red/white pattern tells the pilot whether
+// they're high, low, or on the standard 3° slope. Lights are emissive boxes
+// on a low post — bright at dusk/night, dim in daylight — mirroring the HUD
+// PAPI bar and ILS needles but visible from the actual approach window.
+const papiLights = []; // populated by buildPapiBar; one entry per individual light
+const PAPI_CAL_ANGLES = [2.50, 2.83, 3.17, 3.50]; // degrees per light, inner→outer
+const PAPI_NIGHT_FALLOFF = 0.35; // matches runway edge lights / airport beacons
+// Build a four-light PAPI bar on the LEFT side of the threshold (from the
+// approaching pilot's perspective). end=+1 places it at the +z threshold;
+// end=-1 at the -z threshold. Lights are 0.6×0.6×0.6 emissive boxes spaced
+// 1.6m apart along the runway-perpendicular axis, sitting on a slim post.
+// aimX/aimZ is the touchdown reference (300m inboard) so all four lights
+// share the same target — only the calibrated angle differs per light.
+function buildPapiBar(grp, a, end, aimX, aimZ){
+  // Local coords inside the airport group (which is already rotated to hdg).
+  // For +z threshold: pilot flies -z, so "left" of the runway = local +x.
+  // For -z threshold: pilot flies +z, so "left" of the runway = local -x.
+  const side = (end > 0 ? +1 : -1);
+  const lateral = side * (a.w/2 + 6);     // 6m off the edge stripe
+  const inboard = end * (a.len/2 - 30);   // 30m inboard from the threshold
+  // Slim grey post so the bar reads as mounted, not floating.
+  const postMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.25), postMat);
+  post.position.set(lateral, 0.7, inboard);
+  grp.add(post);
+  // Backplate so the lights stand out against the apron in daylight too.
+  const back = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 1.0, 7.4),
+    new THREE.MeshLambertMaterial({ color: 0x222222 })
+  );
+  back.position.set(lateral + side * 0.25, 1.4, inboard);
+  grp.add(back);
+  // Four light heads, spaced 1.6m along the runway-parallel axis. We mount
+  // the row along the runway-parallel direction (local z) so all four are
+  // visible from the approach (rather than stacking depth-wise behind each
+  // other). Inner light sits closest to the runway centerline (smallest z
+  // offset from threshold midline along the bar).
+  const headGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+  for (let i = 0; i < 4; i++){
+    // Spread the lights from -2.4 to +2.4 along local z, centered on inboard.
+    const offset = (i - 1.5) * 1.6;
+    const lz = inboard + offset;
+    // Each light needs its own material so we can set emissive per-bulb.
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0xffffff, emissive: 0x000000
+    });
+    const bulb = new THREE.Mesh(headGeo, mat);
+    bulb.position.set(lateral, 1.4, lz);
+    grp.add(bulb);
+    // World position of this bulb — precomputed once so the per-frame tick
+    // doesn't have to rotate local coords to world coords for every light.
+    const wx = a.x + lateral * Math.cos(a.hdg) + lz * Math.sin(a.hdg);
+    const wz = a.z - lateral * Math.sin(a.hdg) + lz * Math.cos(a.hdg);
+    const wy = a.elev + 1.4;
+    papiLights.push({
+      mat, wx, wy, wz, aimX, aimZ, aimY: a.elev,
+      calDeg: PAPI_CAL_ANGLES[i]
+    });
+  }
+}
+// Per-frame: compute the player's vertical angle to each PAPI bulb's aim
+// point and light it red (below the bulb's calibrated angle) or white
+// (above). Dusk gate keeps daylight subtle and night punchy. Cheap — one
+// hypot + atan2 per bulb (12 bulbs total across 3 airports = 36 per frame).
+function tickPapiLights(dt){
+  // Same dusk gate as runway edge lights so the bar fades in with the rest
+  // of the night lighting.
+  const dir = sunDirFor(state.todHours);
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / PAPI_NIGHT_FALLOFF));
+  // Day brightness is enough to read the colors in sunlight; night ramps up
+  // so they're properly dazzling on an after-dark approach.
+  const peakE = 0.45 + 1.05 * nightT;
+  for (let i = 0; i < papiLights.length; i++){
+    const p = papiLights[i];
+    const dx = plane.position.x - p.aimX;
+    const dz = plane.position.z - p.aimZ;
+    const dy = plane.position.y - p.aimY;
+    const horiz = Math.hypot(dx, dz);
+    // Below the runway elevation = full red. Very close in (within 50m) we
+    // freeze the bar to whatever the last reading was so we don't get a
+    // flickering pattern as the plane crosses overhead during touchdown.
+    let red;
+    if (horiz < 50){
+      // Hold last color by skipping the update — emissive stays where it was.
+      continue;
+    } else {
+      const angDeg = Math.atan2(dy, horiz) * 180 / Math.PI;
+      red = angDeg < p.calDeg;
+    }
+    // Brighten over time as we approach dusk; daylight bar is dimmer but
+    // still legible thanks to the dark backplate behind each bulb.
+    if (red){
+      p.mat.color.setRGB(1.0, 0.18, 0.18);
+      p.mat.emissive.setRGB(peakE, 0.06 * peakE, 0.06 * peakE);
+    } else {
+      p.mat.color.setRGB(1.0, 1.0, 1.0);
+      p.mat.emissive.setRGB(peakE, peakE, peakE);
+    }
+  }
 }
 
 // Fire a touchdown flare on the matching airport's runway lights. Called from
@@ -10255,6 +10369,7 @@ function step(dt){
   tickAirportBeacons(dt);
   tickNavLights(dt);
   tickLandingLight(dt);
+  tickPapiLights(dt);
   tickCanopy(dt);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
