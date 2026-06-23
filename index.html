@@ -755,7 +755,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -865,7 +865,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -8467,6 +8467,21 @@ const state = {
   primeT: -1,
   roughIdleT: -1,
   coldMorning: false,
+  // Pre-prime via Shift+I hold (1.5s) — the ritual-loving alternative to the
+  // automatic prime that tapping `I` on cold-start fires. While the player
+  // holds Shift+I, `primeHoldT` counts up from 0; reaching PRIME_HOLD_S sets
+  // `primed=true` AND stamps `primeExpiresAt` so the carb's fuel charge has a
+  // 30 s shelf life. Tap `I` after a fresh pre-prime → ignition skips the
+  // auto-prime cycle (the engine's already wet). Let the prime expire OR
+  // never pre-prime AND the engine is cold (CHT < COLD_THRESHOLD_C) → the
+  // crank now takes 2–3 spool/cough cycles to catch instead of a clean single
+  // spool. Warm engine without prime still catches in one crank (no penalty
+  // for a hot restart). All three reset in resetPlane() and on finishIgnition().
+  primeHoldT: -1,
+  primeExpiresAt: 0,
+  crankAttempt: 0,
+  crankAttemptsNeeded: 0,
+  crankCoughUntil: 0,
   // Fuel-starvation misfire — when fuel drops below MISFIRE_FUEL_START the
   // engine starts intermittently coughing: state.misfireUntil holds the
   // ctx.currentTime / performance.now() ms timestamp the current pop
@@ -9330,6 +9345,16 @@ addEventListener('keyup', e=>{
   if ((e.code==='KeyT' || e.code==='ShiftLeft' || e.code==='ShiftRight') && state.warnTest){
     stopWarnTest();
   }
+  // Shift+I pre-prime is hold-to-run — releasing either key aborts the prime
+  // mid-hold so a stray tap doesn't accidentally lock in a prime the pilot
+  // didn't intend. The completion path inside step() clears primeHoldT back
+  // to -1 the same way, so this handler only fires for early releases.
+  if ((e.code==='KeyI' || e.code==='ShiftLeft' || e.code==='ShiftRight')
+      && state.primeHoldT >= 0
+      && state.primeHoldT < PRIME_HOLD_S){
+    state.primeHoldT = -1;
+    if (state.coldStart) showStatus('COLD START', 'Shift+I primes · I cranks', 'hard');
+  }
 });
 addEventListener('keydown', e=>{
   if (e.repeat) return;
@@ -9460,7 +9485,31 @@ addEventListener('keydown', e=>{
     togglePreflight();
     return;
   }
-  if (e.code==='KeyI'){
+  if (e.code==='KeyI' && e.shiftKey){
+    // Pre-prime ritual. Holding Shift+I for PRIME_HOLD_S seconds primes the
+    // carb so a subsequent `I` tap skips the auto-prime + (on a cold engine)
+    // the 2–3-cycle crank cough-out. Only valid on the ground during a fresh
+    // cold-start (in-air deadstick restart has no time for ritual). step()
+    // advances state.primeHoldT each frame while it's >= 0; releasing Shift,
+    // I, or the cold-start ending clears the hold. autorepeat-safe via the
+    // primeHoldT-already-running guard.
+    e.preventDefault();
+    if (state.coldStart
+        && state.onGround
+        && !state.crashed
+        && !state.introOpen
+        && !state.replayActive
+        && !state.paused
+        && !state.primed
+        && state.ignitionT < 0
+        && state.primeT < 0
+        && state.primeHoldT < 0){
+      state.primeHoldT = 0;
+      showStatus('PRIMING', 'hold Shift+I to fill the carb', 'good');
+    }
+    return;
+  }
+  if (e.code==='KeyI' && !e.shiftKey){
     // Cold-start ignition. Fires when either the ground cold-start sequence
     // is armed (state.coldStart) or the in-air deadstick restart is armed
     // (state.airRestart). Otherwise this is a no-op so the I key keeps
@@ -11198,6 +11247,11 @@ function resetPlane(){
   // primer doesn't leak into the new flight.
   state.primeT = -1;
   state.primed = false;
+  state.primeHoldT = -1;
+  state.primeExpiresAt = 0;
+  state.crankAttempt = 0;
+  state.crankAttemptsNeeded = 0;
+  state.crankCoughUntil = 0;
   state.roughIdleT = -1;
   state.coldMorning = false;
   armColdStart();
@@ -12507,16 +12561,32 @@ const COLD_START_SPOOL_S = 1.6;     // seconds from crank-tap to engine-online
 const PRIME_DURATION_S   = 0.5;     // two-pump primer cycle that precedes the starter spool
 const ROUGH_IDLE_S       = 3.0;     // post-catch roughness when the player skipped the primer
 const COLD_MORNING_EXTRA_S = 0.4;   // extra spool time on a cold morning (TOD < 7)
+// Shift+I pre-prime ritual. PRIME_HOLD_S is how long the player has to hold
+// Shift+I to lock in a fresh prime; PRIME_EXPIRY_S is how long that prime
+// stays good for before the carb dries back out. COLD_THRESHOLD_C is the CHT
+// boundary below which an unprimed crank turns into a 2–3-cycle ordeal with
+// sputtery cough SFX between attempts (warm engines still light off in one).
+// COLD_CRANK_COUGH_S is the dead time between cough and the next spool so the
+// retry feels like the starter is actually re-engaging.
+const PRIME_HOLD_S         = 1.5;
+const PRIME_EXPIRY_S       = 30;
+const COLD_THRESHOLD_C     = 60;
+const COLD_CRANK_COUGH_S   = 0.55;
 function armColdStart(){
   if (!settings.coldStart) return;
   state.coldStart = true;
   state.ignitionT = -1;
   state.primeT = -1;
   state.primed = false;
+  state.primeHoldT = -1;
+  state.primeExpiresAt = 0;
+  state.crankAttempt = 0;
+  state.crankAttemptsNeeded = 0;
+  state.crankCoughUntil = 0;
   state.roughIdleT = -1;
   state.coldMorning = false;
   state.throttle = 0;
-  showStatus('COLD START', 'press I to prime + ignite', 'hard');
+  showStatus('COLD START', 'Shift+I primes · I cranks', 'hard');
 }
 function beginIgnition(){
   // Crank gate: only valid while either ignition sequence is armed (ground
@@ -12553,7 +12623,6 @@ function beginIgnition(){
       && state.onGround
       && !state.parkingBrake
       && state.primeT < 0
-      && !state.primed
       && state.ignitionT < 0
       && !state.parkingBrakeHintFired){
     state.parkingBrakeHintFired = true;
@@ -12590,6 +12659,25 @@ function beginIgnition(){
     // roughIdleT will arm in finishIgnition() based on this primed=false flag.
   }
   state.ignitionT = 0;
+  // Cold-engine cough-out seed. Cold-start ground crank with an UNPRIMED carb
+  // (no fresh Shift+I prime, and the auto-prime path above didn't run because
+  // either we're past it or the player is mid-prime force-start) plus a CHT
+  // below COLD_THRESHOLD_C now needs 2–3 crank cycles to catch with sputtery
+  // coughs in between. Warm engines AND in-air deadstick restarts always
+  // crank in one (no penalty). state.crankAttempt counts up from 1; the
+  // step() loop fires playCrankCough() + resets ignitionT for each retry
+  // until crankAttempt >= crankAttemptsNeeded, then finishIgnition() runs.
+  state.crankAttempt = 1;
+  if (state.coldStart
+      && !state.primed
+      && (state.engineTempC || ENG_TEMP_COLD) < COLD_THRESHOLD_C){
+    // Two cycles 70% of the time, three cycles 30% — just enough variance so
+    // a stubborn pilot can tell each cold morning apart without becoming a
+    // dice-roll about whether the sortie even starts.
+    state.crankAttemptsNeeded = (Math.random() < 0.3) ? 3 : 2;
+  } else {
+    state.crankAttemptsNeeded = 1;
+  }
   // Pilot is in command; tower hears the crank confirmation either way.
   pushATC('Cranking — stand by.', { tag:'PILOT', now:true });
   showStatus('IGNITION', 'spooling up...', 'good');
@@ -12859,6 +12947,56 @@ function playIgnitionCrank(){
     dPop.connect(dPg).connect(ctx.destination);
     dPop.start(t0 + dur * 0.9);
     dPop.stop(t0 + dur + 0.24);
+  }
+}
+
+// Cold-engine crank cough — fires between failed spools when the carb is dry
+// and the cylinders almost catch but die. Short low-passed noise burst layered
+// with two quick sub-thumps that descend in pitch so it reads as "engine fired,
+// then sputtered out". Fits inside COLD_CRANK_COUGH_S (0.55s) so the next
+// spool can re-engage cleanly afterward. Reuses sfxReady() like every other
+// engine SFX path so no new long-lived nodes leak.
+function playCrankCough(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.28 * settings.volume;
+  if (vol <= 0) return;
+  // Low-passed noise burst — the wet-then-dies whuff. ~280 ms decay.
+  const dur = 0.32;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let k = 0; k < data.length; k++) data[k] = (Math.random()*2 - 1) * (1 - k/data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 420;
+  lp.Q.value = 0.7;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0, t0);
+  ng.gain.linearRampToValueAtTime(vol * 0.9, t0 + 0.02);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Two descending sub-thumps — the "chuff... chuff" of two cylinders firing
+  // and then giving up. Spaced ~120 ms apart.
+  for (let i = 0; i < 2; i++){
+    const tp = t0 + i * 0.12;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    const startHz = 130 - i * 25;
+    const endHz   = 70 - i * 15;
+    osc.frequency.setValueAtTime(startHz, tp);
+    osc.frequency.exponentialRampToValueAtTime(endHz, tp + 0.16);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0, tp);
+    og.gain.linearRampToValueAtTime(vol * 0.6, tp + 0.012);
+    og.gain.exponentialRampToValueAtTime(0.0001, tp + 0.18);
+    osc.connect(og).connect(ctx.destination);
+    osc.start(tp);
+    osc.stop(tp + 0.2);
   }
 }
 
@@ -14758,6 +14896,50 @@ function _aeroBoxFinish(reason){
 }
 
 function step(dt){
+  // Shift+I pre-prime hold. While the player holds Shift+I (KeyI down AND
+  // shift state active in the keys map—the keyup handler clears primeHoldT on
+  // either key releasing), tick primeHoldT toward PRIME_HOLD_S. Hitting the
+  // target marks the carb primed and stamps PRIME_EXPIRY_S of validity. Pause
+  // / photo / replay / intro skip the tick so the player can't sneak a prime
+  // while time is frozen.
+  const _primeTickable = state.primeHoldT >= 0
+      && state.primeHoldT < PRIME_HOLD_S
+      && !state.paused
+      && !state.photoMode
+      && !state.replayActive
+      && !state.introOpen;
+  if (_primeTickable){
+    if (keys['KeyI']){
+      state.primeHoldT += dt;
+      if (state.primeHoldT >= PRIME_HOLD_S){
+        state.primeHoldT = -1;
+        state.primed = true;
+        state.primeExpiresAt = performance.now() + PRIME_EXPIRY_S * 1000;
+        // Cold morning latch matches the auto-prime path so the spool length
+        // bias is locked in at the moment of prime, not at crank time.
+        state.coldMorning = (state.todHours < 7);
+        pushATC('Engine primed, ready to crank.', { tag:'PILOT', now:true });
+        showStatus('PRIMED', 'fuel charge good for 30s', 'good');
+        playEnginePrime();
+      }
+    } else {
+      // Defensive: keys['KeyI'] cleared but keyup didn't fire (focus blur,
+      // alt-tab). Abort the hold so the prime doesn't auto-complete while
+      // the player is away from the keyboard.
+      state.primeHoldT = -1;
+    }
+  }
+  // Pre-prime expiry. Carb fuel charge dries out after PRIME_EXPIRY_S so a
+  // pilot who primed and then wandered off has to re-prime. We only clear the
+  // primed flag while the engine is still in the cold-start ritual—once the
+  // engine catches and finishIgnition() runs, primed=true permanently for the
+  // session (the fuel system is wet) and the expiry timestamp is moot.
+  if (state.coldStart && state.primed && state.primeExpiresAt > 0 && performance.now() >= state.primeExpiresAt){
+    state.primed = false;
+    state.primeExpiresAt = 0;
+    pushATC('Prime dried out — carb cold again.', { tag:'PILOT' });
+    showStatus('PRIME EXPIRED', 'Shift+I to re-prime', 'hard');
+  }
   // Engine prime cycle: advance the primer clock first. When it completes,
   // mark primed and auto-roll into the starter spool (so the player only has
   // to tap I once for the full ritual). Skipped silently when not armed.
@@ -14783,12 +14965,38 @@ function step(dt){
   // Cold-start ritual: tick the ignition timer here so the legacy throttle
   // path stays untouched. Throttle pinning lives inside the throttle branch
   // below; this just advances the spool clock when the player has cranked.
-  if ((state.coldStart || state.airRestart) && state.ignitionT >= 0){
+  // Multi-crank cold-engine handling: when a CHT-below-COLD_THRESHOLD_C start
+  // was seeded with crankAttemptsNeeded > 1 in beginIgnition(), each spool
+  // ends in a sputtery cough instead of finishIgnition(); state.crankCoughUntil
+  // holds the performance.now() ms timestamp the current cough finishes at,
+  // and once it passes we restart the spool for the next attempt. Final
+  // attempt always runs the legacy finishIgnition() path.
+  if (state.crankCoughUntil > 0 && performance.now() >= state.crankCoughUntil){
+    state.crankCoughUntil = 0;
+    state.ignitionT = 0;
+    state.crankAttempt += 1;
+    playIgnitionCrank();
+  }
+  if ((state.coldStart || state.airRestart)
+      && state.ignitionT >= 0
+      && state.crankCoughUntil <= 0){
     state.ignitionT += dt;
     // Cold morning adds COLD_MORNING_EXTRA_S to the spool so the engine takes
     // a hair longer to catch on a chilly start — ground cold-start only.
     const spoolTarget = COLD_START_SPOOL_S + ((state.coldStart && state.coldMorning) ? COLD_MORNING_EXTRA_S : 0);
-    if (state.ignitionT >= spoolTarget) finishIgnition();
+    if (state.ignitionT >= spoolTarget){
+      if (state.crankAttemptsNeeded > 1 && state.crankAttempt < state.crankAttemptsNeeded){
+        // Cold + unprimed cough: starter releases, engine almost catches and
+        // dies. Schedule the next spool after COLD_CRANK_COUGH_S so the pilot
+        // hears the failure beat before the starter re-engages.
+        playCrankCough();
+        pushATC('No catch — cranking again.', { tag:'PILOT' });
+        state.ignitionT = -1;
+        state.crankCoughUntil = performance.now() + COLD_CRANK_COUGH_S * 1000;
+      } else {
+        finishIgnition();
+      }
+    }
   }
   // Rough-idle decay after a skipped-primer start. Just a countdown so the
   // gauge / exhaust / thrust judder reads can gate off it without per-frame math.
@@ -16551,6 +16759,28 @@ function step(dt){
   // stay clean.
   const cowlPillEl = document.getElementById('cowlPill');
   if (cowlPillEl) cowlPillEl.style.display = (state.cowlFlapsOpen && !state.photoMode) ? 'inline' : 'none';
+  // Pre-prime pill (WIND row) — green ✓ PRIMED <Ns> while a Shift+I prime
+  // is fresh and the engine still hasn't caught (post-catch primed=true is
+  // permanent for the session and not interesting on the HUD). Color biases
+  // to amber under 6s left so the pilot sees the carb is about to dry out
+  // and re-primes if they want a clean catch. Hidden in photo mode + once
+  // the engine is running so the HUD doesn't carry permanent decoration.
+  const primedPillEl = document.getElementById('primedPill');
+  const primedTEl    = document.getElementById('primedT');
+  if (primedPillEl){
+    const showPrime = state.coldStart && state.primed && state.primeExpiresAt > 0
+        && !state.photoMode && !state.crashed && !state.replayActive
+        && !state.introOpen && !state.paused;
+    if (showPrime){
+      const remainMs = Math.max(0, state.primeExpiresAt - performance.now());
+      const remainS  = Math.ceil(remainMs / 1000);
+      primedPillEl.style.display = 'inline';
+      primedPillEl.style.color = remainS <= 6 ? '#ff9e3d' : '#7ee787';
+      if (primedTEl) primedTEl.textContent = remainS + 's';
+    } else {
+      primedPillEl.style.display = 'none';
+    }
+  }
   // Bailout pill (WIND row) — cyan reminder that Shift+P will work right
   // now. Lit whenever bailoutArmed() returns true (engine fire / heavy
   // damage / fuel exhaustion / inverted-low) and hidden in photo mode +
