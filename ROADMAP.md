@@ -254,6 +254,16 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Engine torque effect on takeoff — a single-engine prop in real life pulls the nose left on full-throttle takeoff roll thanks to P-factor + spiraling slipstream. Add a small yaw bias (~3–5° left swing) that scales with throttle squared and ground speed under 80 km/h, fades out airborne, and flips sign with reverse thrust. Forces the pilot to feed in right rudder on the roll like a real taildragger / GA single. Pure flight-model tweak — no new audio, no new HUD — but turns every takeoff into a teaching moment and pairs naturally with the new takeoff-clearance ATC line.
+
+- [ ] Bingo fuel auto-suggest divert — when fuel range ring shrinks below 1.2× the distance to the nearest airport, fire a one-shot PILOT ATC "Bingo fuel, diverting <id>" and drop a magenta waypoint pin on that airport's runway threshold automatically (only if no waypoint is currently set, so a pilot already routing somewhere isn't overridden). Pairs the fuel-range ring with the existing waypoint plumbing so low-fuel emergencies get a literal pointer instead of just a flashing amber gauge.
+
+- [ ] Visible engine exhaust stacks + flame puffs on full power — small grey cylinder geometry stub on each engine cowl (single or twin, follows the existing engine-config swap) plus a tiny orange additive sprite that pulses brighter during full-throttle climbs (>85% throttle) and on engine-start catch-fire. Stack stays out at idle so the visual is a reward for honking the throttle. Hidden in photo mode if it ever covers the cockpit camera. Free immersion — no new physics, no new HUD.
+
+- [ ] Mid-air contact warning (TCAS-lite) — when the player and the AI plane close within ~600 m and converging, HUD flashes a yellow `⚠ TRAFFIC` pill with a small bearing arrow pointing at the AI plane and a soft repeating ping. Closes to ~250 m or a positive-collision-course geometry escalates to red `⚠ TRAFFIC — CLIMB/DESCEND` with a sharper beep and a one-shot ATC "Traffic, traffic — resolve". Latches per encounter, clears when separation grows past 1 km. Reuses the existing AI plane plumbing + the GPWS audio path — no new assets — and turns the AI plane from a formation prize into a thing you actually have to watch.
+
+- [ ] Engine prime / mixture cycle as part of cold-start — extends the existing cold-start ritual: after `I` is pressed but before the starter spools, a short two-pump primer sequence (visible cockpit prime knob pulsing twice with a soft `chug-chug` SFX over 0.5s) primes the engine. Skipping primer (somehow forcing the engine on without it) means the engine catches but immediately roughens for ~3s (visible RPM judder + uneven exhaust note) before smoothing. Adds depth to the start ritual without lengthening it noticeably and gives cold-mornings (TOD < 7) a slightly slower catch (~0.4s extra). Pure SFX + RPM polish on the existing cold-start branch.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
