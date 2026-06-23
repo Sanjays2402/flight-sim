@@ -4009,6 +4009,75 @@ propGroupR.position.set( 2.2, 0.05, -1.55);
 plane.add(propGroupL);
 plane.add(propGroupR);
 
+// Visible engine exhaust stacks — small dark cylinder stubs angled slightly
+// outward + downward off the engine cowl(s) so they read as real stacks
+// instead of pipes glued to the fuselage. One stack on the nose for single
+// engine; one per nacelle for twin. Built once and shown/hidden by
+// applyEngineConfig() so the visual matches the prop layout. Same dark mat
+// as the prop hub so they fit the airframe without a new material.
+// Each stack has a child flame Mesh at its tip that pulses on full-throttle
+// climbs and during cold-start catch — additive orange disc so it pops
+// against the sky without needing a Sprite pool.
+const exhaustGroupNose = new THREE.Group();
+{
+  // Two stubs, one each side of the cowl, angled back + slightly outward.
+  // Cylinder is built along +Y locally then rotated so the open end faces aft.
+  const stackGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.55, 8, 1, true);
+  const flameGeo = new THREE.SphereGeometry(0.18, 8, 6);
+  const flameMat = new THREE.MeshBasicMaterial({
+    color: 0xff7820, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  for (const sideSign of [-1, 1]){
+    const stack = new THREE.Mesh(stackGeo, matDark);
+    // Rotate cylinder so its axis lies along the plane's -Z (aft) with a
+    // slight outward + downward angle so the stub reads as exhaust, not a
+    // skid. Pre-rotate to lay it on -Z, then yaw outward + pitch down a hair.
+    stack.rotation.x = Math.PI / 2;
+    stack.rotation.z = sideSign * 0.18;  // outward splay
+    stack.position.set(sideSign * 0.42, -0.18, -3.12);
+    exhaustGroupNose.add(stack);
+    const flame = new THREE.Mesh(flameGeo, flameMat.clone());
+    flame.scale.set(0.6, 0.6, 1.6);
+    flame.position.set(sideSign * 0.5, -0.22, -3.42);
+    flame.visible = false;
+    flame.renderOrder = 4;
+    flame.userData.isExhaustFlame = true;
+    exhaustGroupNose.add(flame);
+  }
+}
+plane.add(exhaustGroupNose);
+
+const exhaustGroupL = new THREE.Group();
+const exhaustGroupR = new THREE.Group();
+for (const grp of [exhaustGroupL, exhaustGroupR]){
+  // Single stub per nacelle, slightly outboard + below the prop hub.
+  const stack = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 0.45, 8, 1, true), matDark
+  );
+  stack.rotation.x = Math.PI / 2;
+  stack.position.set(0, -0.18, -0.45);
+  grp.add(stack);
+  const flame = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 8, 6),
+    new THREE.MeshBasicMaterial({
+      color: 0xff7820, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    })
+  );
+  flame.scale.set(0.55, 0.55, 1.5);
+  flame.position.set(0, -0.21, -0.72);
+  flame.visible = false;
+  flame.renderOrder = 4;
+  flame.userData.isExhaustFlame = true;
+  grp.add(flame);
+  grp.visible = false;
+}
+exhaustGroupL.position.set(-2.2, 0.05, -1.55);
+exhaustGroupR.position.set( 2.2, 0.05, -1.55);
+plane.add(exhaustGroupL);
+plane.add(exhaustGroupR);
+
 // Flip prop visuals between single nose prop and twin wing props. Called
 // once at startup and whenever the settings toggle flips. No flight-model
 // side effects.
@@ -4017,8 +4086,21 @@ function applyEngineConfig(){
   propGroup.visible = !twin;
   propGroupL.visible = twin;
   propGroupR.visible = twin;
+  // Exhaust stacks follow the prop layout: nose stubs for single, nacelle
+  // stubs for twin. The flame Mesh children inherit the group visibility,
+  // so per-frame opacity is the only thing that controls the pulse.
+  exhaustGroupNose.visible = !twin;
+  exhaustGroupL.visible = twin;
+  exhaustGroupR.visible = twin;
 }
 applyEngineConfig();
+
+// Cold-start catch pulse — one-shot timer that flares the exhaust flame
+// brighter for ~0.45s right when ignition finishes (the classic puff of
+// flame out the stack as the engine catches). Set by finishIgnition(),
+// ticked + decayed in updateExhaustFlame(), cleared in resetPlane().
+// Lives on state (initialized in the state object below); declared inline
+// where it's used so the rest of the engine block stays cohesive.
 
 // ====== LANDING LIGHT (L key) ======
 // Forward-facing white SpotLight on the left wing root, plus a faint cone
@@ -7271,6 +7353,8 @@ const state = {
   reverserT: 0,
   reverserPrevActive: false,
   reverserDustT: 0,
+  // Cold-start catch flare timer for the visible exhaust flame (seconds).
+  exhaustCatchT: 0,
   vel: new THREE.Vector3(0,0,0),
   onGround: true,
   crashed: false,
@@ -9225,6 +9309,10 @@ function resetPlane(){
   state.reverserPrevActive = false;
   state.reverserDustT = 0;
   clearReverseDust();
+  // Exhaust flame state — clear the catch-pulse timer so the new sortie
+  // starts dark, then ignition relights it. updateExhaustFlame() handles
+  // the per-frame opacity from there.
+  state.exhaustCatchT = 0;
   // Canopy: every fresh sortie starts closed and silent so the engine can
   // actually crank. Snap both the commanded state and the rendered angle so
   // there's no eased lerp playing as the player spawns in.
@@ -10453,8 +10541,57 @@ function finishIgnition(){
   // it back, also clear the engine-out so thrust returns when the player
   // pushes the throttle. Pure mission-start path already has engineOut=false.
   state.engineOut = false;
+  // Flare the exhaust flame for ~0.45s as the engine catches — classic
+  // puff-out-the-stack moment. Decayed in updateExhaustFlame() each frame.
+  state.exhaustCatchT = 0.45;
   showStatus('ENGINE ONLINE', state.onGround ? 'cleared to taxi' : 'power restored', 'good');
   pushATC('Engine running, all gauges green.', { tag:'PILOT' });
+}
+
+// Per-frame flame intensity update. Reads throttle + engine-live + cold-start
+// catch timer and writes the additive flame material opacity on every exhaust
+// flame Mesh under both engine layouts. Idle = nothing visible (the stack
+// itself stays out, the flame is off). Above ~70% throttle the flame starts
+// to bloom; above 85% it pulses with a small high-freq jitter so the puff
+// reads as combustion. A cold-start catch flares it once on engine start.
+let _exhaustFlamePhase = 0;
+function updateExhaustFlame(dt){
+  if (state.exhaustCatchT > 0){
+    state.exhaustCatchT = Math.max(0, state.exhaustCatchT - dt);
+  }
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  // Photo / pause / replay / intro — keep the prior frame's opacity but stop
+  // animating so a saved PNG never freezes mid-flicker. The flames go fully
+  // dark in those modes so they don't bleed into screenshots.
+  const suppress = state.photoMode || state.paused || state.replayActive || state.introOpen;
+  let base = 0;
+  if (!suppress && engineLive){
+    // Soft ramp from 0 at 70% throttle to ~0.9 at 100%.
+    const t = state.throttle || 0;
+    if (t > 0.7){
+      const k = Math.min(1, (t - 0.7) / 0.3);
+      base = 0.55 * k;
+      // High-throttle jitter for combustion shimmer.
+      _exhaustFlamePhase += dt * 30;
+      base += 0.18 * k * (0.5 + 0.5 * Math.sin(_exhaustFlamePhase));
+    }
+  }
+  // Cold-start catch puff — bright orange flash that decays linearly.
+  if (!suppress && state.exhaustCatchT > 0){
+    base = Math.max(base, state.exhaustCatchT / 0.45 * 0.95);
+  }
+  if (suppress) base = 0;
+  // Write to every flame child under the active exhaust group. Cheap loop —
+  // 2 children for single, 1 for each nacelle. Inactive groups are .visible=false
+  // so their flame opacity write is harmless.
+  const groups = [exhaustGroupNose, exhaustGroupL, exhaustGroupR];
+  for (const g of groups){
+    for (const c of g.children){
+      if (!c.userData || !c.userData.isExhaustFlame) continue;
+      c.material.opacity = base;
+      c.visible = base > 0.001;
+    }
+  }
 }
 // Engine instrument startup self-test — sweep duration in seconds. Splits into
 // a 0→max ramp (first half) and a max→operating ease (second half). Tuned to
@@ -12732,6 +12869,10 @@ function step(dt){
   propGroup.rotation.x = state.reverserT * 0.35;
   propGroupL.rotation.x = propGroupR.rotation.x = propGroup.rotation.x;
   updateReverseDust(dt);
+  // Exhaust flame puff — pulses bright on full throttle and during the
+  // cold-start catch. Cheap per-frame material opacity write on a handful
+  // of additive sphere meshes.
+  updateExhaustFlame(dt);
   // Steam catapult tick: handles both the hold-O arm timer and the firing
   // velocity override + steam puff bloom. Runs after physics so the velocity
   // override sticks; geometry gates live in catapultEligible().
