@@ -5728,6 +5728,14 @@ const state = {
   xwTakeoffActive: false,
   xwTakeoffSide: 0,
   xwTakeoffOpacity: 0,
+  // Takeoff clearance ATC call. Fires once the first time throttle crosses
+  // ~70% on a runway with brakes off, naming the field, runway designator,
+  // and current wind. `takeoffClearArmed` is true at mission start and re-arms
+  // after a full stop on the ground so touch-and-go patterns get a fresh
+  // clearance per departure. `takeoffClearFired` latches the one-shot so a
+  // long static run-up at full throttle doesn't spam the strip.
+  takeoffClearArmed: true,
+  takeoffClearFired: false,
   // Engine fire emergency. Rare random event in normal flight, or guaranteed
   // when a bird strike hits at high throttle. While `engineFire` is true,
   // `engineFireT` counts up the seconds since ignition (drives the cowl flame
@@ -6804,6 +6812,10 @@ function resetPlane(){
   state.xwTakeoffActive = false;
   state.xwTakeoffSide = 0;
   state.xwTakeoffOpacity = 0;
+  // Takeoff clearance: fresh sortie always gets a clearance call on the
+  // first throttle push past 70% with brakes off.
+  state.takeoffClearArmed = true;
+  state.takeoffClearFired = false;
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
@@ -9219,6 +9231,7 @@ function step(dt){
   drawILSNeedles(hdg);
   drawCrabIndicator(hdg);
   drawXwTakeoffHint();
+  maybeFireTakeoffClearance();
   drawChecklist(indicatedKmh);
   drawMinimap(hdg);
   drawWeatherRadar();
@@ -10257,6 +10270,66 @@ function drawXwTakeoffHint(){
   xwhintCtx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
   xwhintCtx.fillStyle = 'rgba(232,139,232,0.85)';
   xwhintCtx.fillText('CROSSWIND', W/2, H - 4);
+}
+
+// ====== Takeoff clearance ATC call ======
+// One-shot tower clearance the first time the player advances throttle past
+// 70% while on a runway with brakes off. Names the field, the runway
+// designator the plane is actually pointing down (so reciprocal departures
+// read 27 vs 09 on the same strip), and the current wind ("<DDD> at <NN>")
+// or "winds calm" when speed < 3 kt. Pairs with the existing aileron-into-wind
+// coach + departure callout so the takeoff sequence sounds like real radio
+// chatter. Re-arms after a full stop on the ground so touch-and-go patterns
+// (or back-taxi for another departure) get a fresh clearance each time.
+function maybeFireTakeoffClearance(){
+  const live = !state.crashed && !state.paused && !state.replayActive
+               && !state.photoMode && !state.introOpen;
+  if (!live) return;
+  if (!state.onGround) return;
+  const gs = Math.hypot(state.vel.x, state.vel.z);
+  // Full-stop re-arm: once the previous clearance has fired, the next time
+  // the wheels are essentially stopped on the ground re-arms the latch so
+  // back-taxi-and-go (or touch-and-go full stop) gets a fresh call.
+  if (state.takeoffClearFired && gs < 0.8){
+    state.takeoffClearFired = false;
+    state.takeoffClearArmed = true;
+  }
+  if (!state.takeoffClearArmed || state.takeoffClearFired) return;
+  if (state.brakes) return;
+  if (state.throttle < 0.70) return;
+  // Must actually be on a runway (taxiway / apron / grass shouldn't trip it).
+  let onRwy = null;
+  try {
+    const proj = (typeof landingProj === 'function')
+      ? landingProj(plane.position.x, plane.position.z) : null;
+    if (proj && proj.ri && proj.onRunway) onRwy = proj;
+  } catch(e){ onRwy = null; }
+  if (!onRwy) return;
+  state.takeoffClearFired = true;
+  state.takeoffClearArmed = false;
+  if (typeof pushATC !== 'function') return;
+  // Build the line. runwayDesignator() picks the threshold matching the
+  // plane's nose so reciprocal departures read correctly.
+  let rwy = '';
+  try {
+    if (typeof runwayDesignator === 'function'){
+      rwy = runwayDesignator(onRwy.ri.ap.hdg, plane);
+    }
+  } catch(e){ rwy = ''; }
+  const windSpd = Math.hypot(state.wind.x, state.wind.z);
+  const kt = Math.round(windSpd * 1.94384);
+  const rwyPart = rwy ? 'RWY ' + rwy + ', ' : '';
+  let line;
+  if (kt < 3){
+    line = onRwy.ri.ap.id + ', cleared for takeoff ' + rwyPart + 'winds calm.';
+  } else {
+    let from = Math.atan2(-state.wind.x, -state.wind.z) * 180/Math.PI;
+    if (from < 0) from += 360;
+    const dir = String(Math.round(from / 10) * 10 % 360).padStart(3, '0');
+    line = onRwy.ri.ap.id + ', cleared for takeoff ' + rwyPart
+         + 'wind ' + dir + ' at ' + kt + '.';
+  }
+  pushATC(line, { tag:'TWR', now:true });
 }
 
 // ====== Mini-map ======
