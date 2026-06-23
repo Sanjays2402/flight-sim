@@ -20915,6 +20915,87 @@ function step(dt){
     }
   }
 
+  // Tower flyby achievement — stricter cousin of the soft `+1 FLYBY` toast
+  // above. Same per-airport gate, but adds the showboat conditions: within
+  // 200 m horizontally of the beacon tower, AGL ≤ 60 m above the tower's
+  // base (a.elev), ground speed ≥ 180 km/h, gear UP, and pointed within
+  // ±20° of a straight pass (velocity horizontal is near-perpendicular to
+  // the plane-to-tower offset, i.e. you're buzzing it, not heading straight
+  // at it or orbiting). Latched per airport id in localStorage so each
+  // tower's achievement fires exactly once, ever. Counter row already
+  // exists in the pilot-stats panel as `🛬 TOWER FLYBYS` and is bumped by
+  // the soft flyby block above, so this is a pure one-shot trophy on top.
+  if (!state.crashed && !state.onGround && !state.replayActive && !state.photoMode
+      && !state.introOpen && !state.paused
+      && !state.gearDown){
+    if (!state._flybyAchSet){
+      // Lazy-init the latched set from localStorage. Survives reloads so
+      // a buzzed tower never re-fires the trophy.
+      state._flybyAchSet = new Set();
+      try {
+        const _raw = localStorage.getItem('flightsim.flyby.v1');
+        if (_raw){
+          const _arr = JSON.parse(_raw);
+          if (Array.isArray(_arr)) for (const _id of _arr) if (typeof _id === 'string') state._flybyAchSet.add(_id);
+        }
+      } catch(_e){ /* corrupt — stay empty */ }
+    }
+    // Ground speed gate first — if we're slow, no airport will qualify, so
+    // skip the whole per-airport loop. 180 km/h = 50 m/s, classic show-pass pace.
+    const _gsKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+    if (_gsKmh >= 180){
+      // Horizontal forward direction from the plane's quaternion. Reused for
+      // the dot-product alignment test below.
+      const _fwdAch = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+      const _fLen = Math.hypot(_fwdAch.x, _fwdAch.z);
+      if (_fLen > 1e-3){
+        const _fxN = _fwdAch.x / _fLen, _fzN = _fwdAch.z / _fLen;
+        for (let ai = 0; ai < AIRPORTS.length; ai++){
+          const _a = AIRPORTS[ai];
+          if (state._flybyAchSet.has(_a.id)) continue; // already earned this tower
+          // Mirror the tower position math from the soft-flyby block above
+          // (and makeAirportBeacon): local x=a.w/2+9, z=a.len/2-18 rotated by a.hdg.
+          const _lxa = _a.w/2 + 9;
+          const _lza = _a.len/2 - 18;
+          const _csa = Math.cos(_a.hdg), _sna = Math.sin(_a.hdg);
+          const _txa = _a.x + _lxa * _csa + _lza * _sna;
+          const _tza = _a.z - _lxa * _sna + _lza * _csa;
+          const _dx = plane.position.x - _txa;
+          const _dz = plane.position.z - _tza;
+          const _tda = Math.hypot(_dx, _dz);
+          if (_tda > 200 || _tda < 1) continue; // 1 m floor avoids divide-by-zero on the alignment dot
+          // AGL ABOVE THE TOWER BASE (a.elev), not above terrain. 60 m ceiling
+          // keeps the trophy honest — a high overflight doesn't count.
+          const _aglT = plane.position.y - _a.elev;
+          if (_aglT <= 5 || _aglT > 60) continue;
+          // Alignment: velocity horizontal direction should be near-perpendicular
+          // to the plane-to-tower offset. Take the unit forward dotted with the
+          // unit offset — |dot| near 0 = perpendicular = a clean pass; |dot| near
+          // 1 = pointed at or away from the tower. sin(20°) ≈ 0.342 cap.
+          const _dxN = _dx / _tda, _dzN = _dz / _tda;
+          const _alignDot = _fxN * _dxN + _fzN * _dzN;
+          if (Math.abs(_alignDot) > 0.342) continue;
+          // Earned. Latch + persist + fire toast + ATC line.
+          state._flybyAchSet.add(_a.id);
+          try { localStorage.setItem('flightsim.flyby.v1', JSON.stringify(Array.from(state._flybyAchSet))); } catch(_e){}
+          const _atcPool = [
+            'Nice pass, keep it off the deck.',
+            'Stay clear of the controlled area.',
+            'Show-off.'
+          ];
+          const _atcLine = _atcPool[(Math.random() * _atcPool.length) | 0];
+          if (typeof pushATC === 'function'){
+            pushATC(_atcLine, { tag: 'TWR', now: true });
+          }
+          if (typeof showToast === 'function'){
+            showToast('\u{1F5FC}', 'TOWER FLYBY!', 'Buzzed ' + (_a.name || _a.id) + ' tower at low altitude.');
+          }
+          break; // one trophy per frame is plenty
+        }
+      }
+    }
+  }
+
   // Co-pilot pattern callouts — three soft voice cues that walk a newer
   // pilot through a standard left-hand pattern. Reuses the same coordinate
   // math as the pattern-entry-guide rectangle on the mini-map so a callout
