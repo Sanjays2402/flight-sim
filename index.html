@@ -7244,7 +7244,32 @@ function beginIgnition(){
   // Pilot is in command; tower hears the crank confirmation either way.
   pushATC('Cranking — stand by.', { tag:'PILOT', now:true });
   showStatus('IGNITION', 'spooling up...', 'good');
+  // Cold-start only flavor: 3-line preflight checklist toast that fades over
+  // ~2.5s while the starter is spooling. Skipped on in-air deadstick restart
+  // (state.airRestart) since you're already mid-flight, not running through
+  // a checklist. Same photo / replay / pause gate as the bird-strike splatter
+  // so saved PNGs and frozen frames stay clean.
+  if (state.coldStart && !state.photoMode && !state.replayActive && !state.paused){
+    showChecklistToast();
+  }
   playIgnitionCrank();
+}
+// Cold-start preflight checklist toast — pure flavor over the existing
+// ignition ritual, no physics or gating changes. Reuses the achievement DOM
+// host + base style but with a tighter 2.5s lifecycle so it clears before the
+// engine actually catches at COLD_START_SPOOL_S.
+function showChecklistToast(){
+  const host = document.getElementById('achievements');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'ach';
+  el.style.animation = 'achSlide .35s ease-out, achFade .5s ease-in 2.0s forwards';
+  el.innerHTML =
+    '<span class="ic">\u{1F4CB}</span>' +
+    '<span class="ttl">PREFLIGHT</span>' +
+    '<span class="desc">FUEL ON \u2713<br>MIXTURE RICH \u2713<br>MAGS BOTH \u2713</span>';
+  host.appendChild(el);
+  setTimeout(function(){ if (el && el.parentNode) el.parentNode.removeChild(el); }, 2600);
 }
 function finishIgnition(){
   state.coldStart = false;
