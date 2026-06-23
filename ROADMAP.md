@@ -149,10 +149,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Cabin chime on level-off — the first frame autopilot altitude-hold captures within ±10 m of the locked target with vertical speed below 0.6 m/s, fire the iconic two-note seatbelt ding (1046 Hz → 784 Hz sine pair, 0.36s apart), pop a faint top-center `✈ CRUISING` ribbon for 2s, and queue an ATC "Cabin crew, prepare for cruise" line (PILOT tag). Latched so it only fires once per altitude lock; the latch clears on AP disengage, AP re-engage, resetPlane, and after the plane wanders >50 m vertically off lock (climb to a fresh altitude re-arms the chime). Suppressed in photo/replay/pause/intro and on the ground, and hidden via PHOTO_HIDE_IDS so saved PNGs stay clean. Reuses the existing sfxReady() context so no new nodes are allocated.
 
+- [x] Ground vehicles at airports — one tug + one fuel truck per ground airport drifting around a tiny ~120m perimeter loop on the apron between the runway shoulder and the hangar front (10m × 50m rectangle centered at mid-runway). Tug is a low green box silhouette with cab + four wheels; fuel truck is a larger white hauler with a cylindrical tank on the bed, red accent stripes, and six wheels. Each carries a small amber emissive beacon on the roof that pulses on a ~0.85–0.95s sin² cycle (phased per vehicle so neither airport blinks in lockstep). Speeds (~4–6.7 m/s walking pace) and loop phase are staggered so the truck always sits half a lap behind the tug. Heading lerps along the loop path so each vehicle correctly faces its travel direction at every corner. Visibility gate mirrors the taxi chevrons — only shown when the player is on the ground OR low overhead (AGL <220 m) within 1.2 km of the nearest airport — so cruise air views stay clean. Pure scenery: no collision, no physics, no interaction. Pairs with the hangar + AI plane + windsock + beacon tower so the apron finally reads as populated.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Ground vehicles at airports — one slow tug + one fuel truck per airport drifting in a tiny ~120m loop around the apron, low-poly boxes with a flashing amber rotating beacon on top. Purely scenery, no collision, gated to ground-or-low altitude visibility like the existing taxi chevrons so air views stay clean. Pairs with the existing AI plane + windsock + beacon tower so each field finally feels populated instead of abandoned.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

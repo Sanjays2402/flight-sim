@@ -2262,6 +2262,214 @@ function makeHangar(a, idx){
 }
 AIRPORTS.forEach((a, i) => makeHangar(a, i));
 
+// ====== GROUND VEHICLES (apron tug + fuel truck) ======
+// One slow tug + one fuel truck per ground airport, each drifting in a tiny
+// ~120m perimeter loop on the apron between the runway edge and the hangar
+// row. Pure low-poly box scenery — no collision, no physics, no interaction.
+// A flashing amber rotating beacon sits on each roof so they read as service
+// vehicles from the air. Visibility is gated like the taxi chevrons: only
+// shown when the player is on the ground or low overhead near an airport,
+// so air views stay clean. Pairs with the hangar + AI plane + windsock so
+// every field finally feels populated instead of abandoned.
+const groundVehicles = []; // [{ ap, group, vehicles:[{root, beaconMat, loop:[{x,z}], phase, speed}] }]
+const GROUND_VEH_RANGE = 1200;          // m — visibility radius from any airport
+const GROUND_VEH_AGL_MAX = 220;         // m — also visible from low passes (taxi pattern altitude)
+// Build a simple oriented loop (4-corner rectangle perimeter) in airport-local
+// space. Returns segment list with cumulative arc length so updateGroundVehicles
+// can advance by speed*dt and lerp position + heading along the path.
+function makeLoopPath(cx, cz, halfX, halfZ){
+  // Corners in CCW order so heading reads consistent with travel direction.
+  const pts = [
+    { x: cx + halfX, z: cz - halfZ },
+    { x: cx + halfX, z: cz + halfZ },
+    { x: cx - halfX, z: cz + halfZ },
+    { x: cx - halfX, z: cz - halfZ }
+  ];
+  let total = 0;
+  const segs = [];
+  for (let i=0;i<pts.length;i++){
+    const a = pts[i], b = pts[(i+1) % pts.length];
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.hypot(dx, dz);
+    segs.push({ ax: a.x, az: a.z, dx, dz, len, start: total });
+    total += len;
+  }
+  return { segs, total };
+}
+// Sample (position + heading) at arc-length s along the loop. s wraps.
+function sampleLoop(loop, s){
+  const t = ((s % loop.total) + loop.total) % loop.total;
+  for (const seg of loop.segs){
+    if (t <= seg.start + seg.len){
+      const k = (t - seg.start) / seg.len;
+      const x = seg.ax + seg.dx * k;
+      const z = seg.az + seg.dz * k;
+      // Heading: rotation.y aligns local +X with travel direction. Local
+      // forward of our vehicle bodies is +X (long axis along X), so yaw =
+      // atan2(-dz, dx) using three.js's left-handed Y-up convention.
+      const yaw = Math.atan2(-seg.dz, seg.dx);
+      return { x, z, yaw };
+    }
+  }
+  return { x: 0, z: 0, yaw: 0 };
+}
+// Tug: tiny low boxy pickup-truck silhouette, dark green cab + flat bed.
+// Built along local +X (long axis), so updateGroundVehicles can point it
+// the way it's travelling.
+function makeTug(){
+  const grp = new THREE.Group();
+  const bodyMat  = new THREE.MeshLambertMaterial({ color: 0x2d6a3a });
+  const cabMat   = new THREE.MeshLambertMaterial({ color: 0x244f30 });
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x223344 });
+  const tireMat  = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.7, 1.6), bodyMat);
+  chassis.position.y = 0.55; grp.add(chassis);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 1.5), cabMat);
+  cab.position.set(-0.5, 1.35, 0); grp.add(cab);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 1.52), glassMat);
+  win.position.set(-0.5, 1.5, 0); grp.add(win);
+  // Four wheels — short cylinders laid flat, axis along Z.
+  for (const wx of [-1.2, 1.2]) for (const wz of [-0.85, 0.85]){
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.3, 10), tireMat);
+    w.rotation.x = Math.PI/2;
+    w.position.set(wx, 0.32, wz);
+    grp.add(w);
+  }
+  return grp;
+}
+// Fuel truck: larger boxy hauler with a cylindrical tank on the bed. Cab
+// at -X, tank covering rear bed. Painted in a service-bay white so it
+// reads distinctly from the green tug at a glance.
+function makeFuelTruck(){
+  const grp = new THREE.Group();
+  const bodyMat  = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 });
+  const cabMat   = new THREE.MeshLambertMaterial({ color: 0xcfcfcf });
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x223344 });
+  const tankMat  = new THREE.MeshLambertMaterial({ color: 0xf2eadc });
+  const tireMat  = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const accent   = new THREE.MeshLambertMaterial({ color: 0xc24b3a });
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.6, 2.0), bodyMat);
+  chassis.position.y = 0.6; grp.add(chassis);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.9), cabMat);
+  cab.position.set(-1.8, 1.5, 0); grp.add(cab);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.55, 1.92), glassMat);
+  win.position.set(-1.8, 1.7, 0); grp.add(win);
+  // Cylindrical fuel tank lying along +X across the rear bed.
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 3.4, 14), tankMat);
+  tank.rotation.z = Math.PI/2;
+  tank.position.set(0.8, 1.65, 0); grp.add(tank);
+  // Red accent stripe along the tank side so it reads as "fuel".
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(3.42, 0.18, 0.05), accent);
+  stripe.position.set(0.8, 1.65, 0.86); grp.add(stripe);
+  const stripe2 = stripe.clone(); stripe2.position.z = -0.86; grp.add(stripe2);
+  // Six wheels — two front under cab, four rear under tank.
+  const wheelPos = [[-2.0,-1.05],[-2.0,1.05],[0.2,-1.05],[0.2,1.05],[1.6,-1.05],[1.6,1.05]];
+  for (const [wx, wz] of wheelPos){
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.32, 10), tireMat);
+    w.rotation.x = Math.PI/2;
+    w.position.set(wx, 0.42, wz);
+    grp.add(w);
+  }
+  return grp;
+}
+// Add a small flashing amber beacon to the roof of the given vehicle group.
+// Returns the emissive material so updateGroundVehicles can drive its
+// intensity each frame. Sized small so it doesn't dominate the silhouette.
+function addVehicleBeacon(root, yOnRoof){
+  const housingMat = new THREE.MeshLambertMaterial({ color: 0x2a1a08 });
+  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 10), housingMat);
+  housing.position.y = yOnRoof; root.add(housing);
+  // Lens sits on top — emissive amber that we pulse via .emissiveIntensity.
+  const lensMat = new THREE.MeshLambertMaterial({
+    color: 0xffb030, emissive: 0xff8a00, emissiveIntensity: 0.4
+  });
+  const lens = new THREE.Mesh(new THREE.SphereGeometry(0.20, 10, 8), lensMat);
+  lens.position.y = yOnRoof + 0.10; lens.scale.set(1, 0.7, 1);
+  root.add(lens);
+  return lensMat;
+}
+function makeGroundVehicles(a){
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  grp.visible = false;
+  scene.add(grp);
+  // Loop sits between the runway edge (-x = -a.w/2) and the hangar back
+  // wall (-a.w/2 - 30 ish). 50m long × 10m wide rectangle → ~120m perimeter,
+  // centered at mid-runway (z ~ 0) so we stay clear of both the windsock
+  // (z ~ +len/2-18) and the beacon tower (z ~ -len/2+18) and the hangar
+  // jitter window (z ~ -len*0.08).
+  const loopCenterX = -(a.w/2 + 12);   // 12m off runway edge — between runway shoulder and hangar front (which sits at -w/2-18)
+  const loopCenterZ = 0;
+  const loopHalfX   = 5;               // → 10m wide  (x range [-w/2-17, -w/2-7], clear of hangar front and the runway shoulder)
+  const loopHalfZ   = 25;              // → 50m long  (z range [-25, +25], well clear of windsock/beacon and hangar baseZ jitter near z=-len*0.08)
+  const loop = makeLoopPath(loopCenterX, loopCenterZ, loopHalfX, loopHalfZ);
+  // Tug + fuel truck. Stagger phases halfway around the loop so they're at
+  // opposite sides and one always reads as moving away from the other. Vary
+  // speed slightly per airport so each field has its own rhythm.
+  const vehicles = [];
+  const tug = makeTug();
+  grp.add(tug);
+  vehicles.push({
+    root: tug,
+    beaconMat: addVehicleBeacon(tug, 1.85),
+    loop,
+    phase: 0,
+    speed: 5.5 + ((a.x * 0.001) % 1) * 1.2,    // ~5.5–6.7 m/s walking pace
+    beaconPeriod: 0.85,
+    beaconPhase: 0
+  });
+  const truck = makeFuelTruck();
+  grp.add(truck);
+  vehicles.push({
+    root: truck,
+    beaconMat: addVehicleBeacon(truck, 1.0),  // beacon on the cab roof, not the tank top
+    loop,
+    phase: loop.total * 0.5,                   // half a lap behind the tug
+    speed: 4.2 + ((a.z * 0.001) % 1) * 0.9,    // slightly slower than tug
+    beaconPeriod: 0.95,
+    beaconPhase: 0.4
+  });
+  groundVehicles.push({ ap: a, group: grp, vehicles });
+}
+for (const a of AIRPORTS) makeGroundVehicles(a);
+
+function updateGroundVehicles(dt){
+  // Visibility gate: on the ground near any airport, OR low overhead near
+  // any airport. "Low overhead" lets you see service vehicles when you're
+  // taxiing the pattern or on short final without seeing them from 5000 ft.
+  let near = null, nearD2 = Infinity;
+  for (const a of AIRPORTS){
+    const dx = plane.position.x - a.x, dz = plane.position.z - a.z;
+    const d2 = dx*dx + dz*dz;
+    if (d2 < nearD2){ nearD2 = d2; near = a; }
+  }
+  const inRange = nearD2 < GROUND_VEH_RANGE*GROUND_VEH_RANGE;
+  let agl = plane.position.y;
+  if (near) agl = plane.position.y - near.elev;
+  const showAll = inRange && (!!state.onGround || agl < GROUND_VEH_AGL_MAX);
+  for (const gv of groundVehicles){
+    const isNear = (gv.ap === near) && showAll;
+    if (gv.group.visible !== isNear) gv.group.visible = isNear;
+    if (!isNear) continue;
+    for (const v of gv.vehicles){
+      // Advance arc length along the loop. Speed is slow enough that one
+      // full lap takes ~25–35s so the apron has gentle motion, not a racetrack.
+      v.phase += v.speed * dt;
+      const s = sampleLoop(v.loop, v.phase);
+      v.root.position.x = s.x;
+      v.root.position.z = s.z;
+      v.root.rotation.y = s.yaw;
+      // Amber beacon pulse: square-ish flash (sin² gives a fatter blink that
+      // reads as a rotating reflector rather than a soft pulse).
+      v.beaconPhase += dt / v.beaconPeriod;
+      const f = Math.sin((v.beaconPhase + 0) * Math.PI);
+      const lit = f * f;
+      v.beaconMat.emissiveIntensity = 0.35 + 2.1 * lit;
+    }
+  }
+}
+
 function updateWindSocks(){
   // Wind vector points the way wind is going TO. Sock tail should align with
   // that direction (real socks blow away from the pole). Heading-style yaw:
@@ -8603,6 +8811,10 @@ function step(dt){
   // points new pilots toward the takeoff threshold.
   updateTaxiArrows(dt);
   updateTaxiwayLights(dt);
+  // Slow tug + fuel truck per airport drifting around the apron — pure
+  // scenery, gated to on-ground or low-overhead near the field so air views
+  // stay clean.
+  updateGroundVehicles(dt);
   // Wind socks at each airport tilt with wind speed and point downwind so
   // pilots can read the breeze without staring at the HUD.
   updateWindSocks();
