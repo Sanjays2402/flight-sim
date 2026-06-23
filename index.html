@@ -3252,7 +3252,13 @@ function updateTaxiwayLights(dt){
 // lifting toward horizontal as wind speed picks up. Cheap pre-landing read
 // — way easier than squinting at the HUD wind readout on short final.
 const WINDSOCK_LIFT_FULL = 10; // m/s — wind speed at which the sock sits horizontal
-const windSocks = []; // [{ yawGrp, tiltMesh }]
+// Per-frame ripple / flap amplitudes (radians). Two-segment chain bobs in
+// phase-offset sin waves so a 12 m/s sock visibly flaps along its length
+// while a 2 m/s sock just sways. Pure scenery polish — no flight effect.
+const WINDSOCK_RIPPLE_HZ      = 1.25; // base ripple frequency
+const WINDSOCK_RIPPLE_AMP_MAX = 0.22; // rad, peak segment bob at full wind
+const WINDSOCK_YAW_JITTER_MAX = 0.052; // rad (~3°), peak yaw flicker at full wind
+const windSocks = []; // [{ yawGrp, tiltGrp, baseSegGrp, tipSegGrp, baseYaw, phase }]
 // Shared compass-rose texture for the disc painted on the ground at the base
 // of every windsock pole. ~1.2 m flat disc with N/E/S/W cardinals, 30°/60°
 // labels, and tick marks every 10° + bolder ticks every 30°. World-aligned
@@ -3361,37 +3367,60 @@ function makeWindSock(a){
   const yawGrp = new THREE.Group();
   yawGrp.position.set(stripX, 5.0, poleZ);
   grp.add(yawGrp);
-  // Sock cone: built along +Y (cylinder default), wider at the bottom = mouth,
-  // narrower at the top = tail. We then rotate -90° about Z so the tail points
-  // along +X local (which is the direction the yaw group steers downwind).
-  // Open both ends so we don't see ugly disk caps from the side.
+  // Sock split into TWO chained cone segments so it can ripple along its
+  // length. Base segment (mouth → mid) hangs off tiltGrp; tip segment
+  // (mid → tail) hangs off baseSegGrp at the base's far end. Each segment
+  // gets a small per-frame Z wobble in updateWindSocks with a phase offset,
+  // so a windy sock visibly waves down its length instead of holding stiff.
+  // Geometry is still built along +Y, then rotated -90° about Z so the tail
+  // points along +X local (the direction yawGrp steers downwind).
   const sockMat = new THREE.MeshLambertMaterial({
     color: 0xff7a1a, side: THREE.DoubleSide, emissive: 0x331400
   });
-  const sockGeo = new THREE.CylinderGeometry(0.25, 1.1, 4.5, 14, 1, true);
-  const tiltMesh = new THREE.Mesh(sockGeo, sockMat);
-  tiltMesh.rotation.z = -Math.PI/2;     // align cone along +X, mouth at origin
-  tiltMesh.position.x =  4.5/2;         // shift so the mouth sits on the pivot
-  // White accent band near the tail so the sock isn't a solid orange blob.
+  const SOCK_LEN = 4.5;
+  const SEG_LEN  = SOCK_LEN / 2;        // 2.25 m per segment
+  // Radii: mouth 1.1 → mid 0.675 → tail 0.25, matching the original linear
+  // taper so the silhouette is unchanged at rest.
+  const R_MOUTH = 1.1, R_MID = 0.675, R_TAIL = 0.25;
+  // Base segment group sits on the tilt pivot; segment cone is offset along
+  // local +X so the wide mouth aligns with the pivot point.
+  const baseSegGrp = new THREE.Group();
+  const baseSegGeo = new THREE.CylinderGeometry(R_MID, R_MOUTH, SEG_LEN, 14, 1, true);
+  const baseSeg = new THREE.Mesh(baseSegGeo, sockMat);
+  baseSeg.rotation.z = -Math.PI/2;
+  baseSeg.position.x =  SEG_LEN/2;
+  baseSegGrp.add(baseSeg);
+  // Mouth hoop is a thin torus at the wide open end (local x = 0 on the base segment).
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.08, 6, 16), hoopMat);
+  hoop.rotation.y = Math.PI/2;          // align torus around the +X axis
+  baseSegGrp.add(hoop);
+  // Tip segment group sits at the far end of the base segment and bobs
+  // independently so the wave reads as two-segment ripple.
+  const tipSegGrp = new THREE.Group();
+  tipSegGrp.position.x = SEG_LEN;
+  const tipSegGeo = new THREE.CylinderGeometry(R_TAIL, R_MID, SEG_LEN, 14, 1, true);
+  const tipSeg = new THREE.Mesh(tipSegGeo, sockMat);
+  tipSeg.rotation.z = -Math.PI/2;
+  tipSeg.position.x =  SEG_LEN/2;
+  tipSegGrp.add(tipSeg);
+  // White accent band wraps the tip segment ~1.4 m back from the tail tip
+  // (matches the original placement: tail at +2.25 in tip-local, band at +0.85).
   const bandMat = new THREE.MeshLambertMaterial({
     color: 0xffffff, side: THREE.DoubleSide
   });
   const bandGeo = new THREE.CylinderGeometry(0.55, 0.75, 0.9, 14, 1, true);
   const band = new THREE.Mesh(bandGeo, bandMat);
-  band.position.y =  4.5/2 - 1.4;       // ~1.4m down from the tail end
-  tiltMesh.add(band);
-  // Mouth hoop is a thin torus at y = -length/2 (the wide open end).
-  const hoop = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.08, 6, 16), hoopMat);
-  hoop.position.y = -4.5/2;
-  hoop.rotation.x = Math.PI/2;
-  tiltMesh.add(hoop);
-  // Pre-rotate the tilt mesh into the limp-down resting pose so the very
-  // first frame doesn't show it sticking out horizontally. updateWindSocks
-  // overwrites this each step.
+  band.rotation.z = -Math.PI/2;
+  band.position.x = SEG_LEN - 1.4;      // ~1.4 m back from the tail tip
+  tipSegGrp.add(band);
+  baseSegGrp.add(tipSegGrp);
+  // Tilt group holds the chained segments and applies the wind-driven lift.
   const tiltGrp = new THREE.Group();
-  tiltGrp.add(tiltMesh);
+  tiltGrp.add(baseSegGrp);
   yawGrp.add(tiltGrp);
-  windSocks.push({ yawGrp, tiltGrp });
+  // Per-sock phase so adjacent airports don't ripple in lockstep.
+  const phase = Math.random() * Math.PI * 2;
+  windSocks.push({ yawGrp, tiltGrp, baseSegGrp, tipSegGrp, baseYaw: a.hdg, phase });
   // Painted compass-rose disc at the base of the pole, world-aligned so the
   // N/E/S/W labels match geographic north regardless of how the runway is
   // oriented. Sits just above ground (y=0.02) to avoid z-fighting with the
@@ -3763,9 +3792,33 @@ function updateWindSocks(){
   // even a light breeze visibly lifts it, but it saturates near horizontal.
   const tiltLift = Math.min(1, spd / WINDSOCK_LIFT_FULL);
   const tilt = -Math.PI/2 * (1 - Math.pow(tiltLift, 0.6));
+  // Per-frame ripple + yaw jitter, scaled by wind speed. A 2 m/s breeze
+  // produces near-zero motion (just a gentle sway); 12 m/s actually flaps.
+  const t = performance.now() * 0.001;
+  // Amplitude ramps in from ~3 m/s so dead-calm stays glassy.
+  const flap = Math.min(1, Math.max(0, (spd - 3) / (WINDSOCK_LIFT_FULL - 3)));
+  const rippleAmp = WINDSOCK_RIPPLE_AMP_MAX * flap;
+  const yawJitterAmp = WINDSOCK_YAW_JITTER_MAX * flap;
+  // Drive base + tip segments out of phase by ~π/2 so the wave reads as it
+  // travels down the cloth, not as one rigid swing.
+  const baseW = 2 * Math.PI * WINDSOCK_RIPPLE_HZ;
   for (const ws of windSocks){
-    if (yaw !== null) ws.yawGrp.rotation.y = yaw;
+    if (yaw !== null) {
+      // Lightweight yaw flicker layered on the steady wind heading. Uses a
+      // second sin at a different frequency so it doesn't sync with the bob.
+      const jit = Math.sin(t * (baseW * 0.6) + ws.phase * 1.7) * yawJitterAmp;
+      ws.yawGrp.rotation.y = yaw + jit;
+    }
     ws.tiltGrp.rotation.z = tilt;
+    // Segment bobs — small Z rotations on top of the resting straight pose.
+    // Base segment leads; tip segment trails with a π/2 phase lag so the
+    // wave travels mouth → tail.
+    if (ws.baseSegGrp){
+      ws.baseSegGrp.rotation.z = Math.sin(t * baseW + ws.phase) * (rippleAmp * 0.6);
+    }
+    if (ws.tipSegGrp){
+      ws.tipSegGrp.rotation.z = Math.sin(t * baseW + ws.phase + Math.PI * 0.5) * rippleAmp;
+    }
   }
 }
 updateWindSocks(); // prime so first paint matches current wind, not the limp default
