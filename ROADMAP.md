@@ -215,10 +215,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Photo countdown (`Shift+S` in photo mode) — in photo mode, `Shift+S` starts a 3-2-1 visible countdown (big centered green digits with a pop-in animation) before grabbing the PNG. Each tick fires a soft sine chime (final tick pitched a fifth higher as the shutter cue) so the count reads visually and audibly. Plain `S` still saves immediately (and cancels any active countdown); Shift+click on the SAVE button mirrors the keybind for mobile/mouse users. Countdown drains via dt in the existing photo-mode loop branch so the rest of the sim stays frozen, and the digit overlay is hidden in `savePhoto()`'s overlay-hide sweep so it never bakes into the screenshot. Exiting photo mode (P / Esc) cancels any in-progress countdown.
 
+- [x] Squawk code keypad (`K`) — small 4-digit keypad overlay (tap numbers or type 0–7) for setting the transponder squawk shown next to the ATC strip; presets for 1200 (VFR), 7500 (hijack), 7600 (radio fail), 7700 (emergency). Each preset fires a matching one-shot ATC line. K toggles open/close, Backspace erases, Enter applies (also auto-applies on the fourth digit), Esc cancels. Gated against intro/replay/photo/pause/crash and the J overlay; manual codes survive an active 7700 emergency latch via the existing pre-emergency restore path. Clears `keys['KeyK']` on open/close so K still works as pitch when the keypad is closed. Hidden in photo mode via `PHOTO_HIDE_IDS`.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Squawk code keypad (`K` in autopilot off) — small 4-digit keypad overlay (tap numbers or type) for setting the transponder squawk shown next to the ATC strip; presets for 1200 (VFR), 7500 (hijack), 7600 (radio fail), 7700 (emergency). Each preset fires a matching one-shot ATC line (`"Squawk seven-seven-zero-zero, declaring emergency"`). Pure flavor, ~40 LOC, and gives the existing squawk-7700 emergency auto-set a manual escape valve.
 
 - [ ] Engine warning chime test (`Shift+T` on the ground) — holding `Shift+T` on the ground (parking brake set) cycles through every cockpit warning sound in sequence (stall horn, gear warn, GPWS, fire chirp, oil-pressure low) with a small `TESTING: <name>` toast for each so the pilot can verify audio settings before takeoff. Re-uses every existing WebAudio node. Pairs naturally with the cold-start ritual as a pre-flight checklist beat.
 

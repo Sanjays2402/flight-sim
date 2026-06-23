@@ -475,6 +475,37 @@
   #jumpsel .ap.here .num { color:#7ee787; }
   #jumpsel .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
   #jumpsel kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
+  /* Transponder squawk keypad: same modal vibe as #jumpsel. Opens with K
+     (toggle), displays the current 4-digit entry, an octal keypad (0-7 +
+     Backspace + CLR + ENT), and four big preset buttons for the standard
+     reserved codes (1200 VFR / 7500 hijack / 7600 radio fail / 7700
+     emergency). Hidden in photo mode via PHOTO_HIDE_IDS so saved PNGs stay
+     clean. Pointer-events on so the keypad is fully click/tap-able on mobile
+     too. */
+  #sqkeypad { position:fixed; inset:0; background:rgba(0,5,12,.78); display:none; align-items:center; justify-content:center; z-index:26; }
+  #sqkeypad.show { display:flex; }
+  #sqkeypad .card { width:320px; padding:22px 24px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:13px; text-align:center; }
+  #sqkeypad h2 { font-size:20px; color:#7ee787; margin-bottom:4px; letter-spacing:3px; font-weight:800; }
+  #sqkeypad .sub { font-size:11px; color:#9bb; margin-bottom:14px; letter-spacing:1px; }
+  #sqkeypad .display { font-family:'JetBrains Mono','Menlo',monospace; font-size:32px; font-weight:800; letter-spacing:10px; color:#7ee787; padding:10px 0 4px; background:rgba(20,40,60,.55); border:1px solid #2a4a6a; border-radius:8px; margin-bottom:6px; min-height:48px; text-shadow:0 0 8px rgba(126,231,135,.35); }
+  #sqkeypad .display.bad { color:#ff7a7a; text-shadow:0 0 8px rgba(255,90,90,.45); }
+  #sqkeypad .hint2 { font-size:10px; color:#9bb; margin-bottom:12px; letter-spacing:1px; min-height:14px; }
+  #sqkeypad .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:12px; }
+  #sqkeypad .k { padding:12px 0; font-size:16px; font-weight:800; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; border-radius:6px; cursor:pointer; color:#cfe; transition:all .12s ease; user-select:none; font-family:inherit; }
+  #sqkeypad .k:hover { background:rgba(40,80,110,.85); border-color:#7ee787; transform:translateY(-1px); }
+  #sqkeypad .k:active { transform:translateY(0); }
+  #sqkeypad .k.wide { grid-column:span 1; }
+  #sqkeypad .k.act { color:#7ee787; border-color:#3a5a7a; }
+  #sqkeypad .k.bsp { color:#ffd166; }
+  #sqkeypad .presets { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+  #sqkeypad .pr { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; cursor:pointer; transition:all .15s ease; text-align:left; font-family:inherit; color:#cfe; font-size:12px; }
+  #sqkeypad .pr:hover { background:rgba(40,80,110,.85); border-color:#7ee787; transform:translateY(-1px); }
+  #sqkeypad .pr .pcode { color:#ffd166; font-weight:800; letter-spacing:2px; width:48px; flex:0 0 auto; font-family:'JetBrains Mono','Menlo',monospace; }
+  #sqkeypad .pr .plabel { color:#cfe; font-weight:600; flex:1 1 auto; }
+  #sqkeypad .pr.emerg .pcode { color:#ff7a7a; }
+  #sqkeypad .pr.emerg:hover { border-color:#ff7a7a; }
+  #sqkeypad .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
+  #sqkeypad kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
   /* First-flight tutorial overlay: shows once on the very first launch (latch
      persisted in localStorage as `flightsim.tutorial.v1`) above the intro
      menu, so brand-new players see the core control list before they pick
@@ -574,7 +605,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -744,6 +775,17 @@
     <div class="sub">PICK A FIELD</div>
     <div class="list" id="jumpList"></div>
     <div class="hint">press <kbd>1</kbd>–<kbd>9</kbd> to jump · hold <kbd>Shift</kbd> for opposite end · <kbd>J</kbd>/<kbd>Esc</kbd> to cancel</div>
+  </div>
+</div>
+<div id="sqkeypad">
+  <div class="card">
+    <h2>SQUAWK</h2>
+    <div class="sub">TRANSPONDER CODE</div>
+    <div class="display" id="sqDisp">1200</div>
+    <div class="hint2" id="sqMsg"> </div>
+    <div class="grid" id="sqGrid"></div>
+    <div class="presets" id="sqPresets"></div>
+    <div class="hint">type <kbd>0</kbd>–<kbd>7</kbd> · <kbd>Backspace</kbd> erase · <kbd>Enter</kbd> set · <kbd>K</kbd>/<kbd>Esc</kbd> close</div>
   </div>
 </div>
 <div id="achievements"></div>
@@ -7030,6 +7072,10 @@ const state = {
   // matching airport's runway threshold (free-flight only). Other Esc/keyboard
   // handlers check this gate so the overlay's Esc/J close path wins cleanly.
   jumpOpen: false,
+  // #sqkeypad transponder keypad modal is visible. Same gate idea as
+  // jumpOpen: the K-toggle handler and any Esc consumer check this so the
+  // keypad's own close path wins cleanly before falling through to pause.
+  sqkeypadOpen: false,
   mode: 'free',
   hopOrder: [],
   hopIdx: 0,
@@ -15176,7 +15222,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -15998,6 +16044,7 @@ updateCamModeUi();
     if (state.photoMode) return;
     if (state.replayActive) return;
     if (state.jumpOpen) return;
+    if (state.sqkeypadOpen) return;
     if (!state.paused && isAnyOtherModalOpen()) return;
     e.preventDefault();
     if (state.paused) closePause(); else openPause();
@@ -16181,6 +16228,287 @@ updateCamModeUi();
     teleportTo(ap, opp);
     showStatus('JUMPED TO ' + ap.id + (opp ? ' (REV)' : ''), ap.name + ' · throttle 30%', 'good');
     pushATC('Repositioning to ' + ap.id + (opp ? ', opposite end' : '') + ', taxi at your discretion.', { tag:'TOWER', now:true });
+  });
+})();
+
+// ====== SQUAWK CODE KEYPAD ======
+// Press K to toggle a small modal that lets the pilot dial a transponder
+// code by tapping the on-screen keypad or typing 0–7. Four big preset
+// buttons mirror the standard reserved codes (1200 VFR, 7500 hijack, 7600
+// radio fail, 7700 emergency) and each preset fires a matching one-shot
+// ATC line so the readout pill + the radio call swap together. Manual
+// entries that aren't one of the presets just get a generic "Squawking
+// <code>" call.
+//
+// Pure flavor on top of the existing transponder system: setSquawk() is
+// already there for hop legs / 7700 latches, and we update _squawkPreEmerg
+// so a manual code survives a brief emergency latch the same way a hop
+// leg's code does. No new audio, no new state plumbing beyond the open
+// gate, ~120 LOC including the modal HTML/CSS hooks.
+(function setupSquawkKeypadUi(){
+  const panel  = document.getElementById('sqkeypad');
+  const dispEl = document.getElementById('sqDisp');
+  const msgEl  = document.getElementById('sqMsg');
+  const gridEl = document.getElementById('sqGrid');
+  const presetEl = document.getElementById('sqPresets');
+  if (!panel || !dispEl || !gridEl || !presetEl) return;
+
+  // Standard reserved squawks. Each preset carries the radio call that
+  // matches what a real pilot would say when dialing it in. 1200 is the
+  // VFR default, the other three are emergencies; the 7700 line piggybacks
+  // on the same wording the auto-latch uses for visual/audio consistency.
+  const PRESETS = [
+    { code:'1200', label:'VFR',         atc:'Squawk 1200, VFR.',                          tag:'PILOT', emerg:false },
+    { code:'7500', label:'HIJACK',      atc:'Squawk 7500.',                               tag:'PILOT', emerg:true  },
+    { code:'7600', label:'RADIO FAIL',  atc:'Squawk 7600, lost comms.',                   tag:'PILOT', emerg:true  },
+    { code:'7700', label:'EMERGENCY',   atc:'Squawk 7700, declaring emergency.',          tag:'PILOT', emerg:true  },
+  ];
+
+  // Current keypad entry (string, up to 4 chars of '0'..'7'). Empty entry
+  // shows the live `state.squawk` so the display always reads as a code
+  // and never blanks out mid-dial.
+  let entry = '';
+
+  function refreshDisplay(){
+    const txt = entry.length ? entry.padEnd(4, '—') : (state.squawk || '1200');
+    dispEl.textContent = txt;
+    // Highlight red if the user has typed something invalid (shouldn't
+    // happen since we only accept 0–7, but kept as a defensive cue).
+    const bad = entry.length > 0 && !/^[0-7]+$/.test(entry);
+    dispEl.classList.toggle('bad', bad);
+  }
+
+  function setMsg(text, kind){
+    if (!msgEl) return;
+    msgEl.textContent = text || ' ';
+    msgEl.style.color = kind === 'good' ? '#7ee787'
+                      : kind === 'warn' ? '#ffd166'
+                      : kind === 'bad'  ? '#ff7a7a'
+                      : '#9bb';
+  }
+
+  function buildGrid(){
+    // Octal-style 0–7 keypad in 3 rows + an action row. Real transponders
+    // only accept 0–7 per digit so we match that constraint and skip 8/9.
+    //   1 2 3
+    //   4 5 6
+    //   7 0 BSP
+    //   CLR — ENT
+    const layout = [
+      ['1','2','3'],
+      ['4','5','6'],
+      ['7','0','BSP'],
+      ['CLR','',  'ENT'],
+    ];
+    let html = '';
+    for (const row of layout){
+      for (const cell of row){
+        if (!cell){ html += '<div></div>'; continue; }
+        const cls = cell === 'BSP' ? 'k bsp'
+                  : (cell === 'ENT' || cell === 'CLR') ? 'k act'
+                  : 'k';
+        html += '<button type="button" class="' + cls + '" data-key="' + cell + '">' + cell + '</button>';
+      }
+    }
+    gridEl.innerHTML = html;
+    for (const btn of gridEl.querySelectorAll('button')){
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        handleKey(btn.dataset.key);
+      });
+    }
+  }
+
+  function buildPresets(){
+    let html = '';
+    for (const p of PRESETS){
+      html += '<button type="button" class="pr' + (p.emerg ? ' emerg' : '') + '" data-code="' + p.code + '">'
+           +   '<span class="pcode">' + p.code + '</span>'
+           +   '<span class="plabel">' + p.label + '</span>'
+           + '</button>';
+    }
+    presetEl.innerHTML = html;
+    for (const btn of presetEl.querySelectorAll('button')){
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const code = btn.dataset.code;
+        if (!code) return;
+        applyPreset(code);
+      });
+    }
+  }
+
+  function handleKey(k){
+    if (!state.sqkeypadOpen) return;
+    if (k === 'BSP'){
+      if (entry.length) entry = entry.slice(0, -1);
+      setMsg('');
+      refreshDisplay();
+      return;
+    }
+    if (k === 'CLR'){
+      entry = '';
+      setMsg('');
+      refreshDisplay();
+      return;
+    }
+    if (k === 'ENT'){
+      commitEntry();
+      return;
+    }
+    if (/^[0-7]$/.test(k)){
+      if (entry.length >= 4){
+        setMsg('Four digits only.', 'warn');
+        return;
+      }
+      entry += k;
+      setMsg('');
+      refreshDisplay();
+      // Auto-commit when the user types the fourth digit so a quick four-tap
+      // sequence (e.g. 7-7-0-0) sets the code without needing to reach for
+      // Enter. Matches how real transponders accept a full dial.
+      if (entry.length === 4) commitEntry();
+      return;
+    }
+  }
+
+  function applyCode(code, opts){
+    // Manual squawks survive an emergency latch the same way hop-leg codes
+    // do: bump _squawkPreEmerg via the global helper so once the 7700 latch
+    // clears we restore the player's chosen code, not a stale 1200.
+    if (state.squawkEmerg){
+      // Stomping _squawkPreEmerg directly would require exposing it; we
+      // can't do that, so we route through assignHopLegSquawk-style logic:
+      // call setSquawk only after the latch lifts. While emergency is hot,
+      // update the squawk by force so the readout reflects the pilot's
+      // intent but warn that 7700 is still in effect.
+      try { setSquawk(code, { force:true }); } catch(e){}
+      setMsg('Emergency latch active — 7700 returns until clear.', 'warn');
+      return false;
+    }
+    try { setSquawk(code, { force:true }); } catch(e){}
+    return true;
+  }
+
+  function commitEntry(){
+    if (entry.length === 0){
+      setMsg('Enter four digits 0–7.', 'warn');
+      return;
+    }
+    if (entry.length < 4){
+      setMsg('Need four digits.', 'warn');
+      return;
+    }
+    if (!/^[0-7]{4}$/.test(entry)){
+      setMsg('Digits 0–7 only.', 'bad');
+      return;
+    }
+    const code = entry;
+    const preset = PRESETS.find(p => p.code === code);
+    if (preset){
+      applyPreset(code);
+      return;
+    }
+    const ok = applyCode(code);
+    if (ok){
+      pushATC('Squawking ' + code + '.', { tag:'PILOT', now:true });
+      setMsg('Squawking ' + code + '.', 'good');
+    }
+    entry = '';
+    refreshDisplay();
+    // Brief feedback, then auto-close so the modal doesn't sit on top of
+    // the sim after the player has confirmed their choice. Closed via the
+    // shared close path so state + class stay in sync.
+    setTimeout(closePanel, 650);
+  }
+
+  function applyPreset(code){
+    const preset = PRESETS.find(p => p.code === code);
+    if (!preset) return;
+    const ok = applyCode(code);
+    if (ok){
+      pushATC(preset.atc, { tag: preset.tag, now:true });
+      setMsg(preset.label + ' · ' + code, preset.emerg ? 'bad' : 'good');
+    }
+    entry = '';
+    refreshDisplay();
+    setTimeout(closePanel, 650);
+  }
+
+  function canOpen(){
+    // Same conservative gate as jumpsel: keypad shouldn't pop on top of
+    // intro / replay / photo / pause / a crash. Unlike jumpsel we don't
+    // restrict by mission mode — dialing a code is harmless in any mode
+    // and pairs naturally with the hop-leg system.
+    if (state.introOpen) return false;
+    if (state.replayActive) return false;
+    if (state.photoMode) return false;
+    if (state.paused) return false;
+    if (state.crashed) return false;
+    if (state.jumpOpen) return false;
+    return true;
+  }
+
+  function openPanel(){
+    if (state.sqkeypadOpen) return;
+    state.sqkeypadOpen = true;
+    entry = '';
+    setMsg('');
+    refreshDisplay();
+    panel.classList.add('show');
+    // K is also bound to pitch-down on the flight controls. Clear the held
+    // state so the elevator doesn't keep biting while the modal sits open
+    // (the player tapped K to dial a code, not to flare). keys[] is the
+    // global flight-input map; touching just KeyK is surgical and safe.
+    try { if (typeof keys === 'object') keys['KeyK'] = false; } catch(e){}
+  }
+  function closePanel(){
+    if (!state.sqkeypadOpen) return;
+    state.sqkeypadOpen = false;
+    panel.classList.remove('show');
+    entry = '';
+    setMsg('');
+    // Same surgical reset as openPanel — the K used to close shouldn't
+    // leak into the elevator on the next frame.
+    try { if (typeof keys === 'object') keys['KeyK'] = false; } catch(e){}
+  }
+
+  buildGrid();
+  buildPresets();
+
+  // Click background to dismiss; click on a row sets a code (handled above).
+  panel.addEventListener('click', e => {
+    if (e.target === panel) closePanel();
+  });
+
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'KeyK'){
+      if (state.sqkeypadOpen){ e.preventDefault(); closePanel(); return; }
+      if (!canOpen()) return;
+      e.preventDefault();
+      openPanel();
+      return;
+    }
+    if (!state.sqkeypadOpen) return;
+    if (e.code === 'Escape'){ e.preventDefault(); closePanel(); return; }
+    if (e.code === 'Backspace'){ e.preventDefault(); handleKey('BSP'); return; }
+    if (e.code === 'Enter' || e.code === 'NumpadEnter'){ e.preventDefault(); handleKey('ENT'); return; }
+    // Digit0…Digit9 and Numpad0…Numpad9 — we only honor 0–7 since real
+    // transponders are octal-style.
+    let n = -1;
+    if (e.code.startsWith('Digit'))  n = parseInt(e.code.slice(5), 10);
+    if (e.code.startsWith('Numpad')) n = parseInt(e.code.slice(6), 10);
+    if (Number.isFinite(n) && n >= 0 && n <= 7){
+      e.preventDefault();
+      handleKey(String(n));
+      return;
+    }
+    if (Number.isFinite(n) && (n === 8 || n === 9)){
+      e.preventDefault();
+      setMsg('Digits 0–7 only.', 'warn');
+      return;
+    }
   });
 })();
 
