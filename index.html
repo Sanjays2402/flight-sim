@@ -801,7 +801,7 @@
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
   <div class="row" id="emrRow" style="display:none"><span class="lbl">EMR</span><span class="val" id="emrReadout" style="color:#ff6cf7;font-weight:700">—</span></div>
-  <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
+  <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimPitchPair"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span><span id="trimRudPair" style="display:none;margin-left:8px">RUD <span id="trimRudArrow">▶</span> <span id="trimRudVal">0%</span></span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
   <div class="row"><span id="bestGlide" style="display:none;color:#7ad0ff;font-weight:700" title="Engine out — pitch for best glide IAS">BEST GLIDE <span id="bestGlideTgt">105</span> <span id="bestGlideTgtUnit">km/h</span> <span id="bestGlideIas" style="margin-left:6px;color:#7ee787">—</span></span></div>
@@ -905,7 +905,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -10123,6 +10123,15 @@ const state = {
   // `;` (nose down) and `'` (nose up); Shift = 1% fine, plain = 5% coarse.
   // Autopilot ignores trim (AP owns pitch). Reset to 0 on resetPlane().
   trim: 0,
+  // Rudder trim: -1..+1, where +1 = full right-rudder bias. Mirrors pitch trim
+  // but on the yaw axis so a torque-rolling or wing-heavy crosswind cruise
+  // stops being a constant boot-on-pedal workout. Adjust with `Alt+;` (left)
+  // and `Alt+'` (right); Shift = 1% fine, plain = 5% coarse. (Spec asked for
+  // Shift+;/Shift+' but those already drive night-mode + fine pitch-up trim;
+  // Alt is the natural fallback so no shipped feature is overwritten.)
+  // Autopilot heading-hold ignores it (AP owns rudder). Reset to 0 on
+  // resetPlane() alongside pitch trim.
+  rudderTrim: 0,
   // Altimeter (Kollsman) setting, inHg. Default 29.92 (standard). Pilot nudges
   // with `Shift+,` (down 0.01) and `Shift+.` (up 0.01); clamped to 28.00..31.00.
   // The HUD/cockpit altitude reading biases by 1000 ft per 1 inHg vs the
@@ -10819,6 +10828,20 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='Semicolon' || e.code==='Quote'){
+    // Alt+; / Alt+' = rudder trim wheel. Same coarse/fine semantics as pitch
+    // trim (plain Alt = 5%, Alt+Shift = 1%). Runs FIRST so the Alt-modified
+    // variants are consumed before the unmodified pitch-trim path or the
+    // Shift+; night-mode path can fire. Skipped while the intro modal is up
+    // and while autopilot heading-hold owns the rudder.
+    if (e.altKey){
+      if (state.introOpen) return;
+      if (state.ap.on) return;
+      e.preventDefault();
+      const rStep = e.shiftKey ? 0.01 : 0.05;
+      const rDir  = (e.code === 'Semicolon') ? -1 : 1;
+      state.rudderTrim = Math.max(-1, Math.min(1, state.rudderTrim + rDir*rStep));
+      return;
+    }
     // Shift+; toggles the cockpit instrument panel's red night-mode tint.
     // Runs ahead of the trim path so the shifted variant is consumed cleanly;
     // unshifted ; / ' still nudge trim, and Shift+' still nudges fine nose-up
@@ -12355,6 +12378,9 @@ function resetPlane(){
   // Trim is a per-flight setting — a fresh reset wipes it back to neutral
   // so the next takeoff doesn't have the elevator pre-loaded from last cruise.
   state.trim = 0;
+  // Rudder trim mirrors pitch trim's reset semantics so a new sortie starts
+  // with the rudder pedals exactly centered, not biased from last cruise.
+  state.rudderTrim = 0;
   // Chronograph zeros out so each fresh sortie starts on a clean clock.
   // Matches the trim / waypoint / emergency-site reset semantics above.
   if (state.chrono){ state.chrono.running = false; state.chrono.elapsedMs = 0; state.chrono.lapMs = 0; }
@@ -16806,6 +16832,14 @@ function step(dt){
   if (!state.ap.on && !state.crashed && !state.onGround){
     pIn = Math.max(-1, Math.min(1, pIn - state.trim));
   }
+  // Rudder trim wheel: bias yaw input by the trim setting so the pilot can
+  // fly hands-off in a crosswind cruise. Sign matches yIn (yIn>0 = right
+  // rudder), so +rudderTrim adds to yIn directly. Same gate as pitch trim:
+  // AP heading-hold owns rudder when engaged, and trim has no authority on
+  // the ground / after a crash.
+  if (!state.ap.on && !state.crashed && !state.onGround){
+    yIn = Math.max(-1, Math.min(1, yIn + state.rudderTrim));
+  }
 
   const fwd = tmpV1.set(0,0,-1).applyQuaternion(plane.quaternion);
   const up  = tmpV2.set(0,1,0).applyQuaternion(plane.quaternion);
@@ -18450,22 +18484,47 @@ function step(dt){
     emrRow.style.display = 'none';
   }
 
-  // Trim HUD row: hidden when neutral so the panel stays tidy on a fresh
-  // takeoff. Arrow points the way the trim is biasing the nose (▲ = nose up,
-  // ▼ = nose down), and the percentage shows how far the wheel is wound off
-  // neutral. Color tracks magnitude so a heavy trim setting is obvious.
+  // Trim HUD row: hidden when both pitch and rudder trim are neutral so the
+  // panel stays tidy on a fresh takeoff. Pitch arrow points the way the
+  // elevator is biasing the nose (▲ = nose up, ▼ = nose down). Rudder arrow
+  // shows which way the rudder is biased (◀ = left, ▶ = right). Each axis
+  // hides independently when within the neutral dead-band so a pilot only
+  // trimming one axis doesn't see a stale "0%" on the other.
   const trimRow = document.getElementById('trimRow');
-  if (Math.abs(state.trim) > 0.005){
+  const trimActive = Math.abs(state.trim) > 0.005;
+  const rudActive  = Math.abs(state.rudderTrim) > 0.005;
+  if (trimActive || rudActive){
     trimRow.style.display = 'flex';
-    const arrowEl = document.getElementById('trimArrow');
-    const valEl   = document.getElementById('trimVal');
-    const pct = Math.round(state.trim * 100);
-    arrowEl.textContent = state.trim > 0 ? '▲' : '▼';
-    valEl.textContent   = (pct > 0 ? '+' : '') + pct + '%';
-    const mag = Math.abs(state.trim);
-    const color = mag > 0.5 ? '#ffd166' : '#cfe';
-    arrowEl.style.color = color;
-    valEl.style.color   = color;
+    const pitchEl = document.getElementById('trimPitchPair');
+    if (trimActive){
+      pitchEl.style.display = 'inline';
+      const arrowEl = document.getElementById('trimArrow');
+      const valEl   = document.getElementById('trimVal');
+      const pct = Math.round(state.trim * 100);
+      arrowEl.textContent = state.trim > 0 ? '▲' : '▼';
+      valEl.textContent   = (pct > 0 ? '+' : '') + pct + '%';
+      const mag = Math.abs(state.trim);
+      const color = mag > 0.5 ? '#ffd166' : '#cfe';
+      arrowEl.style.color = color;
+      valEl.style.color   = color;
+    } else {
+      pitchEl.style.display = 'none';
+    }
+    const rudEl = document.getElementById('trimRudPair');
+    if (rudActive){
+      rudEl.style.display = 'inline';
+      const rArrowEl = document.getElementById('trimRudArrow');
+      const rValEl   = document.getElementById('trimRudVal');
+      const rPct = Math.round(state.rudderTrim * 100);
+      rArrowEl.textContent = state.rudderTrim > 0 ? '▶' : '◀';
+      rValEl.textContent   = (rPct > 0 ? '+' : '') + rPct + '%';
+      const rMag = Math.abs(state.rudderTrim);
+      const rColor = rMag > 0.5 ? '#ffd166' : '#cfe';
+      rArrowEl.style.color = rColor;
+      rValEl.style.color   = rColor;
+    } else {
+      rudEl.style.display = 'none';
+    }
   } else {
     trimRow.style.display = 'none';
   }
