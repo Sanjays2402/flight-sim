@@ -502,7 +502,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -552,7 +552,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -868,7 +868,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, aerobaticBest: 0 };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, aerobaticBest: 0 };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -922,6 +922,7 @@ try {
     if (typeof saved.landingLight === 'boolean') settings.landingLight = saved.landingLight;
     if (typeof saved.wipers === 'string' && ['off','slow','fast','auto'].indexOf(saved.wipers) !== -1) settings.wipers = saved.wipers;
     if (typeof saved.pitotHeat === 'boolean') settings.pitotHeat = saved.pitotHeat;
+    if (typeof saved.carbHeat === 'boolean') settings.carbHeat = saved.carbHeat;
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
@@ -5505,6 +5506,21 @@ function togglePitotHeat(){
   saveSettings();
   showStatus('PITOT HEAT ' + (state.pitotHeatOn ? 'ON' : 'OFF'), null, state.pitotHeatOn ? 'good' : 'hard');
 }
+// Carb heat (Shift+C). Mirrors the pitot-heat pattern: persistent pilot
+// setting, status toast confirms each press. The real-world tell when you
+// pull carb heat is a brief RPM drop (denser, warmer intake air), so the
+// toggle kicks a small carbHeatRpmDip the cockpit RPM gauge subtracts off the
+// needle for ~0.6s. Heat-on also drives the icing model toward 0 fast.
+function toggleCarbHeat(){
+  state.carbHeatOn = !state.carbHeatOn;
+  settings.carbHeat = state.carbHeatOn;
+  saveSettings();
+  // Real-world cue: ~80 RPM dip the instant heat is pulled. Decays in
+  // updateCarbIce(). Only kick the dip on heat-on so turning it off doesn't
+  // briefly read like the engine surged.
+  if (state.carbHeatOn) state.carbHeatRpmDip = 80;
+  showStatus('CARB HEAT ' + (state.carbHeatOn ? 'ON' : 'OFF'), null, state.carbHeatOn ? 'good' : 'hard');
+}
 // Manual wiper cycle: off → slow → fast → off. Auto stays parked in the
 // settings panel so a stray keypress can't unexpectedly latch the auto mode.
 // Persists the new mode to settings + flashes a status toast so the player
@@ -5923,6 +5939,67 @@ function updatePitotIce(dt){
     if (typeof pushATC === 'function') pushATC('Airspeed unreliable, check pitot heat.', { tag:'ATC', now:true });
   }
   if (state.pitotIceAtcLatch && state.pitotIce <= PITOT_ICE_CLEAR) state.pitotIceAtcLatch = false;
+}
+
+// ====== Carb icing ======
+// Different envelope from pitot ice: this one bites at LOW throttle in cool /
+// damp conditions (rain on, or TOD before 7 / after 19 — same cold-weather
+// window the pitot model uses). Real-world carb ice forms when intake air
+// drops past the dew point as it expands across the venturi — most likely at
+// reduced power on a descent. Pilot pulls carb heat (Shift+C) to feed warm
+// air into the intake, which both melts existing ice (~3x build rate) AND
+// costs a small flat thrust penalty from the less-dense warm intake. The
+// thrust path reads state.carbIce and state.carbHeatOn to apply both knobs.
+const CARB_ICE_THROTTLE_MAX  = 0.40; // build only when throttle is at or below this
+const CARB_ICE_BUILD_SECS    = 25;   // seconds 0 -> 1 at idle in cold + damp conditions
+const CARB_ICE_THAW_MULT     = 3.0;  // heat-on melts ice this much faster than passive build
+const CARB_ICE_PASSIVE_THAW  = 18;   // seconds 1 -> 0 passively when out of icing envelope
+const CARB_ICE_THRUST_BLEED  = 0.15; // max thrust fraction stolen at full ice
+const CARB_HEAT_THRUST_COST  = 0.03; // flat thrust penalty when heat is on (denser air)
+const CARB_ICE_LATCH         = 0.25; // ice severity that fires the one-shot ATC nag
+const CARB_ICE_SHOW_MIN      = 0.12; // ice severity above this lights the HUD pill
+const CARB_ICE_CLEAR         = 0.05; // ice severity below this re-arms the ATC latch
+const CARB_HEAT_RPM_DIP_DECAY = 0.6; // seconds for the RPM-dip kick to fade out
+function updateCarbIce(dt){
+  // Same freeze list as updatePitotIce so the model doesn't drift while the
+  // sim is frozen.
+  if (state.paused || state.replayActive || state.introOpen) return;
+  // Decay the RPM-dip kick every frame regardless of conditions so the gauge
+  // recovers smoothly after the pilot pulls heat.
+  if (state.carbHeatRpmDip > 0){
+    state.carbHeatRpmDip = Math.max(0, state.carbHeatRpmDip - 80 * dt / CARB_HEAT_RPM_DIP_DECAY);
+  }
+  // Engine off / cold-start / fuel-out: no combustion, no carb ice growth.
+  // Existing ice slowly bleeds off (no warm engine to keep things frozen).
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  if (!engineLive){
+    if (state.carbIce > 0){
+      state.carbIce = Math.max(0, state.carbIce - dt / CARB_ICE_PASSIVE_THAW);
+    }
+    if (state.carbIce <= CARB_ICE_CLEAR) state.carbIceAtcLatch = false;
+    return;
+  }
+  // Cold-weather window: night + early morning + evening (mirrors pitot ice).
+  const cold = state.todHours < 7 || state.todHours > 19;
+  const damp = settings.rain || cold;
+  const lowPower = state.throttle <= CARB_ICE_THROTTLE_MAX;
+  const icingCond = damp && lowPower;
+  if (state.carbHeatOn){
+    // Heat on: melt fast. Faster than passive thaw so the toggle has visible
+    // bite. Mirrors the pitot-heat-on case.
+    state.carbIce = Math.max(0, state.carbIce - dt * CARB_ICE_THAW_MULT / CARB_ICE_BUILD_SECS);
+  } else if (icingCond){
+    state.carbIce = Math.min(1, state.carbIce + dt / CARB_ICE_BUILD_SECS);
+  } else if (state.carbIce > 0){
+    // No heat, no icing conditions: ice slowly bleeds off via passive thaw.
+    state.carbIce = Math.max(0, state.carbIce - dt / CARB_ICE_PASSIVE_THAW);
+  }
+  // One-shot ATC nag the first frame ice severity crosses the latch line.
+  if (!state.carbIceAtcLatch && state.carbIce >= CARB_ICE_LATCH){
+    state.carbIceAtcLatch = true;
+    if (typeof pushATC === 'function') pushATC('Carb ice — apply heat.', { tag:'ATC', now:true });
+  }
+  if (state.carbIceAtcLatch && state.carbIce <= CARB_ICE_CLEAR) state.carbIceAtcLatch = false;
 }
 
 // Flame flicker sprite — single shared sprite that we re-aim at the cowl in
@@ -6440,6 +6517,15 @@ const state = {
   pitotHeatOn: !!settings.pitotHeat,
   pitotIce: 0,
   pitotIceAtcLatch: false,
+  // Carb-ice mirror of the pitot fields. `carbHeatOn` is seeded from settings
+  // so the player's pull-heat preference rides across reloads. `carbIce`
+  // grows at low throttle in damp/cold conditions (see updateCarbIce);
+  // `carbHeatRpmDip` is a small transient gauge kick the cockpit RPM gauge
+  // subtracts off the needle the frame heat is pulled.
+  carbHeatOn: !!settings.carbHeat,
+  carbIce: 0,
+  carbIceAtcLatch: false,
+  carbHeatRpmDip: 0,
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
   // fire (or each spawn) so we don't roll the dice every frame for nothing.
   nextFireRollMs: 0,
@@ -6748,7 +6834,15 @@ addEventListener('keydown', e=>{
     playParkingBrakeClick(state.parkingBrake);
     showStatus(state.parkingBrake ? 'PARKING BRAKE SET' : 'PARKING BRAKE RELEASED', null, 'good');
   }
-  if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
+  // Shift+C toggles carb heat. Gated through introOpen so a stray key on the
+  // main menu can't latch it. Plain C (no shift) still cycles the camera
+  // (handled in the line below), so we keep the two behaviors cleanly split.
+  if (e.code==='KeyC' && e.shiftKey){
+    if (state.introOpen) return;
+    toggleCarbHeat();
+    return;
+  }
+  if (e.code==='KeyC' && !e.shiftKey) { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyI'){
     // Cold-start ignition. Fires when either the ground cold-start sequence
@@ -7620,6 +7714,12 @@ function resetPlane(){
   // per-flight state, so a hot reset keeps the toggle the player chose.
   state.pitotIce = 0;
   state.pitotIceAtcLatch = false;
+  // Carb ice mirrors pitot ice on reset: clear the ice + latch + RPM-dip
+  // kick, but preserve carbHeatOn so a fresh sortie respects the player's
+  // earlier carb-heat choice.
+  state.carbIce = 0;
+  state.carbIceAtcLatch = false;
+  state.carbHeatRpmDip = 0;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -9806,7 +9906,12 @@ function step(dt){
   // visually slow in the animate-parts block below. Cold-start also kills thrust
   // (no fuel reaching combustion until the crank ritual finishes).
   const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
-  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) : 0;
+  // Carb-icing thrust multiplier: ice severity steals up to CARB_ICE_THRUST_BLEED
+  // of available thrust (so a fully iced carb caps thrust at ~85%). Pulling
+  // carb heat costs a small flat CARB_HEAT_THRUST_COST penalty from the warmer,
+  // less-dense intake — the systems trade-off the pilot is making.
+  const carbMul = Math.max(0, 1 - (state.carbIce || 0) * CARB_ICE_THRUST_BLEED - (state.carbHeatOn ? CARB_HEAT_THRUST_COST : 0));
+  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
@@ -10275,6 +10380,8 @@ function step(dt){
   // Pitot icing pairs with rain + TOD as the high-altitude weather hazard.
   // Self-gates on pause/replay/intro and ground/crash to match other systems.
   updatePitotIce(dt);
+  // Carb icing: low-throttle weather hazard. Self-gates on pause/replay/intro.
+  updateCarbIce(dt);
   // Brake-disc thermal model. Heating only ticks on the ground inside the
   // physics branch (which fills brakeHeatGroundSp + brakeHeatHeld below before
   // the next frame); cooling runs every frame so a hot disc can bleed off
@@ -10737,6 +10844,18 @@ function step(dt){
   // pill goes dark, heat off in icing conditions means ice pill rises.
   const pitotHeatPillEl = document.getElementById('pitotHeatPill');
   if (pitotHeatPillEl) pitotHeatPillEl.style.display = state.pitotHeatOn ? 'inline' : 'none';
+  // Carb heat pill (WIND row) — amber whenever the Shift+C toggle is on so
+  // the pilot can see at a glance that warm intake air is flowing. Pairs
+  // with the carb-ice pill the same way pitot heat pairs with pitot ice:
+  // heat on usually means the ice pill goes dark, heat off in low-throttle
+  // damp conditions lets the ice pill rise.
+  const carbHeatPillEl = document.getElementById('carbHeatPill');
+  if (carbHeatPillEl) carbHeatPillEl.style.display = state.carbHeatOn ? 'inline' : 'none';
+  // Carb ice pill (WIND row) — amber whenever the iced fraction is over the
+  // show floor so brief excursions don't flash on and off. Hidden in photo
+  // mode so saved PNGs stay clean.
+  const carbIcePillEl = document.getElementById('carbIcePill');
+  if (carbIcePillEl) carbIcePillEl.style.display = ((state.carbIce || 0) > CARB_ICE_SHOW_MIN && !state.photoMode) ? 'inline' : 'none';
   // Cockpit panel pitot-heat indicator — pure flavor amber lamp inside the
   // cockpit panel, only visible alongside the gauges so chase / orbit cams
   // stay clean. Reuses the cockpit-cam visibility gate via the parent panel's
@@ -13202,6 +13321,12 @@ function drawCockpitRpm(speedKmh){
       rpm = Math.max(rpm, spool + rpm * 0.5);
     }
   }
+  // Carb-heat tell: the instant heat is pulled, prop RPM drops ~80 because
+  // intake air is warmer and less dense. carbHeatRpmDip is set by
+  // toggleCarbHeat() and decays in updateCarbIce() over ~0.6s, so the needle
+  // shows a quick dip-and-recover that reads as the engine breathing the new
+  // air. Clamp so the gauge can't go negative on a low-throttle dip.
+  rpm = Math.max(0, rpm - (state.carbHeatRpmDip || 0));
   ctx.strokeStyle = '#dfe';
   ctx.fillStyle = '#dfe';
   ctx.textAlign = 'center';
