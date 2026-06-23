@@ -1437,6 +1437,14 @@ function onCrash(){
     state.tgStreak = 0;
     state.tgAirborneAfterTd = false;
   }
+  // Crash debris field — scatter dark-grey shards + start a thin black
+  // smoke column at the impact point so the wreck has visual punctuation
+  // for the replay orbit + crash card. Self-gates on photo mode and clears
+  // on resetPlane() so the next sortie starts on a clean slate. Guarded so
+  // a bailout (where state.crashed flips later, off-screen) still wreckifies.
+  if (typeof spawnCrashDebris === 'function' && typeof plane !== 'undefined'){
+    spawnCrashDebris(plane.position, state.vel);
+  }
   appendLogEntry({
     outcome: 'crashed',
     score: 0,
@@ -7671,6 +7679,260 @@ function playFireWarnChirp(){
   }
 }
 
+// ====== CRASH DEBRIS FIELD ======
+// Visual punctuation for a wreck. When the plane crashes (terrain impact,
+// airframe failure, gear-up slam), spawn a small fixed pool of dark-grey
+// BoxGeometry shards at the impact point with randomized outward velocities
+// + a thin black smoke column rising from the wreck. Shards gravity-fall +
+// bounce for ~1.5 s then settle and persist for the rest of the crash card
+// / replay. Smoke lingers ~12 s before fading. Reuses the airshow sprite
+// texture so no new bake. Hidden in photo mode so saved PNGs stay clean,
+// and fully cleared on resetPlane() so the next sortie starts on a clean
+// slate. Pure additive — no new geometry per frame, no per-frame allocs.
+const DEBRIS_COUNT = 12;
+const DEBRIS_GRAVITY = -9.8;
+const DEBRIS_BOUNCE_DAMP = 0.35;       // velocity multiplier on each ground bounce
+const DEBRIS_FRICTION = 4.5;           // horizontal velocity decay per second while settling
+const DEBRIS_ANG_DAMP = 2.0;           // angular velocity decay per second
+const DEBRIS_SETTLE_SEC = 1.5;         // seconds of physics before the shard freezes in place
+const DEBRIS_MIN_SIZE = 0.4;
+const DEBRIS_MAX_SIZE = 1.2;
+const DEBRIS_BURST_SPEED_H = 8.0;      // m/s horizontal kick magnitude
+const DEBRIS_BURST_SPEED_V = 6.0;      // m/s upward kick magnitude
+const debrisShards = [];
+for (let i = 0; i < DEBRIS_COUNT; i++){
+  // Per-shard random box size so the field doesn't look like a row of clones.
+  const sx = DEBRIS_MIN_SIZE + Math.random() * (DEBRIS_MAX_SIZE - DEBRIS_MIN_SIZE);
+  const sy = DEBRIS_MIN_SIZE + Math.random() * (DEBRIS_MAX_SIZE - DEBRIS_MIN_SIZE);
+  const sz = DEBRIS_MIN_SIZE + Math.random() * (DEBRIS_MAX_SIZE - DEBRIS_MIN_SIZE);
+  // Dark grey shards with a tiny per-shard tint variance so the pile reads
+  // as broken metal panels, not a stack of identical boxes.
+  const v = 0.16 + Math.random() * 0.10;
+  const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(v, v, v + 0.01) });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+  mesh.visible = false;
+  scene.add(mesh);
+  debrisShards.push({
+    mesh,
+    mat,
+    vel: new THREE.Vector3(),
+    angVel: new THREE.Vector3(),
+    groundY: 0,
+    settled: false,
+    age: 0,
+    alive: false
+  });
+}
+// Crash smoke column — smaller cousin of the engine-fire pool. Slow emit,
+// dark tint, lingers ~12 s and rises so the wreck reads from a distance.
+const CRASH_SMOKE_MAX = 60;
+const CRASH_SMOKE_LIFE = 12.0;
+const CRASH_SMOKE_START_R = 0.8;
+const CRASH_SMOKE_GROW = 4.5;
+const CRASH_SMOKE_EMIT_PER_SEC = 5.0;
+const CRASH_SMOKE_TOTAL_SEC = 12.0;    // stop emitting after this; existing puffs age out
+const crashSmokePool = [];
+let crashSmokeHead = 0;
+for (let i = 0; i < CRASH_SMOKE_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0x1a1a1a
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(CRASH_SMOKE_START_R);
+  spr.visible = false;
+  spr.renderOrder = 4;
+  scene.add(spr);
+  crashSmokePool.push({ spr, mat, age: CRASH_SMOKE_LIFE + 1, life: CRASH_SMOKE_LIFE });
+}
+const crashDebris = {
+  active: false,
+  emitAccum: 0,
+  emitTimer: 0,           // seconds since spawn — emit stops past CRASH_SMOKE_TOTAL_SEC
+  origin: new THREE.Vector3()
+};
+function spawnCrashSmokePuff(world){
+  const p = crashSmokePool[crashSmokeHead];
+  crashSmokeHead = (crashSmokeHead + 1) % CRASH_SMOKE_MAX;
+  p.spr.position.copy(world);
+  // Tiny offset jitter so the column doesn't look like a single stack of
+  // identically-aligned discs as they rise.
+  p.spr.position.x += (Math.random() - 0.5) * 0.6;
+  p.spr.position.z += (Math.random() - 0.5) * 0.6;
+  p.spr.scale.setScalar(CRASH_SMOKE_START_R);
+  // Slight tint variance so the plume isn't flat.
+  const v = 0.08 + Math.random() * 0.10;
+  p.mat.color.setRGB(v, v, v);
+  p.age = 0;
+  p.spr.visible = true;
+}
+function clearCrashDebris(){
+  for (const s of debrisShards){
+    s.mesh.visible = false;
+    s.alive = false;
+    s.settled = false;
+    s.age = 0;
+    s.vel.set(0, 0, 0);
+    s.angVel.set(0, 0, 0);
+  }
+  for (const p of crashSmokePool){
+    p.spr.visible = false;
+    p.mat.opacity = 0;
+    p.age = p.life + 1;
+  }
+  crashDebris.active = false;
+  crashDebris.emitAccum = 0;
+  crashDebris.emitTimer = 0;
+}
+// Called from onCrash() — `world` is the impact point (plane.position) and
+// `baseVel` is the plane's pre-impact velocity so shards inherit some of the
+// crash energy rather than spawning dead-still.
+function spawnCrashDebris(world, baseVel){
+  // Hard reset so a back-to-back wreck doesn't double up the pool.
+  clearCrashDebris();
+  crashDebris.active = true;
+  crashDebris.emitAccum = 0;
+  crashDebris.emitTimer = 0;
+  crashDebris.origin.copy(world);
+  // Use impact-point ground as the bounce floor. Mostly equals world.y but
+  // we drop the spawn a touch above so shards aren't already half-buried.
+  const groundY = Math.max(0, world.y);
+  // Inherit ~40% of the plane's momentum so a high-speed wreck scatters
+  // shards downrange instead of dumping them straight onto the impact point.
+  const inhX = (baseVel ? baseVel.x : 0) * 0.4;
+  const inhY = (baseVel ? baseVel.y : 0) * 0.2;
+  const inhZ = (baseVel ? baseVel.z : 0) * 0.4;
+  for (let i = 0; i < debrisShards.length; i++){
+    const s = debrisShards[i];
+    // Scatter shards 5–15 m out in a flat ring around the impact point. We
+    // pick a random angle + radius and offset the spawn position so they
+    // don't all start stacked inside each other.
+    const ang = Math.random() * Math.PI * 2;
+    const r = 0.6 + Math.random() * 1.4;        // spawn radius (m) — tight cluster, velocity fans out
+    const ox = Math.cos(ang) * r;
+    const oz = Math.sin(ang) * r;
+    // Slight vertical spread so the burst reads 3D, not pancake-flat.
+    const oy = 0.4 + Math.random() * 0.8;
+    s.mesh.position.set(world.x + ox, groundY + oy, world.z + oz);
+    s.mesh.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+    // Outward velocity along the spawn angle, magnitude up to BURST_SPEED_H,
+    // plus inherited plane momentum so high-speed wrecks scatter further.
+    const vh = DEBRIS_BURST_SPEED_H * (0.4 + Math.random() * 0.6);
+    s.vel.set(
+      Math.cos(ang) * vh + inhX,
+      DEBRIS_BURST_SPEED_V * (0.3 + Math.random() * 0.7) + inhY,
+      Math.sin(ang) * vh + inhZ
+    );
+    // Spin per shard so each tumbles individually on the way down.
+    s.angVel.set(
+      (Math.random() - 0.5) * 8,
+      (Math.random() - 0.5) * 8,
+      (Math.random() - 0.5) * 8
+    );
+    s.groundY = groundY;
+    s.settled = false;
+    s.age = 0;
+    s.alive = true;
+    s.mesh.visible = true;
+  }
+}
+function updateCrashDebris(dt){
+  // Photo mode hides the whole field so saved PNGs stay clean — matches the
+  // crash-card / engine-fire FX suppression pattern. Visibility toggles each
+  // frame so unpausing photo mode pops the wreck back in.
+  const hidden = !!state.photoMode;
+  // Shards: gravity + ground bounce + horizontal friction until they settle,
+  // then freeze. We keep them visible after settling so the wreck has
+  // something to look at during the replay orbit and the crash card.
+  for (const s of debrisShards){
+    if (!s.alive) continue;
+    s.mesh.visible = !hidden;
+    if (!s.settled){
+      s.age += dt;
+      // Gravity.
+      s.vel.y += DEBRIS_GRAVITY * dt;
+      // Integrate position.
+      s.mesh.position.x += s.vel.x * dt;
+      s.mesh.position.y += s.vel.y * dt;
+      s.mesh.position.z += s.vel.z * dt;
+      // Ground bounce — only kicks while the shard is moving down. Dampen
+      // each axis on contact so the pile loses energy and settles instead of
+      // bouncing forever.
+      if (s.mesh.position.y <= s.groundY + 0.05){
+        s.mesh.position.y = s.groundY + 0.05;
+        if (s.vel.y < 0){
+          s.vel.y = -s.vel.y * DEBRIS_BOUNCE_DAMP;
+          s.vel.x *= 0.6;
+          s.vel.z *= 0.6;
+        }
+      }
+      // Horizontal friction so the shards don't slide forever even pre-
+      // settle. Frame-rate independent decay.
+      const decay = Math.max(0, 1 - DEBRIS_FRICTION * dt);
+      s.vel.x *= decay;
+      s.vel.z *= decay;
+      // Spin damping.
+      const adecay = Math.max(0, 1 - DEBRIS_ANG_DAMP * dt);
+      s.angVel.x *= adecay;
+      s.angVel.y *= adecay;
+      s.angVel.z *= adecay;
+      // Apply rotation.
+      s.mesh.rotation.x += s.angVel.x * dt;
+      s.mesh.rotation.y += s.angVel.y * dt;
+      s.mesh.rotation.z += s.angVel.z * dt;
+      // After SETTLE_SEC the shard freezes in place — cheaper than tracking
+      // tiny velocities forever, and the visual is already at rest.
+      if (s.age >= DEBRIS_SETTLE_SEC){
+        s.settled = true;
+        s.vel.set(0, 0, 0);
+        s.angVel.set(0, 0, 0);
+      }
+    }
+  }
+  // Smoke column: emit while the active flag is set and we're inside the
+  // emit window. Aging puffs keep ticking either way so the plume tails out
+  // naturally after the emitter shuts off.
+  if (crashDebris.active && !hidden){
+    crashDebris.emitTimer += dt;
+    if (crashDebris.emitTimer <= CRASH_SMOKE_TOTAL_SEC){
+      crashDebris.emitAccum += CRASH_SMOKE_EMIT_PER_SEC * dt;
+      while (crashDebris.emitAccum >= 1){
+        crashDebris.emitAccum -= 1;
+        // Emit at the impact point (plus the per-puff jitter inside spawn).
+        spawnCrashSmokePuff(crashDebris.origin);
+      }
+    } else {
+      crashDebris.emitAccum = 0;
+    }
+  } else {
+    crashDebris.emitAccum = 0;
+  }
+  // Age every puff — drift with wind, lift as hot smoke rises, fade out at
+  // both ends so puffs pop in/out cleanly. Mirrors the engine-fire loop.
+  for (const p of crashSmokePool){
+    if (!p.spr.visible) continue;
+    if (hidden){
+      p.mat.opacity = 0;
+      continue;
+    }
+    p.age += dt;
+    if (p.age >= p.life){
+      p.spr.visible = false;
+      p.mat.opacity = 0;
+      continue;
+    }
+    const t = p.age / p.life;
+    p.spr.position.x += state.wind.x * 0.25 * dt;
+    p.spr.position.z += state.wind.z * 0.25 * dt;
+    p.spr.position.y += 0.6 * dt; // hot smoke rises a touch faster than the fire plume
+    const r = CRASH_SMOKE_START_R + CRASH_SMOKE_GROW * t;
+    p.spr.scale.setScalar(r);
+    const fadeIn = Math.min(1, t / 0.06);
+    const fadeOut = Math.min(1, (1 - t) / 0.35);
+    p.mat.opacity = 0.78 * fadeIn * fadeOut;
+  }
+}
+
 // ====== PARACHUTE BAILOUT ======
 // Shift+P punches the pilot out of the cockpit when the situation has clearly
 // gone sideways. Triggered from a tight whitelist (engine fire / heavy damage /
@@ -10321,6 +10583,10 @@ function resetPlane(){
   state.engineFireBeepAt = 0;
   state.nextFireRollMs = 0;
   clearEngineFireFx();
+  // Crash debris field — wipe shards + smoke column so the next sortie
+  // starts on a clean slate. clearCrashDebris() is a no-op when nothing is
+  // active so a hot reset on the apron pays nothing.
+  if (typeof clearCrashDebris === 'function') clearCrashDebris();
   // Alternator failure: wipe the per-sortie roll + trip schedule + battery
   // counter so a fresh sortie re-rolls cleanly. Also drop any visual dim/dark
   // classes left on the cockpit panel + HUD from a prior failure (the per-
@@ -20864,6 +21130,13 @@ function loop(now){
   updateSunGlare(dt);
   updatePlaneShadow(dt);
   updateGVision(dt);
+  // Crash debris field — advances shard physics + ages the smoke column.
+  // Lives outside step() so shards still settle and smoke still drifts
+  // during the post-crash replay (otherwise everything would freeze the
+  // moment startReplay() fires, leaving boxes hanging in mid-air). Self-
+  // gates on the active flag so a clean cruise pays almost nothing, and
+  // hides everything in photo mode so saved PNGs stay clean.
+  updateCrashDebris(dt);
   renderer.render(scene, camera);
 }
 
