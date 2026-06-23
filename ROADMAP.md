@@ -11,6 +11,7 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - No giant rewrites. Touch the minimum to land the feature.
 
 ## DONE
+- [x] Mid-flight turbulence pockets — invisible 200–500 m bubbles drifting on the surface wind that inject body-frame pitch/roll/yaw jitter + a small vertical gust while the plane is inside one; smooth low (<500 m MSL) + high (>4500 m MSL), bumpy through the 800–2500 m mid-layer with feathered transition shoulders, severity scaled by per-pocket strength + steady-wind speed (calm day stays glassy, windy day bites). HUD pill (amber `〰 BUMPY` / red `🌪 SEVERE`) sits on the WIND row with a brief 0.9 s hold so a gap between adjacent bubbles doesn't blink it off; one-shot PILOT ATC `"Moderate chop reported, <FL>m."` (or `"Moderate-to-severe…"`) fires the first frame the plane crosses into moderate severity per altitude band and re-arms when leaving that band. Pool of 14 pockets respawns near the plane on a 35–110 s scheduler, hard-gated against crash/replay/photo/intro/pause/onGround (taxi stays steady), reset via `_chopResetLatches()` in `resetPlane()`. Pure additive — no new mesh, no new audio, no allocations per frame.
 - [x] Basic takeoff + landing
 - [x] Throttle-scaled engine sound
 - [x] Bigger world: mountains, multiple airports, volumetric clouds
@@ -304,8 +305,6 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Mid-flight turbulence pockets — invisible 200–500 m wide bubbles drifting on the wind that, while the plane is inside, inject a small randomized pitch + roll + vertical-gust jitter scaled by altitude band (calmer near the ground, choppier in the 800–2500 m mid-layer, calm again at high altitude). Severity ramps with the existing wind speed so a calm-day flight stays smooth and a windy day finally feels windy. HUD adds a small amber `BUMPY` / red `SEVERE` chop pill on the WIND row + a one-shot ATC `"Light/Moderate chop reported, FL<NN>."` line the first frame the plane enters a moderate-or-worse pocket per altitude band (re-arms when the plane leaves the band). Hidden in photo / pause / replay / intro / crash and gated to airborne so taxi stays steady. Pure additive — no new mesh, no new audio — but the smooth-air cruise finally has texture and pairs naturally with the existing wind / shear / wake systems.
 
 - [ ] Approach plate kneeboard (`Shift+N`) — small right-side overlay card (compact PDF-style approach plate look) showing the nearest airport's runway diagram, threshold elevation, runway heading, 3° glideslope altitude callouts at 1/2/3/5 km, current wind / altimeter / time, and a tiny top-down plan view with the standard left-hand pattern outlined and the player's live position dot. Auto-picks the wind-favoured runway (same logic as ATIS), updates the OBS / glideslope numbers live. Shift+N toggles, Esc closes; gated against intro / photo / pause / replay / crashed and the J / squawk / time / keypad modals so it stacks cleanly. Hidden in photo mode via PHOTO_HIDE_IDS. Pure derived readout off existing runway / wind / ATIS plumbing — no new physics, no new audio — but finally gives the player a real briefing card to glance at instead of holding the whole approach in their head.
 

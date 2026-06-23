@@ -683,7 +683,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -10319,6 +10319,14 @@ function resetPlane(){
     state.shear.triggered = false;
     state.shear.rwyDesignator = '';
   }
+  // Turbulence pockets: clear the per-band ATC latches + hide the pill so
+  // every fresh sortie can re-fire the "moderate chop reported" call when the
+  // player climbs back into the rough air. The pockets themselves keep
+  // drifting/respawning under tickTurbulence so a hot reset doesn't dump the
+  // whole atmospheric model.
+  if (typeof _chopResetLatches === 'function') _chopResetLatches();
+  const _chopPillReset = document.getElementById('chopPill');
+  if (_chopPillReset) _chopPillReset.style.display = 'none';
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   for (const v of aiVortexMeshes){ v.primed = false; v.mesh.visible = false; }
   wakeState.intensity = 0; wakeState.rumbleCooldown = 0; wakeState.wasInWake = false;
@@ -12381,6 +12389,256 @@ function tickWindShear(){
     pushATC('Wind shear escape \u2014 max power, pitch for climb.', { tag:'PILOT', now:true });
   }
   if (typeof showShearEscape === 'function') showShearEscape();
+}
+
+// ====== MID-FLIGHT TURBULENCE POCKETS ======
+// Invisible 200-500m wide bubbles drifting on the surface wind that, while
+// the plane is inside, inject a small randomized pitch + roll + vertical
+// gust jitter scaled by altitude band. The mid-layer (800-2500m MSL) is
+// the rough air; near the ground (<500m) and high up (>4500m) the air is
+// smooth, mirroring the real-world picture where convective + mechanical
+// turbulence sits in the mixing layer. Severity ramps with steady-wind
+// magnitude so a calm day stays glassy and a windy day finally feels
+// windy. HUD adds an amber CHOP pill (or red SEVERE) on the WIND row and
+// fires a one-shot ATC "Light/Moderate chop" line per altitude band; the
+// per-band latches clear when the plane leaves that band so descending
+// back into the mid layer earns a fresh call.
+//
+// No new mesh, no new audio. The pockets are pure data + body-frame jitter
+// applied through plane.rotateX/Y/Z (the same trick the wake-turbulence
+// code uses) and a small additive vertical kick into state.vel.y. The
+// pool is fixed-size and pockets respawn around the plane on a slow
+// scheduler so we never allocate per frame.
+const CHOP_POOL_N         = 14;     // number of active pockets
+const CHOP_R_MIN          = 200;    // metres - smallest bubble
+const CHOP_R_MAX          = 500;    // metres - largest bubble
+const CHOP_SPAWN_RADIUS_M = 9000;   // metres around the plane where new pockets seed
+const CHOP_RESPAWN_MIN_S  = 35;     // per-pocket lifetime min (s)
+const CHOP_RESPAWN_MAX_S  = 110;    // per-pocket lifetime max (s)
+const CHOP_BAND_MID_LO    = 800;    // metres MSL - bumpy band lower edge
+const CHOP_BAND_MID_HI    = 2500;   // metres MSL - bumpy band upper edge
+const CHOP_BAND_LO_TOP    = 500;    // metres MSL - low calm ceiling
+const CHOP_BAND_HI_FLOOR  = 4500;   // metres MSL - high calm floor
+const CHOP_VERT_HALF_M    = 350;    // metres - ± vertical half-extent of a pocket
+const CHOP_WIND_REF_MS    = 12;     // m/s steady wind = full severity reference
+const CHOP_PITCH_RATE     = 0.55;   // rad/s peak pitch jitter at severity=1
+const CHOP_ROLL_RATE      = 0.95;   // rad/s peak roll jitter at severity=1
+const CHOP_YAW_RATE       = 0.35;   // rad/s peak yaw jitter at severity=1
+const CHOP_VGUST_MS       = 3.5;    // m/s peak vertical kick magnitude at severity=1
+const CHOP_MOD_THRESHOLD  = 0.45;   // severity above this = moderate-or-worse (ATC fires)
+const CHOP_SEVERE_THRESH  = 0.80;   // severity above this = SEVERE pill (red)
+const CHOP_BUMPY_THRESH   = 0.12;   // severity above this = BUMPY pill (amber)
+const CHOP_PILL_HOLD_MS   = 900;    // ms to keep the pill lit after dropping below the floor
+// Pre-allocated scratch for the local plane axes so the per-frame jitter
+// path doesn't allocate.
+const _chopTmpFwd  = new THREE.Vector3();
+const _chopTmpRgt  = new THREE.Vector3();
+const _chopTmpUp   = new THREE.Vector3();
+// Pool of pockets. Each pocket: { x, z, r, alt, sev, life } where alt is the
+// MSL altitude of the pocket centre, r is the horizontal radius, sev is the
+// raw 0..1 severity multiplier of that pocket (re-rolled each respawn so the
+// world has a mix of weak + strong bumps), and life is the remaining seconds
+// before respawn. Allocated lazily on first tick so we don't run before the
+// world (plane.position) exists.
+let chopPockets = null;
+// Per-band one-shot ATC latches. Cleared in resetPlane(). Indexed by altitude
+// band ('low' / 'mid' / 'high') so descending back into the mid band after a
+// climb fires a fresh call instead of staying silent the rest of the sortie.
+const chopAtcLatch = { low: false, mid: false, high: false };
+// Hold the pill on briefly after dropping out of a pocket so a momentary
+// gap between two adjacent bubbles doesn't blink the warning off and on.
+let chopPillUntilMs = 0;
+function _chopBandFor(yMsl){
+  if (yMsl < CHOP_BAND_LO_TOP) return 'low';
+  if (yMsl >= CHOP_BAND_HI_FLOOR) return 'high';
+  if (yMsl >= CHOP_BAND_MID_LO && yMsl <= CHOP_BAND_MID_HI) return 'mid';
+  // Soft transition bands (500-800m and 2500-4500m): treat as mid so the
+  // bumpy zone has a feathered edge instead of a hard cliff.
+  return 'mid';
+}
+// Multiplier for how rough each band gets at peak. Mid layer is the rough
+// air; the transition shoulders feel softer so climbing into / out of the
+// chop has a perceptible easing.
+function _chopBandFactor(yMsl){
+  if (yMsl < CHOP_BAND_LO_TOP) return 0;
+  if (yMsl >= CHOP_BAND_HI_FLOOR) return 0;
+  if (yMsl >= CHOP_BAND_MID_LO && yMsl <= CHOP_BAND_MID_HI) return 1.0;
+  if (yMsl < CHOP_BAND_MID_LO){
+    // 500 -> 800m linear ramp up
+    return Math.max(0, (yMsl - CHOP_BAND_LO_TOP) / (CHOP_BAND_MID_LO - CHOP_BAND_LO_TOP));
+  }
+  // 2500 -> 4500m linear ramp down
+  return Math.max(0, 1 - (yMsl - CHOP_BAND_MID_HI) / (CHOP_BAND_HI_FLOOR - CHOP_BAND_MID_HI));
+}
+function _chopSpawnOne(p, nearPlane){
+  // Place a pocket somewhere in a ring around the plane (or around the
+  // origin on the first cold init when plane isn't placed yet) so the
+  // player keeps stumbling into fresh chop instead of running out of it
+  // in a single direction. Inner ring keeps a pocket from spawning right
+  // on top of the plane (no instant slam).
+  const cx = nearPlane ? plane.position.x : 0;
+  const cz = nearPlane ? plane.position.z : 0;
+  const theta = Math.random() * Math.PI * 2;
+  const minR = nearPlane ? 600 : 0;
+  const dist = minR + Math.random() * (CHOP_SPAWN_RADIUS_M - minR);
+  p.x = cx + Math.sin(theta) * dist;
+  p.z = cz + Math.cos(theta) * dist;
+  p.r = CHOP_R_MIN + Math.random() * (CHOP_R_MAX - CHOP_R_MIN);
+  // Centre altitude biased into the bumpy mid-layer so most rolls land in the
+  // band that actually matters. A small slice spills above/below so the edge
+  // ramps see action too.
+  const altRoll = Math.random();
+  if (altRoll < 0.75){
+    p.alt = CHOP_BAND_MID_LO + Math.random() * (CHOP_BAND_MID_HI - CHOP_BAND_MID_LO);
+  } else if (altRoll < 0.9){
+    // shoulder above
+    p.alt = CHOP_BAND_MID_HI + Math.random() * (CHOP_BAND_HI_FLOOR - CHOP_BAND_MID_HI) * 0.5;
+  } else {
+    // shoulder below
+    p.alt = CHOP_BAND_LO_TOP + Math.random() * (CHOP_BAND_MID_LO - CHOP_BAND_LO_TOP);
+  }
+  // Per-pocket severity. Skewed so most bumps are mild and the occasional
+  // pocket really hammers. Squaring a uniform gives the heavy-low / light-high
+  // distribution we want.
+  const u = Math.random();
+  p.sev = 0.25 + (u * u) * 0.85; // 0.25 .. ~1.10
+  p.life = CHOP_RESPAWN_MIN_S + Math.random() * (CHOP_RESPAWN_MAX_S - CHOP_RESPAWN_MIN_S);
+}
+function _chopInitPool(){
+  if (chopPockets) return;
+  chopPockets = new Array(CHOP_POOL_N);
+  for (let i = 0; i < CHOP_POOL_N; i++){
+    chopPockets[i] = { x: 0, z: 0, r: 0, alt: 0, sev: 0, life: 0 };
+    _chopSpawnOne(chopPockets[i], false);
+    // Stagger initial lifetimes so they don't all respawn on the same frame.
+    chopPockets[i].life = Math.random() * CHOP_RESPAWN_MAX_S;
+  }
+}
+function _chopResetLatches(){
+  chopAtcLatch.low = false;
+  chopAtcLatch.mid = false;
+  chopAtcLatch.high = false;
+  chopPillUntilMs = 0;
+}
+function tickTurbulence(dt){
+  if (dt <= 0) return;
+  const pillEl = document.getElementById('chopPill');
+  _chopInitPool();
+  // Hard gates: anything that pauses or hides the world also pauses the
+  // chop. Taxi stays steady so the pre-takeoff ritual isn't shaken to bits.
+  if (state.crashed || state.replayActive || state.photoMode || state.introOpen || state.paused || state.onGround){
+    if (pillEl && pillEl.style.display !== 'none' && performance.now() > chopPillUntilMs){
+      pillEl.style.display = 'none';
+    }
+    return;
+  }
+  // Drift each pocket with the steady surface wind so the rough air actually
+  // moves over the world instead of being painted to the map. Respawn when
+  // a pocket times out or drifts way outside the spawn radius around the
+  // plane (so the pool always has fresh nearby chop to wander into).
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  for (let i = 0; i < CHOP_POOL_N; i++){
+    const p = chopPockets[i];
+    p.x += wx * dt;
+    p.z += wz * dt;
+    p.life -= dt;
+    if (p.life <= 0){ _chopSpawnOne(p, true); continue; }
+    const dxC = p.x - plane.position.x;
+    const dzC = p.z - plane.position.z;
+    if ((dxC*dxC + dzC*dzC) > (CHOP_SPAWN_RADIUS_M * 1.6) * (CHOP_SPAWN_RADIUS_M * 1.6)){
+      _chopSpawnOne(p, true);
+    }
+  }
+  // Sum per-pocket contributions where the plane is inside the bubble. Smooth
+  // falloff (horizontal Gaussian-ish + vertical linear) so the bumps fade in
+  // and out as the plane crosses the edge instead of latching on at the rim.
+  const px = plane.position.x;
+  const pz = plane.position.z;
+  const py = plane.position.y;
+  let totalSev = 0;
+  for (let i = 0; i < CHOP_POOL_N; i++){
+    const p = chopPockets[i];
+    const dx = px - p.x;
+    const dz = pz - p.z;
+    const distSq = dx*dx + dz*dz;
+    const rSq = p.r * p.r;
+    if (distSq >= rSq) continue;
+    const dh = Math.abs(py - p.alt);
+    if (dh >= CHOP_VERT_HALF_M) continue;
+    const horiz = 1 - distSq / rSq;             // 0 at edge, 1 at centre
+    const vert  = 1 - dh / CHOP_VERT_HALF_M;    // 0 at top/bottom, 1 at centre
+    totalSev += p.sev * horiz * vert;
+  }
+  // Wind-coupled multiplier so a calm day feels glassy and a 12 m/s blow
+  // makes the chop bite. Capped at 1 so the wind doesn't unbalance the
+  // jitter on a freak shear-burst gust.
+  const windSpd = Math.hypot(state.wind ? state.wind.x : 0, state.wind ? state.wind.z : 0);
+  const windMul = Math.min(1, 0.35 + 0.65 * (windSpd / CHOP_WIND_REF_MS));
+  // Altitude-band feather so the transition shoulders feel softer than the
+  // core mid-layer.
+  const bandMul = _chopBandFactor(py);
+  let sev = totalSev * windMul * bandMul;
+  if (sev > 1.5) sev = 1.5;
+  // Apply the body-frame jitter. Uses the same plane.rotateX/Y/Z trick as the
+  // wake-turbulence code so it composes cleanly with the control rates that
+  // run later in the physics step. Random sign per axis per frame keeps it
+  // feeling like air, not a mechanical wobble. Frequency-style jitter is
+  // already baked in by the per-frame random + the dt scaling.
+  if (sev > 0.02){
+    const jR = (Math.random() * 2 - 1);
+    const jP = (Math.random() * 2 - 1);
+    const jY = (Math.random() * 2 - 1);
+    plane.rotateZ(jR * CHOP_ROLL_RATE  * sev * dt);
+    plane.rotateX(jP * CHOP_PITCH_RATE * sev * dt);
+    plane.rotateY(jY * CHOP_YAW_RATE   * sev * dt);
+    // Vertical gust. Bias slightly negative so updrafts and downdrafts feel
+    // about even (the lift response to a positive AoA bump already kicks
+    // the plane up on its own, so leaving the kick zero-mean would slowly
+    // bias the average climb rate). Small enough to feel like air, not a
+    // microburst.
+    const jV = (Math.random() * 2 - 1);
+    state.vel.y += jV * CHOP_VGUST_MS * sev * dt;
+  }
+  // HUD pill. Bumpy (amber) when severity is over the floor, severe (red)
+  // when it crosses the upper threshold. Pill is held briefly after the
+  // severity drops so a half-second lull between adjacent bubbles doesn't
+  // blink the warning off and back on.
+  if (pillEl){
+    const nowMs = performance.now();
+    if (sev >= CHOP_BUMPY_THRESH){
+      const severe = sev >= CHOP_SEVERE_THRESH;
+      pillEl.style.display = 'inline';
+      if (severe){
+        pillEl.style.color = '#ff5050';
+        pillEl.textContent = '🌪 SEVERE';
+      } else {
+        pillEl.style.color = '#ffd166';
+        pillEl.textContent = '〰 BUMPY';
+      }
+      chopPillUntilMs = nowMs + CHOP_PILL_HOLD_MS;
+    } else if (nowMs > chopPillUntilMs){
+      pillEl.style.display = 'none';
+    }
+  }
+  // One-shot ATC line on first entry to moderate-or-worse per altitude band.
+  // Re-arms when the plane leaves that band so descending back into the chop
+  // earns a fresh call. The PILOT-tagged "chop reported" line names the rough
+  // band by approximate flight level so the strip reads like a real pirep.
+  const band = _chopBandFor(py);
+  // Clear the latches for any band the plane isn't currently in.
+  if (band !== 'low')  chopAtcLatch.low  = false;
+  if (band !== 'mid')  chopAtcLatch.mid  = false;
+  if (band !== 'high') chopAtcLatch.high = false;
+  if (sev >= CHOP_MOD_THRESHOLD && !chopAtcLatch[band]){
+    chopAtcLatch[band] = true;
+    if (typeof pushATC === 'function'){
+      const severe = sev >= CHOP_SEVERE_THRESH;
+      const phrase = severe ? 'Moderate-to-severe' : 'Moderate';
+      const fl = Math.max(0, Math.round(py / 100)); // hundreds of metres (FL-ish in metric)
+      pushATC(phrase + ' chop reported, ' + fl + '00m.', { tag:'PILOT' });
+    }
+  }
 }
 
 // ====== GEAR WARNING HORN ======
@@ -14454,6 +14712,13 @@ function step(dt){
   if (performance.now() > state.windNextChangeMs) pickWindTarget();
   // Wind shear hazard: may override windTarget for a 4-6s burst on short final.
   tickWindShear();
+  // Mid-flight turbulence pockets: invisible bubbles drifting on the surface
+  // wind that inject body-frame pitch/roll/yaw jitter + a small vertical gust
+  // when the plane is inside one. Mid-layer (800-2500m MSL) is rough; low and
+  // high are calm. Severity also ramps with steady-wind speed so a windy day
+  // bites. HUD pill + one-shot ATC "chop reported" per altitude band; resets
+  // on resetPlane().
+  tickTurbulence(dt);
   // Landing-gear warning horn: low + slow + descending with gear up = nag.
   tickGearHorn();
   // Bird flock altitude warning: in the band where a flock is drifting and
