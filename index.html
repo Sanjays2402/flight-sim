@@ -486,6 +486,30 @@
   #cockpitPanel.night canvas { filter: saturate(.15) sepia(1) hue-rotate(-45deg) brightness(.85) contrast(1.15); border-color:#5a1818; }
   #cockpitPanel.night { box-shadow: 0 0 22px rgba(220,40,30,.45), inset 0 0 12px rgba(140,10,10,.35); border-color:#5a1818; background:rgba(14,4,4,.78); }
   #cockpitPanel.night .glbl { color:#d56a6a; text-shadow:0 0 6px rgba(220,50,40,.45); }
+  /* Alternator-failure dim pass. Composes with .night (filters multiply via the
+     compositor) so a night-flight alt-fail still reads as red panel + dimmed.
+     Brightness drops the gauge faces ~25%, opacity drops the HUD readouts the
+     same amount so the player gets a real "running on battery" visual cue. */
+  #cockpitPanel.alt-fail canvas { filter: brightness(.72) contrast(.92) saturate(.85); }
+  #cockpitPanel.alt-fail .glbl  { opacity:.72; }
+  #cockpitPanel.night.alt-fail canvas { filter: saturate(.15) sepia(1) hue-rotate(-45deg) brightness(.62) contrast(1.05); }
+  /* Full electrical fade once the battery's drained past ALT_BATTERY_FULL_SECS.
+     Flicker burst is driven by a brief CSS keyframe that runs each time the
+     panel goes dark + on every random re-flicker triggered from JS. */
+  #cockpitPanel.alt-dark canvas { filter: brightness(.18) contrast(.55) saturate(.25); }
+  #cockpitPanel.alt-dark .glbl  { opacity:.32; }
+  #cockpitPanel.alt-flicker canvas { animation: altflick 0.18s steps(2) 1; }
+  @keyframes altflick {
+    0%   { filter: brightness(.18) contrast(.55) saturate(.25); }
+    25%  { filter: brightness(.95) contrast(.85) saturate(.85); }
+    50%  { filter: brightness(.10) contrast(.45) saturate(.20); }
+    75%  { filter: brightness(.55) contrast(.70) saturate(.55); }
+    100% { filter: brightness(.18) contrast(.55) saturate(.25); }
+  }
+  /* Mirror the dim pass on the HUD readouts so the whole instrument scan
+     looks like it's running on a depleted battery, not just the gauges. */
+  #hud.alt-fail { opacity:.75; }
+  #hud.alt-dark { opacity:.30; }
   /* Pause menu: press Esc mid-flight to freeze the sim. Same modal vibe as
      Settings / Pilot Stats so the player gets a consistent feel — dimmed
      backdrop, centered card, big readable buttons. Sits at a high z-index
@@ -672,6 +696,7 @@
   <div class="row"><span id="engtemp" class="warn" style="display:none">⚠ ENG TEMP</span></div>
   <div class="row"><span id="trafficWarn" class="warn-amber" style="display:none">⚠ TRAFFIC <span id="trafficArrow" style="display:inline-block;margin-left:4px;transform-origin:50% 50%">↑</span> <span id="trafficDist" style="margin-left:4px;font-weight:600">—</span></span></div>
   <div class="row"><span id="canopyPill" style="display:none;color:#ffd166;font-weight:700">🔓 CANOPY</span></div>
+  <div class="row"><span id="electrical" class="warn-amber" style="display:none">⚡ BATT-ONLY <span id="electricalT" style="margin-left:6px;font-weight:600;color:#d8c389">3:00</span></span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
@@ -8190,6 +8215,26 @@ const state = {
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
   // fire (or each spawn) so we don't roll the dice every frame for nothing.
   nextFireRollMs: 0,
+  // Generator / alternator failure event. Random 1-in-25 roll happens ONCE
+  // per sortie about 30s after takeoff (seeded to flightStartMs so a save-
+  // scummer can't reroll the result by tapping `R` mid-flight). When the roll
+  // hits, the failure trips at a random delay 30-180s after the roll so the
+  // pilot can't predict when the lights go out. Once tripped (altFailed=true),
+  // altOnBatteryT counts up real seconds on battery; the cockpit panel + HUD
+  // dim 25% via the .alt-fail class, an amber `⚡ BATT-ONLY MM:SS` pill
+  // counts the battery down, and after ALT_BATTERY_FULL_SECS (3 min) the
+  // panel flickers and goes dark via .alt-dark (pill flips red). The engine
+  // itself keeps running — the prop is mechanical, the alt is electrical —
+  // so the player can still fly visually toward a runway. altRollDoneMs latches the per-sortie roll so the routine
+  // only rolls dice once a flight; altFailScheduledMs holds the trip time so
+  // updateAlternator() knows when to fire. altFlickerNextMs schedules the
+  // occasional random flicker during the battery-only ramp so the failure
+  // feels alive instead of being a step function. All reset on resetPlane().
+  altFailed: false,
+  altRollDoneMs: 0,
+  altFailScheduledMs: -1,
+  altOnBatteryT: 0,
+  altFlickerNextMs: 0,
   scoreLast: null,
   scoreBest: 0,
   scoreTotal: 0,
@@ -10030,6 +10075,24 @@ function resetPlane(){
   state.engineFireBeepAt = 0;
   state.nextFireRollMs = 0;
   clearEngineFireFx();
+  // Alternator failure: wipe the per-sortie roll + trip schedule + battery
+  // counter so a fresh sortie re-rolls cleanly. Also drop any visual dim/dark
+  // classes left on the cockpit panel + HUD from a prior failure (the per-
+  // frame updateAlternator() also handles this, but doing it inline here
+  // means no one-frame flash on hot reset).
+  state.altFailed = false;
+  state.altRollDoneMs = 0;
+  state.altFailScheduledMs = -1;
+  state.altOnBatteryT = 0;
+  state.altFlickerNextMs = 0;
+  try {
+    const cp = document.getElementById('cockpitPanel');
+    if (cp) cp.classList.remove('alt-fail', 'alt-dark', 'alt-flicker');
+    const hud = document.getElementById('hud');
+    if (hud) hud.classList.remove('alt-fail', 'alt-dark');
+    const el = document.getElementById('electrical');
+    if (el) el.style.display = 'none';
+  } catch(e){}
   // Parachute bailout: clear the sub-state machine and hide the rendered
   // pilot/canopy meshes so a fresh sortie starts clean. The lifetime stat
   // is preserved in pilotStats.bailouts — only the per-flight scratch goes.
@@ -12343,6 +12406,139 @@ function tickNightPanelSuggest(){
     pushATC('Recommend night panel.', { tag: 'PILOT', now: true });
   }
 }
+
+// ====== GENERATOR / ALTERNATOR FAILURE EVENT ======
+// Roughly 1-in-25 sorties the alternator quits mid-flight. The roll is fired
+// exactly once per sortie about ALT_ROLL_DELAY_S after takeoff so a save-
+// scummer who taps R doesn't get to reroll the result — the choice was made
+// at the moment they committed to the flight. On a hit, the trip itself is
+// scheduled a random 30–180s later so the pilot can't predict when the lights
+// go out. Once the alt is dead, the engine still runs (the prop is mechanical)
+// but every electrically-driven instrument is now running off the battery: the
+// HUD + cockpit panel dim by ~25 %, the fuel-pump SFX gets noisier, the
+// electrical pill counts down 3 min of usable battery, and at zero the panel
+// flickers and goes dark until landing. Lands cleanly because the engine
+// itself is unaffected; visual reset happens in resetPlane() so a fresh
+// sortie gets a fresh roll.
+const ALT_FAIL_CHANCE      = 0.04;   // ~1-in-25 per sortie
+const ALT_ROLL_DELAY_S     = 30;     // wait this many seconds airborne before rolling
+const ALT_FAIL_DELAY_MIN_S = 30;     // min seconds after roll to trip
+const ALT_FAIL_DELAY_MAX_S = 180;    // max seconds after roll to trip
+const ALT_BATTERY_FULL_SECS = 180;   // 3 min on battery before lights go dark
+const ALT_FLICKER_MIN_MS   = 4500;   // min gap between random battery-ramp flickers
+const ALT_FLICKER_MAX_MS   = 11000;  // max gap
+function updateAlternator(dt){
+  // Anywhere we shouldn't be ticking gameplay state, bail out without
+  // poking visuals — resetPlane() owns the class cleanup separately.
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return;
+  if (state.crashed) return;
+  const cp  = document.getElementById('cockpitPanel');
+  const hud = document.getElementById('hud');
+  const el  = document.getElementById('electrical');
+  const elT = document.getElementById('electricalT');
+  const nowMs = performance.now();
+  // On the ground (post-landing or pre-takeoff) the alternator is healthy:
+  // any prior failure clears its visuals so the player isn't stuck staring
+  // at a dim panel after they've safely parked. The altFailed bit itself
+  // stays so the logbook / future stat hooks can read "this flight had an
+  // alt failure", but the per-frame dim doesn't apply once on the ground.
+  if (state.onGround){
+    if (cp) cp.classList.remove('alt-fail', 'alt-dark', 'alt-flicker');
+    if (hud) hud.classList.remove('alt-fail', 'alt-dark');
+    if (el) el.style.display = 'none';
+    state.altOnBatteryT = 0;
+    state.altFlickerNextMs = 0;
+    return;
+  }
+  // Per-sortie roll: only once per flight, gated on a minimum airborne time
+  // so a deadstick or quick touch-and-go isn't constantly re-rolling.
+  if (!state.altFailed && state.altRollDoneMs === 0
+      && flightStartMs != null
+      && (nowMs - flightStartMs) > ALT_ROLL_DELAY_S * 1000){
+    state.altRollDoneMs = nowMs;
+    if (Math.random() < ALT_FAIL_CHANCE){
+      const delaySec = ALT_FAIL_DELAY_MIN_S
+        + Math.random() * (ALT_FAIL_DELAY_MAX_S - ALT_FAIL_DELAY_MIN_S);
+      state.altFailScheduledMs = nowMs + delaySec * 1000;
+    } else {
+      state.altFailScheduledMs = -1;          // no failure this sortie
+    }
+  }
+  // Scheduled trip: when the wall clock reaches altFailScheduledMs, fire
+  // the failure once. Uses showStatus + pushATC for the player cue.
+  if (!state.altFailed && state.altFailScheduledMs > 0 && nowMs >= state.altFailScheduledMs){
+    state.altFailed = true;
+    state.altOnBatteryT = 0;
+    state.altFlickerNextMs = nowMs + (ALT_FLICKER_MIN_MS
+      + Math.random() * (ALT_FLICKER_MAX_MS - ALT_FLICKER_MIN_MS));
+    if (cp){
+      cp.classList.add('alt-fail');
+      cp.classList.add('alt-flicker');
+      // Strip the flicker class on the next animation frame so it can
+      // re-trigger later — CSS animations only re-run on class re-add.
+      setTimeout(() => { try { cp.classList.remove('alt-flicker'); } catch(e){} }, 260);
+    }
+    if (hud) hud.classList.add('alt-fail');
+    if (el){
+      el.style.display = 'block';
+      el.classList.remove('warn-red');
+      el.classList.add('warn-amber');
+    }
+    if (typeof showStatus === 'function'){
+      showStatus('⚡ ALTERNATOR FAILURE', 'running on battery — land soon', 'bad');
+    }
+    if (typeof pushATC === 'function'){
+      pushATC('Alternator out, running on battery, declaring emergency.', { tag:'PILOT', now:true });
+    }
+  }
+  // Battery-only ramp: tick the battery counter, randomly flicker the
+  // gauges, drop to fully dark at ALT_BATTERY_FULL_SECS.
+  if (state.altFailed){
+    state.altOnBatteryT += dt;
+    const remain = Math.max(0, ALT_BATTERY_FULL_SECS - state.altOnBatteryT);
+    if (elT){
+      const mm = Math.floor(remain / 60);
+      const ss = Math.floor(remain % 60).toString().padStart(2, '0');
+      elT.textContent = mm + ':' + ss;
+    }
+    const goingDark = state.altOnBatteryT >= ALT_BATTERY_FULL_SECS;
+    if (goingDark){
+      if (cp){
+        if (!cp.classList.contains('alt-dark')){
+          cp.classList.add('alt-dark');
+          // One-shot flicker burst the frame we transition to dark.
+          cp.classList.add('alt-flicker');
+          setTimeout(() => { try { cp.classList.remove('alt-flicker'); } catch(e){} }, 260);
+          if (typeof showStatus === 'function'){
+            showStatus('⚡ BATTERY DEPLETED', 'instruments dark — fly visually', 'bad');
+          }
+          if (typeof pushATC === 'function'){
+            pushATC('Battery depleted, instruments dark.', { tag:'PILOT', now:true });
+          }
+          // Bump the electrical pill to red so the warning escalates with
+          // the failure stage instead of staying amber forever.
+          if (el){
+            el.classList.remove('warn-amber');
+            el.classList.add('warn-red');
+          }
+        }
+      }
+      if (hud){
+        hud.classList.remove('alt-fail');
+        hud.classList.add('alt-dark');
+      }
+    } else {
+      // Periodic random flicker during the battery-ramp — small visual cue
+      // that the system isn't quite stable.
+      if (cp && nowMs >= state.altFlickerNextMs){
+        cp.classList.add('alt-flicker');
+        setTimeout(() => { try { cp.classList.remove('alt-flicker'); } catch(e){} }, 260);
+        state.altFlickerNextMs = nowMs + (ALT_FLICKER_MIN_MS
+          + Math.random() * (ALT_FLICKER_MAX_MS - ALT_FLICKER_MIN_MS));
+      }
+    }
+  }
+}
 function tickBirdProximity(){
   // Same gate as birdStrikeAllowed(): no warnings during intro / photo /
   // pause / replay / crashed / on-ground. We deliberately do NOT reuse the
@@ -14173,6 +14369,12 @@ function step(dt){
   // Cockpit night-mode suggest (Shift+; toggles the red gauge tint): one-shot
   // ATC nudge the first time TOD crosses past 20:00 in cockpit cam.
   tickNightPanelSuggest();
+  // Generator / alternator failure event — random 1-in-25 roll per sortie
+  // about 30s into the flight, schedules a trip 30-180s later, then ticks
+  // the battery-only ramp (HUD + cockpit dim, electrical pill counts down,
+  // panel flickers + goes dark after 3 min) until landing. Self-contained
+  // in the tick; resetPlane() handles the cleanup.
+  updateAlternator(dt);
   // TCAS-lite mid-air contact warning vs the AI plane: yellow ping +
   // bearing arrow as we close, red beep + ATC "Traffic, traffic — resolve"
   // if the geometry threatens a real collision.
