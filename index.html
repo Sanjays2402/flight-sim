@@ -10736,6 +10736,15 @@ const state = {
   // the ground (mirrors the takeoff-clearance re-arm pattern) so each
   // fresh sortie can teach the lesson again.
   parkingBrakeHintFired: false,
+  // Parking-brake stuck-throttle nag. Latches on `parkingBrakePullLatch`
+  // the first frame the player applies throttle > 0.4 with the parking
+  // brake still set AND ground speed < 5 km/h after 1.5 s of trying;
+  // re-armed once throttle drops back under 0.15 so each fresh "why won't
+  // this thing move?" attempt earns a teaching moment without spamming
+  // the strip on a single attempt. `parkingBrakePullStuckT` accumulates
+  // the time spent trying so a brief throttle blip doesn't fire it.
+  parkingBrakePullLatch: false,
+  parkingBrakePullStuckT: 0,
   // Hold-short callout. Tower fires "<id>, hold short of runway <DD>."
   // (or "...line up and wait..." if brakes are set) the first time the
   // player crosses the painted hold-short line at a runway threshold per
@@ -13457,6 +13466,10 @@ function resetPlane(){
   // Parking-brake-before-start hint: fresh sortie re-arms the one-shot
   // amber nag so cold-starts with the brake off get the teaching moment.
   state.parkingBrakeHintFired = false;
+  // Parking-brake stuck-throttle nag: fresh sortie re-arms the one-shot
+  // banner + ATC line so a forgotten brake on a hot reset earns its call.
+  state.parkingBrakePullLatch = false;
+  state.parkingBrakePullStuckT = 0;
   // Hold-short call: fresh sortie re-arms the hold-short detector so the
   // first taxi out gets the "hold short" / "line up and wait" call.
   state.holdShortArmed = true;
@@ -18377,6 +18390,40 @@ function step(dt){
     } else if (state.onGround && !state.crashed){
       state.brakes = true;
     }
+    // Stuck-throttle nag: pilot is pushing real power against a set parking
+    // brake while the plane refuses to roll. Accumulate "time spent trying"
+    // and fire a one-shot red banner + PILOT ATC after 1.5 s so a brief
+    // throttle blip during run-up doesn't false-trigger. Latched per
+    // attempt; re-arms once throttle drops back under 0.15 so a release +
+    // re-press earns a fresh callout. Skipped in crash / intro / replay /
+    // photo / pause via the standard live-flight gating below.
+    const liveStuck = !state.crashed && !state.introOpen && !state.replayActive
+      && !state.photoMode && !state.paused;
+    if (liveStuck && state.parkingBrake && state.onGround
+        && state.throttle > 0.4 && gspKmh < 5){
+      state.parkingBrakePullStuckT += dt;
+      if (state.parkingBrakePullStuckT >= 1.5 && !state.parkingBrakePullLatch){
+        state.parkingBrakePullLatch = true;
+        if (typeof showStatus === 'function'){
+          showStatus('PARKING BRAKE STILL SET', 'release brake before takeoff', 'bad');
+        }
+        if (typeof pushATC === 'function'){
+          pushATC('Release parking brake.', { tag: 'PILOT' });
+        }
+      }
+    } else {
+      state.parkingBrakePullStuckT = 0;
+    }
+    if (state.parkingBrakePullLatch && state.throttle < 0.15){
+      state.parkingBrakePullLatch = false;
+      state.parkingBrakePullStuckT = 0;
+    }
+  } else if (state.parkingBrakePullLatch || state.parkingBrakePullStuckT > 0){
+    // Brake was released entirely (e.g. auto-release above 5 km/h, or pilot
+    // toggled it off): wipe the latch + timer so the next cold sit doesn't
+    // walk in with stale state.
+    state.parkingBrakePullLatch = false;
+    state.parkingBrakePullStuckT = 0;
   }
   // Reverse thrust input: held Z asks for reverse. Gating to "actually applies
   // a force" happens in the on-ground physics block below (we need onRunway
@@ -25483,6 +25530,54 @@ function drawCockpitBrake(tempC){
     ctx.fillStyle = '#ff5252';
     ctx.font = 'bold 11px ui-monospace, monospace';
     ctx.fillText('FADE', cx, cy + R*0.78);
+  }
+  // Parking-brake annunciator. Painted to the right of the bezel chrome on
+  // the same canvas so the same gauge tile carries the indicator (no new
+  // canvas). When the parking brake is set, the `P` pulses amber-to-red at
+  // ~1 Hz so the pilot can't miss it on a rollout attempt; when released,
+  // the `P` reads dim grey and stays static. Pure feedback — physics path
+  // unchanged.
+  const pX = cx + R * 0.62;
+  const pY = cy - R * 0.55;
+  const pR = R * 0.18;
+  if (state.parkingBrake){
+    // 1 Hz pulse: 0..1 sine tracks performance time so the pulse keeps
+    // running even when the world clock pauses (the panel auto-hides in
+    // pause anyway, but performance.now() keeps the lamp lively across
+    // skipped frames).
+    const pulse = 0.5 + 0.5 * Math.sin((performance.now ? performance.now() : Date.now()) * 0.006283);
+    // Lerp amber -> red on the pulse so the lamp visibly breathes.
+    const r = Math.round(255);
+    const g = Math.round(176 * (1 - pulse) + 60 * pulse);
+    const b = Math.round(32 * (1 - pulse) + 60 * pulse);
+    ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',0.92)';
+    ctx.beginPath();
+    ctx.arc(pX, pY, pR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,20,12,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#1a0606';
+    ctx.font = 'bold 18px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('P', pX, pY + 1);
+  } else {
+    // Dim grey + static when off so the player still sees the legend slot,
+    // mirroring real-world annunciator panels (always-on glyph, illumination
+    // only when active).
+    ctx.fillStyle = 'rgba(40,46,52,0.85)';
+    ctx.beginPath();
+    ctx.arc(pX, pY, pR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(80,90,100,0.7)';
+    ctx.lineWidth = 1.0;
+    ctx.stroke();
+    ctx.fillStyle = '#5a6068';
+    ctx.font = 'bold 18px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('P', pX, pY + 1);
   }
 }
 function drawCockpitFuelFlow(gphOverride){
