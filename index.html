@@ -369,6 +369,7 @@
      view actually feels like sitting behind a panel. Drawn on small canvases so
      needles can sweep smoothly without DOM thrash. */
   #cockpitPanel { position:fixed; left:50%; bottom:54px; transform:translateX(-50%); display:none; gap:12px; padding:10px 14px; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:10px; backdrop-filter:blur(8px); z-index:7; }
+  #cpPitotHeat { pointer-events:none; }
   #cockpitPanel.show { display:flex; }
   #cockpitPanel .gauge { display:flex; flex-direction:column; align-items:center; }
   #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); }
@@ -464,7 +465,7 @@
 <canvas id="sunGlare"></canvas>
 <div id="bino"></div>
 <div id="hud" class="panel">
-  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h<span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
+  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h<span id="asiTag" style="display:none;margin-left:6px;color:#ff5252;font-weight:700">ASI</span><span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
   <div class="row"><span class="lbl">G</span><span class="val"><span id="gnow">1.0</span> <span id="gpk" style="color:#6aa;font-weight:500">pk 1.0</span></span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
   <div class="row" id="rwyDistRow" style="display:none"><span class="lbl">RWY</span><span class="val"><span id="rwyDist">0.0 km</span><span id="rwyArrow" style="display:inline-block;margin-left:6px;color:#9ad8ff;font-weight:700;transform:rotate(0deg);transform-origin:50% 50%">↑</span></span></div>
@@ -474,7 +475,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -522,12 +523,13 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>Shift</kbd>+<kbd>I</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
 <div id="cockpitPanel">
+  <div id="cpPitotHeat" style="display:none;position:absolute;top:-18px;right:8px;font-size:9px;letter-spacing:1.5px;color:#ff9e3d;font-weight:800;text-shadow:0 0 6px rgba(255,158,61,.55)">● PITOT HEAT</div>
   <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl">AIRSPEED km/h</div></div>
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
@@ -819,7 +821,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false };
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -859,6 +861,7 @@ try {
     if (typeof saved.twinEngine === 'boolean') settings.twinEngine = saved.twinEngine;
     if (typeof saved.landingLight === 'boolean') settings.landingLight = saved.landingLight;
     if (typeof saved.wipers === 'string' && ['off','slow','fast','auto'].indexOf(saved.wipers) !== -1) settings.wipers = saved.wipers;
+    if (typeof saved.pitotHeat === 'boolean') settings.pitotHeat = saved.pitotHeat;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -5295,6 +5298,17 @@ function toggleLandingLight(){
   setLandingLightBtn();
   showStatus('LANDING LIGHT ' + (state.landingLight ? 'ON' : 'OFF'), null, state.landingLight ? 'good' : 'hard');
 }
+// Pitot heat (U key). Persists to settings.pitotHeat so the toggle survives
+// reloads — it's a pilot setting, not a per-flight state. Pairs with the
+// existing icing model: heat on thaws the tube, heat off lets icing build at
+// altitude in rain / cold TOD. Status toast confirms the change so the press
+// has visible feedback even when icing conditions aren't currently active.
+function togglePitotHeat(){
+  state.pitotHeatOn = !state.pitotHeatOn;
+  settings.pitotHeat = state.pitotHeatOn;
+  saveSettings();
+  showStatus('PITOT HEAT ' + (state.pitotHeatOn ? 'ON' : 'OFF'), null, state.pitotHeatOn ? 'good' : 'hard');
+}
 // Manual wiper cycle: off → slow → fast → off. Auto stays parked in the
 // settings panel so a stray keypress can't unexpectedly latch the auto mode.
 // Persists the new mode to settings + flashes a status toast so the player
@@ -5669,7 +5683,7 @@ function updateBrakeTemp(dt, brakesHeld, groundSp, onGround){
 // cycle: above PITOT_ICE_TRIGGER_ALT in rain or cold-weather TOD (early
 // morning / evening / night, when the sun is low or below the horizon), the
 // pitot tube freezes over and the airspeed indicator slowly lerps toward 0
-// over ~25s. Pilot toggles pitot heat with Shift+I to keep the tube clear;
+// over ~25s. Pilot toggles pitot heat with U to keep the tube clear;
 // heat on (or returning to warm/low conditions) thaws the ice off. Gives the
 // rain weather an actual gameplay teeth-pulling effect at altitude, and makes
 // the cold-start ritual / weather system feel like part of one coherent
@@ -5710,7 +5724,7 @@ function updatePitotIce(dt){
   // re-arm once we're essentially clear again so a next freeze gets the call.
   if (!state.pitotIceAtcLatch && state.pitotIce >= PITOT_ICE_LATCH){
     state.pitotIceAtcLatch = true;
-    if (typeof pushATC === 'function') pushATC('Pitot heat, pitot heat.', { tag:'ATC', now:true });
+    if (typeof pushATC === 'function') pushATC('Airspeed unreliable, check pitot heat.', { tag:'ATC', now:true });
   }
   if (state.pitotIceAtcLatch && state.pitotIce <= PITOT_ICE_CLEAR) state.pitotIceAtcLatch = false;
 }
@@ -6200,15 +6214,16 @@ const state = {
   brakeTempC: 30,
   brakeOverheatLatch: false,
   brakeFadeT: 0,
-  // Pitot icing (Shift+I toggles `pitotHeatOn`). Above PITOT_ICE_TRIGGER_ALT in
+  // Pitot icing (U toggles `pitotHeatOn`). Above PITOT_ICE_TRIGGER_ALT in
   // rain or cold-weather TOD windows, the pitot tube slowly freezes: the
   // airspeed indicator reading drifts toward 0 over ~25s, the player sees a
   // PITOT ICE pill on the SPD row, and ATC fires a one-shot "Pitot heat,
   // pitot heat" the first frame ice severity latches past PITOT_ICE_LATCH.
   // Heat on melts the ice off; warm conditions / lower altitude also slowly
   // thaw. resetPlane() wipes the ice + latch but preserves pitotHeatOn so the
-  // player's choice survives a hot reset.
-  pitotHeatOn: false,
+  // player's choice survives a hot reset. Seeded from settings.pitotHeat so
+  // the U-key toggle persists across reloads.
+  pitotHeatOn: !!settings.pitotHeat,
   pitotIce: 0,
   pitotIceAtcLatch: false,
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
@@ -6490,7 +6505,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyQ','KeyE','KeyR','KeyJ','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -6511,21 +6526,19 @@ addEventListener('keydown', e=>{
   if (e.code==='KeyC') { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
   if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyI'){
-    // Shift+I toggles pitot heat. Plain I keeps falling through to the
-    // cold-start / air-restart ignition path below so we don't lose either
-    // key role; the pitch-input contribution from keys['KeyI'] also still
-    // applies but a single Shift+I tap is too brief to matter.
-    if (e.shiftKey){
-      state.pitotHeatOn = !state.pitotHeatOn;
-      showStatus(state.pitotHeatOn ? 'PITOT HEAT ON' : 'PITOT HEAT OFF', null, state.pitotHeatOn ? 'good' : 'hard');
-      return;
-    }
     // Cold-start ignition. Fires when either the ground cold-start sequence
     // is armed (state.coldStart) or the in-air deadstick restart is armed
     // (state.airRestart). Otherwise this is a no-op so the I key keeps
     // working as pitch input on the existing keys[] map (which the step()
     // loop reads each frame).
     if (state.coldStart || state.airRestart) beginIgnition();
+  }
+  if (e.code==='KeyU'){
+    // Pitot heat toggle. Persists to settings.pitotHeat so the choice rides
+    // across reloads — pilot setting, not a per-flight state. Gated through
+    // introOpen so a stray keystroke on the main menu can't latch it.
+    if (state.introOpen) return;
+    togglePitotHeat();
   }
   if (e.code==='KeyX'){
     // Toggle the engine. Lets the pilot deliberately practice deadstick approaches,
@@ -9850,6 +9863,18 @@ function step(dt){
   // once heat thaws the tube back to clear.
   const pitotEl = document.getElementById('pitotIce');
   if (pitotEl) pitotEl.style.display = (state.pitotIce > PITOT_ICE_SHOW_MIN) ? 'inline' : 'none';
+  // Pitot heat pill (WIND row) — lights amber whenever the U-key toggle is on
+  // so the pilot can see at a glance whether the tube is being de-iced. Pairs
+  // with the existing PITOT ICE pill on the SPD row: heat on usually means ice
+  // pill goes dark, heat off in icing conditions means ice pill rises.
+  const pitotHeatPillEl = document.getElementById('pitotHeatPill');
+  if (pitotHeatPillEl) pitotHeatPillEl.style.display = state.pitotHeatOn ? 'inline' : 'none';
+  // Cockpit panel pitot-heat indicator — pure flavor amber lamp inside the
+  // cockpit panel, only visible alongside the gauges so chase / orbit cams
+  // stay clean. Reuses the cockpit-cam visibility gate via the parent panel's
+  // .show class.
+  const cpPitotHeatEl = document.getElementById('cpPitotHeat');
+  if (cpPitotHeatEl) cpPitotHeatEl.style.display = state.pitotHeatOn ? 'block' : 'none';
 
   // Touch-and-go score panel
   document.getElementById('scLast').textContent  = state.scoreLast == null ? '—' : ('+'+state.scoreLast);
@@ -9877,7 +9902,19 @@ function step(dt){
   $('#stall').style.display = stallActive ? 'block' : 'none';
 
   const spdEl = document.getElementById('spd');
-  spdEl.style.color = (speedKmh < 80 && !state.onGround) ? '#ffd166' : (stallActive ? '#ff5252' : '#fff');
+  // ASI lie detection: when the icing model has dragged the indicated reading
+  // more than 10 km/h below true airspeed, paint the SPD red and pop the
+  // "ASI" tag so the pilot knows the gauge can't be trusted (real-world cue
+  // for "airspeed unreliable"). Stall red still wins so a stalling jet with
+  // an iced tube doesn't lose its red flash. Otherwise: legacy amber-below-80
+  // / stall-red / default-white logic.
+  const asiLie = (speedKmh - indicatedKmh) > 10;
+  const asiTagEl = document.getElementById('asiTag');
+  if (asiTagEl) asiTagEl.style.display = asiLie ? 'inline' : 'none';
+  spdEl.style.color = stallActive ? '#ff5252'
+                    : asiLie ? '#ff5252'
+                    : (speedKmh < 80 && !state.onGround) ? '#ffd166'
+                    : '#fff';
 
   // G-meter: live G + peak tick for the current flight. Amber past 2.5 g
   // (where vortices kick in), red past 4 g (close to the 4.5 g over-G
