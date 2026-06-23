@@ -718,6 +718,7 @@
   <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
+  <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -7786,6 +7787,14 @@ const state = {
   // the panel reads as a real avionics power-up. Cleared in resetPlane() and
   // when the sweep finishes.
   selfTestT: -1,
+  // Cockpit chronograph / stopwatch. Driven by clicks on the cpChr gauge:
+  // single click toggles running, right-click records a lap split into
+  // lapMs, double-click zeroes both. Ticked inside drawCockpitPanel() so it
+  // only advances while the cockpit panel is actually on screen; that also
+  // skips ticks during photo / pause / replay / intro (drawCockpitPanel
+  // already early-returns when the panel is hidden). resetPlane() wipes it
+  // so every fresh sortie starts at 00:00.0.
+  chrono: { running: false, elapsedMs: 0, lapMs: 0 },
   // In-air deadstick restart ritual. Parallel to coldStart for ground starts:
   // when the player presses X with engineOut while airborne, we check that
   // throttle is low (<30%) and airspeed is high enough to windmill the prop
@@ -10087,6 +10096,9 @@ function resetPlane(){
   // Trim is a per-flight setting — a fresh reset wipes it back to neutral
   // so the next takeoff doesn't have the elevator pre-loaded from last cruise.
   state.trim = 0;
+  // Chronograph zeros out so each fresh sortie starts on a clean clock.
+  // Matches the trim / waypoint / emergency-site reset semantics above.
+  if (state.chrono){ state.chrono.running = false; state.chrono.elapsedMs = 0; state.chrono.lapMs = 0; }
   state.msgT = 0;
   // Seed a fresh wind on reset so reps feel different.
   pickWindTarget();
@@ -17037,6 +17049,7 @@ const cpOilCv = document.getElementById('cpOil');
 const cpMagCv = document.getElementById('cpMag');
 const cpBrkCv = document.getElementById('cpBrk');
 const cpFfCv  = document.getElementById('cpFf');
+const cpChrCv = document.getElementById('cpChr');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
@@ -17046,6 +17059,32 @@ const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
 const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
 const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
 const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
+const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
+// Click on the chronograph gauge to start/stop, right-click to record a lap
+// split, double-click to reset both clocks. Pure visual instrument — every
+// interaction lives on the canvas itself so no new keybinding is taken.
+if (cpChrCv){
+  cpChrCv.addEventListener('click', e => {
+    e.preventDefault();
+    if (!state.chrono) return;
+    state.chrono.running = !state.chrono.running;
+  });
+  cpChrCv.addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (!state.chrono) return;
+    state.chrono.elapsedMs = 0;
+    state.chrono.lapMs = 0;
+    state.chrono.running = false;
+  });
+  cpChrCv.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!state.chrono) return;
+    // Only record a lap while the clock is actually running, so the LAP
+    // window doesn't fill in with the same number across multiple right-
+    // clicks on a paused chrono.
+    if (state.chrono.running) state.chrono.lapMs = state.chrono.elapsedMs;
+  });
+}
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -17707,6 +17746,74 @@ function drawCockpitFuelFlow(gphOverride){
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(f.toFixed(1), cx, cy + R*0.55);
 }
+function _formatChrono(ms){
+  // MM:SS.t with a one-digit tenths field so the readout fits the gauge
+  // face. Clamp to 59:59.9 so a forgotten clock doesn't blow the layout.
+  const total = Math.max(0, Math.min(ms, 3599999));
+  const totalTenths = Math.floor(total / 100);
+  const mm = Math.floor(totalTenths / 600);
+  const ss = Math.floor((totalTenths % 600) / 10);
+  const t  = totalTenths % 10;
+  const pad = n => (n < 10 ? '0' + n : '' + n);
+  return pad(mm) + ':' + pad(ss) + '.' + t;
+}
+function drawCockpitChrono(){
+  if (!cpChrCtx) return;
+  const W = cpChrCv.width, H = cpChrCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpChrCtx;
+  _cpBezel(ctx, W, H);
+  // Sweeping seconds-hand ring — thin tick marks at every 5 seconds (with
+  // larger ticks at the cardinal 0/15/30/45) so the chronograph reads as a
+  // real instrument and not just a digital readout in a circle.
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 12px ui-monospace, monospace';
+  for (let s = 0; s < 60; s += 5){
+    const a = -Math.PI/2 + (s / 60) * Math.PI * 2;
+    const major = (s % 15 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 20 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 32;
+      ctx.fillText(String(s), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Label up top so the gauge is unambiguous in a row of nine other faces.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillText('CHRONO', cx, cy - R*0.55);
+  // Sweep-second needle drives off the live elapsed time so the player gets
+  // a moving hand to fixate on — stopped clock = frozen needle.
+  const chr = state.chrono || { running:false, elapsedMs:0, lapMs:0 };
+  const secs = chr.elapsedMs / 1000;
+  const sweepA = -Math.PI/2 + ((secs % 60) / 60) * Math.PI * 2;
+  // _cpNeedle uses 0 = up so the +Math.PI/2 phase matches the rest of the
+  // panel; running needle is yellow, paused needle is dim so the state reads
+  // at a glance without staring at the digits.
+  _cpNeedle(ctx, cx, cy, sweepA + Math.PI/2, R - 12, chr.running ? '#ffd166' : '#7a8a99', 3);
+  // Main MM:SS.t readout near the bottom of the dial, color-keyed to state
+  // (green = running, dim grey = stopped) so a glance through the panel can
+  // tell the player whether the clock is ticking.
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 22px ui-monospace, monospace';
+  ctx.fillStyle = chr.running ? '#7ee787' : '#9fb0c0';
+  ctx.fillText(_formatChrono(chr.elapsedMs), cx, cy + R*0.32);
+  // Small LAP window underneath — amber, smaller font, prefixed so it can't
+  // be confused with the main timer. Empty placeholder dashes until a lap
+  // has been recorded so the slot doesn't look broken on first paint.
+  ctx.fillStyle = '#ffb347';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  const lapText = chr.lapMs > 0 ? _formatChrono(chr.lapMs) : '--:--.-';
+  ctx.fillText('LAP ' + lapText, cx, cy + R*0.62);
+}
 function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -17780,6 +17887,17 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   drawCockpitMag(magV, dt || 0);
   drawCockpitBrake(brkV);
   drawCockpitFuelFlow(ffOverride);
+  // Tick the chronograph only while the panel is actually visible, and only
+  // when the avionics self-test isn't running (the self-test "powers up" the
+  // gauges — a stopwatch ticking during that ritual would feel wrong).
+  if (state.chrono && state.chrono.running && state.selfTestT < 0 && typeof dt === 'number' && dt > 0){
+    state.chrono.elapsedMs += dt * 1000;
+    // Defensive clamp so a stuck timer can't grow unbounded in a long
+    // session; the readout also clamps when formatting, so this is belt and
+    // suspenders.
+    if (state.chrono.elapsedMs > 3599999) state.chrono.elapsedMs = 3599999;
+  }
+  drawCockpitChrono();
 }
 
 // ====== Camera ======
