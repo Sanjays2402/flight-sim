@@ -8804,20 +8804,32 @@ addEventListener('keydown', e=>{
           showStatus('IGNITION ARMED', 'press I to crank', 'hard');
           pushATC('Restart attempt, cranking on your call.', { tag:'PILOT', now:true });
         } else if (!state.onGround && !state.crashed){
-          // In-air deadstick restart: require throttle pulled back and enough
-          // airspeed to windmill the prop. Mirrors the real-world engine-out
-          // procedure (throttle idle, dive for speed, then crank). Use the
-          // simple ground-velocity magnitude as airspeed — a coarse but fair
-          // stand-in for the airVel computed deeper in step().
+          // In-air deadstick air-restart procedure. Mirrors real-world: prop
+          // has to be windmilling fast enough from airspeed to catch (no
+          // starter motor up here), AND throttle has to be past idle so
+          // there's a fuel/air mixture for the cylinders to fire on. The
+          // windmilling-RPM proxy matches the cockpit RPM gauge
+          // (Math.min(900, speedKmh * 4) in drawCockpitRpm), so the gauge
+          // visibly tells the pilot whether the prop is spinning fast enough
+          // before they even try the crank.
           const spdKmh = Math.hypot(state.vel.x, state.vel.y, state.vel.z) * 3.6;
-          if (state.throttle < 0.30 && spdKmh > 80){
+          const airstartRpm = Math.min(900, spdKmh * 4);
+          if (airstartRpm > 300 && state.throttle > 0.25){
             state.airRestart = true;
             state.ignitionT = -1;
             showStatus('IGNITION ARMED', 'press I to crank', 'hard');
             pushATC('Restart attempt, cranking on your call.', { tag:'PILOT', now:true });
+          } else if (airstartRpm <= 300){
+            // Prop not windmilling fast enough — pilot needs to dive for
+            // airspeed. This is THE dramatic deadstick beat: trade altitude
+            // for the speed that keeps the prop spinning.
+            showStatus('AIRSPEED TOO LOW FOR RESTART', 'dive for speed — windmill the prop', 'hard');
+            pushATC('Airspeed too low for restart, build airspeed.', { tag:'PILOT', now:true });
           } else {
-            // Conditions wrong — stay engine-out, nudge the pilot.
-            pushATC('Restart failed, check throttle and airspeed.', { tag:'PILOT', now:true });
+            // Throttle is at idle — pilot needs to push it forward so the
+            // engine has a mixture to catch on. Real-world technique.
+            showStatus('THROTTLE TOO LOW FOR RESTART', 'advance throttle past idle', 'hard');
+            pushATC('Restart failed, advance throttle past idle.', { tag:'PILOT', now:true });
           }
         } else {
           state.engineOut = false;
