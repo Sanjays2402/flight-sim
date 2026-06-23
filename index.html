@@ -10857,6 +10857,46 @@ function drawWeatherRadar(){
     // Desktop pointer: treat as a click.
     setOrClear(pxToWorld(e.clientX, e.clientY));
   });
+  // Double-click an airport icon (or its off-map rim tick) to snap the
+  // waypoint pin straight onto that airport. Saves the "squint at the dot,
+  // drop a pin nearby" dance. Two normal clicks still fire first (set then
+  // toggle-clear), so this handler runs last and force-sets the airport so
+  // the net result is always "pin is on the chosen field". Threshold is a
+  // generous canvas-px radius around the drawn icon so a slightly-off dbl
+  // still snaps. Falls back silently to the regular click behavior when no
+  // airport is close enough to the cursor.
+  minimapCv.addEventListener('dblclick', e => {
+    if (!canSetWaypoint()) return;
+    const r = minimapCv.getBoundingClientRect();
+    const sx = (e.clientX - r.left) * (minimapCv.width / r.width);
+    const sy = (e.clientY - r.top)  * (minimapCv.height / r.height);
+    const W = minimapCv.width, H = minimapCv.height;
+    const cx = W/2, cy = H/2;
+    const scale = (W - 8) / MINIMAP_RANGE;
+    const R = Math.min(W, H)/2 - 2;
+    // Match each airport against its actual on-screen position — on-map
+    // uses the icon center, off-map uses the rim tick the player can see.
+    let best = null, bestD = 14; // canvas-px tolerance
+    for (const a of AIRPORTS){
+      const dx = a.x - plane.position.x;
+      const dz = a.z - plane.position.z;
+      let ax = cx + dx * scale;
+      let ay = cy + dz * scale;
+      if (ax < 4 || ax > W-4 || ay < 4 || ay > H-4){
+        const ang = Math.atan2(dz, dx);
+        ax = cx + Math.cos(ang) * (R - 6);
+        ay = cy + Math.sin(ang) * (R - 6);
+      }
+      const d = Math.hypot(sx - ax, sy - ay);
+      if (d < bestD){ bestD = d; best = a; }
+    }
+    if (!best) return;
+    state.waypoint = { x: best.x, z: best.z };
+    state.ap.wpFollow = false;
+    const distKm = Math.hypot(best.x - plane.position.x, best.z - plane.position.z) / 1000;
+    showStatus('WAYPOINT → ' + best.id, distKm.toFixed(1) + ' km · press M for AP', 'good');
+    pushATC('Waypoint set to ' + best.id + ', ' + distKm.toFixed(1) + ' km.', { tag:'PILOT' });
+  });
   // Make sure native page gestures don't fight the long-press.
   minimapCv.style.touchAction = 'none';
 })();
