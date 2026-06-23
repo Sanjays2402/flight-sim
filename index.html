@@ -270,6 +270,18 @@
   #landcard .reason { font-size:10px; color:#8ab09e; margin-top:8px; text-align:center; font-style:italic; }
   #landcard .hint { font-size:9px; color:#7a8a98; margin-top:8px; text-align:center; letter-spacing:1px; }
   #landcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
+  /* Bailout summary card — twin of the crash card but cyan, fired when the
+     pilot punches out instead of riding the plane into the ground. Same layout
+     so saved screenshots and the brain wiring stay familiar. */
+  #bailcard { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); width:300px; padding:14px 16px 12px; border:1px solid #6ad8ff; border-radius:10px; background:rgba(6,12,18,.92); color:#dff1ff; font-size:12px; display:none; z-index:11; box-shadow:0 6px 24px rgba(0,0,0,.45); cursor:pointer; }
+  #bailcard h3 { font-size:14px; color:#6ad8ff; margin:0 0 4px; letter-spacing:2px; font-weight:800; text-align:center; }
+  #bailcard .verdict { font-size:13px; color:#ffd166; font-weight:700; text-align:center; margin:0 0 10px; letter-spacing:1px; }
+  #bailcard .grid { display:grid; grid-template-columns:1fr auto; gap:3px 12px; font-size:11px; }
+  #bailcard .grid .lbl { color:#8aa6b8; letter-spacing:1px; }
+  #bailcard .grid .val { color:#cfe; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
+  #bailcard .reason { font-size:10px; color:#8aa6b8; margin-top:8px; text-align:center; font-style:italic; }
+  #bailcard .hint { font-size:9px; color:#7a8a98; margin-top:8px; text-align:center; letter-spacing:1px; }
+  #bailcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
   /* Mobile touch controls: virtual stick bottom-left (pitch/roll), throttle slider bottom-right.
      Hidden by default; .show class added at runtime on touch-capable devices. A small
      row of tap buttons under the throttle covers gear/flaps/brakes/camera so the sim is
@@ -502,7 +514,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -552,7 +564,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -661,6 +673,18 @@
   <div class="reason" id="lcReason"></div>
   <div class="hint">click to dismiss · <kbd>R</kbd> restart</div>
 </div>
+<div id="bailcard">
+  <h3>🪂 BAILED OUT</h3>
+  <div class="verdict" id="bcVerdict">PILOT SAFE</div>
+  <div class="grid">
+    <span class="lbl">EJECT ALT</span><span class="val" id="bcEjectAlt">—</span>
+    <span class="lbl">CHUTE DRIFT</span><span class="val" id="bcDrift">—</span>
+    <span class="lbl">DESCENT TIME</span><span class="val" id="bcTime">—</span>
+    <span class="lbl">BAILOUTS</span><span class="val" id="bcCount">—</span>
+  </div>
+  <div class="reason" id="bcReason"></div>
+  <div class="hint">click to dismiss · <kbd>R</kbd> restart</div>
+</div>
 <div id="photo">
   <div class="ttl">📸 PHOTO MODE</div>
   <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save PNG · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span></div>
@@ -734,6 +758,7 @@
     <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
     <div class="row"><span class="name">BEST T&amp;G STREAK</span><span class="val" id="stTg">0</span></div>
     <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
+    <div class="row"><span class="name">🪂 BAILOUTS</span><span class="val" id="stBailouts">0</span></div>
     <div class="row"><span class="name">🎖️ RANK</span><span class="val hi" id="stRank">CADET</span></div>
     <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
     <div class="actions">
@@ -956,7 +981,8 @@ const STATS_DEFAULT = {
   wingsWagged: 0,          // wing-wave greetings exchanged with the AI plane (lifetime counter)
   burgers: 0,              // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
   bestTgStreak: 0,         // longest touch-and-go streak (touchdown+lift-off within 12s, no full-stop)
-  perfectLandings: 0       // count of landings scored 300+ (used by rank progression)
+  perfectLandings: 0,      // count of landings scored 300+ (used by rank progression)
+  bailouts: 0              // total Shift+P pilot ejections that survived to canopy-down
 };
 const pilotStats = Object.assign({}, STATS_DEFAULT);
 try {
@@ -6240,6 +6266,306 @@ function playFireWarnChirp(){
   }
 }
 
+// ====== PARACHUTE BAILOUT ======
+// Shift+P punches the pilot out of the cockpit when the situation has clearly
+// gone sideways. Triggered from a tight whitelist (engine fire / heavy damage /
+// nose-down inverted at low altitude / fuel exhaustion) so the pilot can't
+// punch out of a perfectly fine cruise just to skip the landing.
+//
+// The bailout is a parallel mini-sim: the airplane keeps physicsing on its
+// own (and will almost certainly crash) while we render a separate pilot +
+// parachute ragdoll and lock the camera to it. Phases:
+//   - eject:     0.45s wind-up while the canopy 'blows' and the pilot kicks free
+//   - freefall:  ~0.85s gravity drop before the chute snaps open
+//   - canopy:    steady ~4.5 m/s descent that drifts with the live wind vector
+//   - landed:    pilot is on the ground; summary card pops after a beat
+// Phase chain is read by updateBailout() each frame from state.bailout.t and
+// flips on simple time gates so we never need a setTimeout chain.
+//
+// Rendered meshes are built once at module load and parented to the scene
+// (NOT the plane) so the pilot doesn't ride the airframe into the ground.
+const bailPilot = (function(){
+  const grp = new THREE.Group();
+  // Torso: dark flight suit. Cheap box; pilot reads as a tiny dot from chase
+  // cam anyway, but the panel-blue tint sells the human silhouette.
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.85, 0.30),
+    new THREE.MeshLambertMaterial({ color: 0x2a3a55 }));
+  torso.position.y = 0.10; grp.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.20, 12, 10),
+    new THREE.MeshLambertMaterial({ color: 0xd8d8e0 }));
+  head.position.y = 0.70; grp.add(head);
+  const armMat = new THREE.MeshLambertMaterial({ color: 0x2a3a55 });
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.55, 0.10), armMat);
+  armL.position.set(-0.30, 0.10, 0); armL.rotation.z = 0.5; grp.add(armL);
+  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.55, 0.10), armMat);
+  armR.position.set( 0.30, 0.10, 0); armR.rotation.z = -0.5; grp.add(armR);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.65, 0.18), armMat);
+  legL.position.set(-0.13, -0.65, 0); grp.add(legL);
+  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.65, 0.18), armMat);
+  legR.position.set( 0.13, -0.65, 0); grp.add(legR);
+  grp.visible = false;
+  scene.add(grp);
+  return grp;
+})();
+// Parachute canopy: hemispherical mesh in international orange + shroud lines
+// down to a single harness point. Sits above the pilot during 'canopy' phase.
+const bailChute = (function(){
+  const grp = new THREE.Group();
+  const geo = new THREE.SphereGeometry(3.2, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  const mat = new THREE.MeshLambertMaterial({ color: 0xff7a2a, side: THREE.DoubleSide });
+  const dome = new THREE.Mesh(geo, mat); dome.position.y = 0.0; grp.add(dome);
+  const lineGeo = new THREE.BufferGeometry();
+  const verts = [];
+  const harness = new THREE.Vector3(0, -3.5, 0);
+  for (let i = 0; i < 6; i++){
+    const a = (i / 6) * Math.PI * 2;
+    const rim = new THREE.Vector3(Math.cos(a) * 3.0, 0, Math.sin(a) * 3.0);
+    verts.push(rim.x, rim.y, rim.z, harness.x, harness.y, harness.z);
+  }
+  lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  const lineMat = new THREE.LineBasicMaterial({ color: 0xddddd5 });
+  const lines = new THREE.LineSegments(lineGeo, lineMat);
+  grp.add(lines);
+  grp.visible = false;
+  scene.add(grp);
+  return grp;
+})();
+// Bailout tunables. Numbers are world units (m/s, seconds). Tuned so the
+// whole bailout reads in 6-15 seconds depending on eject altitude — long
+// enough to feel like a real evac, short enough that the player isn't
+// waiting forever to restart.
+const BAIL_EJECT_DUR    = 0.45;
+const BAIL_FREEFALL_DUR = 0.85;
+const BAIL_EJECT_UP     = 7.0;
+const BAIL_EJECT_BACK   = 4.0;
+const BAIL_CHUTE_DESC   = 4.5;
+const BAIL_CHUTE_DRAG   = 0.92;
+const BAIL_DONE_HOLD    = 1.6;
+// Gate: is Shift+P allowed to fire right now? Matches the squawk-7700
+// triggers plus a hail-mary inverted-low check so a botched pitchover near
+// terrain still has an escape valve.
+function bailoutArmed(){
+  if (typeof plane === 'undefined' || !plane) return false;
+  if (state.bailout && state.bailout.phase !== 'idle') return false;
+  if (state.introOpen || state.replayActive || state.photoMode || state.paused) return false;
+  if (state.crashed || state.onGround) return false;
+  if (state.engineFire) return true;
+  if (state.damage >= 0.65) return true;
+  if (state.fuel <= 0.001 && !state.engineOut) return true;
+  try {
+    const e = new THREE.Euler().setFromQuaternion(plane.quaternion, 'YXZ');
+    const rollDeg = Math.abs(THREE.MathUtils.radToDeg(e.z));
+    const pitchDeg = THREE.MathUtils.radToDeg(e.x);
+    const refElev = (typeof MAIN_AP !== 'undefined' && MAIN_AP) ? MAIN_AP.elev : 0;
+    const nearAGL = plane.position.y - refElev - GEAR_H;
+    if (rollDeg > 130 && nearAGL < 250 && pitchDeg < 0) return true;
+  } catch(_){ /* attitude read failed — fall through */ }
+  return false;
+}
+// Single owner of 'punch out now'. Honors the gate, snapshots the eject pose,
+// flips the camera to chase so the chute is actually visible, and plays a
+// sharp whoosh + ATC mayday. Safe to call repeatedly — the gate filters
+// in-progress bailouts so a double-tap is a no-op.
+function tryBailout(){
+  if (!bailoutArmed()){
+    if (typeof showStatus === 'function') showStatus('BAILOUT UNAVAILABLE', 'no emergency to escape', 'hard');
+    return;
+  }
+  const b = state.bailout;
+  b.phase = 'eject';
+  b.t = 0;
+  b.summarised = false;
+  // Snapshot eject pose: pilot starts at the canopy lip (~0.55m above plane
+  // origin, matches the cockpit cam offset). Velocity inherits plane velocity
+  // so the chute trails the airframe instead of falling straight down from a
+  // 200 km/h cruise.
+  b.pos.copy(plane.position); b.pos.y += 0.55;
+  b.vel.copy(state.vel);
+  // Upward + small rearward kick along the plane's nose vector so the pilot
+  // visibly clears the tail. Both relative to the plane so a wings-level
+  // eject looks identical to an inverted eject (you just go 'up' in the
+  // plane's local frame, which might be 'down' in world).
+  const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+  const upN  = new THREE.Vector3(0,1,0).applyQuaternion(plane.quaternion);
+  b.vel.addScaledVector(upN,  BAIL_EJECT_UP);
+  b.vel.addScaledVector(fwdN, -BAIL_EJECT_BACK);
+  const refElev = (typeof MAIN_AP !== 'undefined' && MAIN_AP) ? MAIN_AP.elev : 0;
+  b.ejectAltAGL = Math.max(0, plane.position.y - refElev - GEAR_H);
+  b.ejectPos.copy(b.pos);
+  bailPilot.visible = true;
+  bailPilot.position.copy(b.pos);
+  bailChute.visible = false;
+  // Force canopy open on the airframe so the visual matches the eject.
+  state.canopyOpen = true;
+  // Cockpit cam from inside an empty airplane is jarring; kick to chase so
+  // the bailout camera retarget actually frames the pilot.
+  if (state.cam === 1){ state.cam = 0; if (typeof updateCamModeUi === 'function') updateCamModeUi(); }
+  playBailoutWhoosh();
+  if (typeof pushATC === 'function') pushATC('Mayday mayday mayday — ejecting!', { tag:'PILOT', now:true });
+  if (typeof showStatus === 'function') showStatus('BAIL OUT', 'punching out — chute in 1s', 'bad');
+}
+// WebAudio one-shot: low canopy thump + bandpassed noise whoosh.
+function playBailoutWhoosh(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.55 * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(140, t0);
+  osc.frequency.exponentialRampToValueAtTime(60, t0 + 0.18);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol * 0.9, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.30);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0); osc.stop(t0 + 0.32);
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.6), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.7;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(vol * 0.7, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+  src.connect(bp).connect(ng).connect(ctx.destination);
+  src.start(t0); src.stop(t0 + 0.6);
+}
+// Soft canopy-pop — shorter, higher than the punch-out whoosh so the audio
+// reads as the chute actually grabbing air.
+function playChuteOpen(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.32 * settings.volume;
+  if (vol <= 0) return;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.35), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 1.1;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.33);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0); src.stop(t0 + 0.36);
+}
+// Per-frame bailout sim. No-op outside an active bailout so the cost is one
+// branch. Owns: pilot/chute pose, phase transitions, ground detection, and
+// the summary card pop. Camera retargeting reads state.bailout.phase to
+// decide whether to track the pilot instead of the plane.
+function updateBailout(dt){
+  const b = state.bailout;
+  if (!b || b.phase === 'idle') return;
+  b.t += dt;
+  // Gravity acts in eject + freefall; canopy phase overrides to steady descent.
+  if (b.phase !== 'canopy' && b.phase !== 'landed') b.vel.y -= 9.81 * dt;
+  if (b.phase === 'eject' && b.t >= BAIL_EJECT_DUR){
+    b.phase = 'freefall'; b.t = 0;
+    b.vel.multiplyScalar(0.85); // light air drag entering freefall
+  }
+  if (b.phase === 'freefall' && b.t >= BAIL_FREEFALL_DUR){
+    b.phase = 'canopy'; b.t = 0;
+    bailChute.visible = true;
+    playChuteOpen();
+    if (typeof showStatus === 'function') showStatus('CANOPY DEPLOYED', 'drift to ground', 'good');
+  }
+  if (b.phase === 'canopy'){
+    b.vel.y = -BAIL_CHUTE_DESC;
+    const k = 1 - Math.exp(-BAIL_CHUTE_DRAG * dt);
+    b.vel.x += (state.wind.x - b.vel.x) * k;
+    b.vel.z += (state.wind.z - b.vel.z) * k;
+  }
+  b.pos.addScaledVector(b.vel, dt);
+  // Ground detection using the same terrain helper as the rest of the sim.
+  let groundY = 0;
+  try { if (typeof terrainHeight === 'function') groundY = terrainHeight(b.pos.x, b.pos.z) || 0; } catch(_){ groundY = 0; }
+  if (b.phase !== 'landed' && b.pos.y <= groundY + 0.05){
+    b.pos.y = groundY + 0.05;
+    b.vel.set(0,0,0);
+    b.phase = 'landed'; b.t = 0;
+    bailChute.visible = false;
+    if (typeof showStatus === 'function') showStatus('PILOT DOWN', 'mission over', 'good');
+  }
+  if (b.phase === 'landed' && b.t >= BAIL_DONE_HOLD && !b.summarised){
+    b.summarised = true;
+    pilotStats.bailouts = (pilotStats.bailouts || 0) + 1;
+    savePilotStats();
+    const driftM = Math.hypot(b.pos.x - b.ejectPos.x, b.pos.z - b.ejectPos.z);
+    showBailCard({
+      ejectAltAGL: b.ejectAltAGL,
+      driftM,
+      bailoutsLifetime: pilotStats.bailouts,
+      verdict: 'PILOT SAFE'
+    });
+    // Logbook entry: bailing tags the crash row's verdict so a glance at the
+    // log shows the pilot walked away. The airframe's own crash branch (or
+    // ground impact below) appends the row — we just override the verdict
+    // string so it reads 'BAILED OUT' instead of the generic CRASHED.
+    state.lastCrashVerdict = 'BAILED OUT — PILOT SAFE';
+    if (typeof pushATC === 'function') pushATC('Pilot on the ground, safe and sound.', { tag:'PILOT', now:true });
+  }
+  // Render: pilot mesh tracks the live pose. Tumble in freefall, hang and
+  // slowly spin under canopy, sit still on the ground.
+  bailPilot.position.copy(b.pos);
+  if (b.phase === 'freefall'){
+    bailPilot.rotation.y += 3.5 * dt;
+    bailPilot.rotation.z = 0.5 * Math.sin(b.t * 6);
+  } else if (b.phase === 'canopy'){
+    bailPilot.rotation.set(0, bailPilot.rotation.y + 0.4 * dt, 0);
+  } else if (b.phase === 'landed'){
+    bailPilot.rotation.set(0, bailPilot.rotation.y, 0);
+  }
+  if (bailChute.visible){
+    bailChute.position.set(b.pos.x, b.pos.y + 3.6, b.pos.z);
+    const sway = 0.10 * Math.sin(b.t * 1.4);
+    bailChute.rotation.set(sway * (state.wind.z * 0.05), 0, sway * (state.wind.x * 0.05));
+  }
+}
+// Reset hook — called from resetPlane(). Hides meshes and resets the
+// sub-state. Lifetime stat (pilotStats.bailouts) is intentionally preserved.
+function resetBailout(){
+  const b = state.bailout;
+  if (!b) return;
+  b.phase = 'idle'; b.t = 0;
+  b.vel.set(0,0,0); b.pos.set(0,0,0);
+  b.ejectAltAGL = 0; b.ejectPos.set(0,0,0);
+  b.summarised = false;
+  if (bailPilot) bailPilot.visible = false;
+  if (bailChute) bailChute.visible = false;
+  hideBailCard();
+}
+// Summary card wiring — twin of showCrashCard / showLandCard.
+const bailCardEl  = document.getElementById('bailcard');
+const bcVerdictEl = document.getElementById('bcVerdict');
+const bcEjectAltEl = document.getElementById('bcEjectAlt');
+const bcDriftEl   = document.getElementById('bcDrift');
+const bcTimeEl    = document.getElementById('bcTime');
+const bcCountEl   = document.getElementById('bcCount');
+const bcReasonEl  = document.getElementById('bcReason');
+function showBailCard(d){
+  if (!bailCardEl) return;
+  if (bcVerdictEl) bcVerdictEl.textContent = d.verdict || 'PILOT SAFE';
+  if (bcEjectAltEl) bcEjectAltEl.textContent = Math.round(d.ejectAltAGL || 0) + ' m AGL';
+  if (bcDriftEl) bcDriftEl.textContent = Math.round(d.driftM || 0) + ' m';
+  if (bcTimeEl){
+    const secs = (BAIL_EJECT_DUR + BAIL_FREEFALL_DUR) + (state.bailout ? state.bailout.t : 0);
+    bcTimeEl.textContent = secs.toFixed(1) + ' s';
+  }
+  if (bcCountEl) bcCountEl.textContent = String(d.bailoutsLifetime || 0);
+  if (bcReasonEl) bcReasonEl.textContent = 'Airframe is wherever it landed. You are not.';
+  bailCardEl.style.display = 'block';
+}
+function hideBailCard(){ if (bailCardEl) bailCardEl.style.display = 'none'; }
+if (bailCardEl){
+  bailCardEl.addEventListener('click', hideBailCard);
+}
+
 // ====== STATE ======
 const GEAR_H = 1.25;
 const state = {
@@ -6476,6 +6802,21 @@ const state = {
   engineFireT: 0,
   engineFireStarvedT: 0,
   engineFireBeepAt: 0,
+  // Parachute bailout sub-state. phase 'idle' = airplane sim is normal; once
+  // the player triggers Shift+P from a qualifying emergency, phase steps
+  // through 'eject' (0.4s wind-up while the canopy blows), 'freefall' (~0.8s
+  // of unguided drop before the chute snaps open), 'canopy' (steady 5 m/s
+  // descent that drifts with wind), and 'landed' (a beat on the ground before
+  // the summary card pops). pos / vel track the pilot ragdoll in world space
+  // while the airplane itself keeps physicsing on its own — the bailout is
+  // a parallel mini-sim that only hijacks the camera. ejectAltAGL captures
+  // entry altitude for the summary card; ejectPos remembers where the player
+  // bailed so the drift number reads cleanly. trigger latches the per-sortie
+  // count so a fresh sortie re-arms the toast suppression. summarised flips
+  // true once we've shown the bailcard for this descent so the next R doesn't
+  // re-pop it. All cleared by resetPlane().
+  bailout: { phase:'idle', t:0, pos:new THREE.Vector3(), vel:new THREE.Vector3(),
+             ejectAltAGL:0, ejectPos:new THREE.Vector3(), summarised:false },
   // Engine cylinder-head temperature (°C). Starts cold on the apron (matches the
   // cold-start ritual flavor), climbs with sustained throttle and climb attitude,
   // cools with low throttle / descents / dense low-altitude air. Above
@@ -7015,6 +7356,15 @@ addEventListener('keydown', e=>{
     state.trim = Math.max(-1, Math.min(1, state.trim + dir*step));
   }
   if (e.code==='KeyP'){
+    // Shift+P punches the pilot out of the airframe when bailout-armed (heavy
+    // damage / engine fire / inverted-low). Routes through tryBailout() which
+    // is the single owner of the entry gate + SFX + camera takeover so the
+    // rest of the sim doesn't have to know about it.
+    if (e.shiftKey){
+      if (state.introOpen || state.replayActive) return;
+      tryBailout();
+      return;
+    }
     // Photo mode toggle. Skip while the intro modal is up (no plane in the
     // world yet) or during replay (the replay banner is already playing back
     // a fixed segment). Defined globally; the setup function below wires the
@@ -7249,6 +7599,10 @@ function pickCrashVerdict(d){
 }
 function showCrashCard(d){
   if (!crashCardEl) return;
+  // Suppress the regular crash card while a bailout is mid-air — the pilot
+  // already punched out, the airframe is just metal at this point, and the
+  // bail summary card will take over once the chute touches down.
+  if (state.bailout && state.bailout.phase !== 'idle') return;
   state.crashReport = d;
   ccVerdictEl.textContent = pickCrashVerdict(d);
   // PEAK G — amber over 4 g, red over 6 g (where the airframe is screaming).
@@ -7694,6 +8048,10 @@ function resetPlane(){
   state.engineFireBeepAt = 0;
   state.nextFireRollMs = 0;
   clearEngineFireFx();
+  // Parachute bailout: clear the sub-state machine and hide the rendered
+  // pilot/canopy meshes so a fresh sortie starts clean. The lifetime stat
+  // is preserved in pilotStats.bailouts — only the per-flight scratch goes.
+  resetBailout();
   // Engine temperature: a fresh sortie starts cool (matches the cold-start
   // flavor) and clears the overheat latch so the next leg re-arms the warning.
   state.engineTempC = ENG_TEMP_COLD;
@@ -7782,6 +8140,7 @@ function resetPlane(){
   hideCrashCard();
   state.landReport = null;
   hideLandCard();
+  hideBailCard();
   state.ap.on = false;
   state.ap.wpFollow = false;
   state.ap.cruiseLatch = false;
@@ -10370,6 +10729,10 @@ function step(dt){
   // visuals). Both calls self-gate so a clean cruise pays nothing.
   maybeRollEngineFire(dt);
   updateEngineFire(dt);
+  // Parachute bailout sim. Self-gates on phase==='idle' so a non-ejected
+  // flight pays nothing; advances pilot + canopy pose, runs the phase
+  // chain, and pops the summary card on touchdown.
+  updateBailout(dt);
   // Engine temperature thermal model — cheap lerp toward a throttle/climb/altitude
   // driven target, with sustained-overheat damage and an ATC nag latch. Self-gates
   // on pause/replay/intro so frozen frames don't drift the gauge.
@@ -10856,6 +11219,16 @@ function step(dt){
   // mode so saved PNGs stay clean.
   const carbIcePillEl = document.getElementById('carbIcePill');
   if (carbIcePillEl) carbIcePillEl.style.display = ((state.carbIce || 0) > CARB_ICE_SHOW_MIN && !state.photoMode) ? 'inline' : 'none';
+  // Bailout pill (WIND row) — cyan reminder that Shift+P will work right
+  // now. Lit whenever bailoutArmed() returns true (engine fire / heavy
+  // damage / fuel exhaustion / inverted-low) and hidden in photo mode +
+  // during the bailout itself so the pill doesn't compete with the
+  // bailout-active toast banner.
+  const bailPillEl = document.getElementById('bailPill');
+  if (bailPillEl){
+    const armed = (typeof bailoutArmed === 'function') && bailoutArmed() && !state.photoMode;
+    bailPillEl.style.display = armed ? 'inline' : 'none';
+  }
   // Cockpit panel pitot-heat indicator — pure flavor amber lamp inside the
   // cockpit panel, only visible alongside the gauges so chase / orbit cams
   // stay clean. Reuses the cockpit-cam visibility gate via the parent panel's
@@ -13778,6 +14151,22 @@ function updateCamModeUi(){
   if (cpEl) cpEl.classList.toggle('show', cockpit);
 }
 function updateCamera(dt){
+  // Parachute bailout takes priority over the regular camera modes — the
+  // player just punched out of the airplane and wants to see the pilot, not
+  // an empty cockpit corkscrewing into the dirt. Frame the pilot from a
+  // gentle stand-off so the chute, drift, and ground impact are all readable.
+  if (state.bailout && state.bailout.phase !== 'idle' && typeof bailPilot !== 'undefined' && bailPilot){
+    const pp = bailPilot.position;
+    // Stand off from the pilot, slightly above so the canopy framed against
+    // sky reads clearly; angle subtly to the wind so drift is visible.
+    const ang = (state.wind.x !== 0 || state.wind.z !== 0)
+      ? Math.atan2(state.wind.x, state.wind.z) : 0;
+    const off = new THREE.Vector3(Math.sin(ang) * -10, 4.5, Math.cos(ang) * -10);
+    const desired = pp.clone().add(off);
+    camera.position.lerp(desired, Math.min(1, 4*dt));
+    camera.lookAt(pp.clone().add(new THREE.Vector3(0, 1.0, 0)));
+    return;
+  }
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
   const up  = new THREE.Vector3(0,1,0).applyQuaternion(plane.quaternion);
   if (state.cam === 0){
@@ -14609,7 +14998,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -14780,6 +15169,7 @@ addEventListener('keydown', e => {
     burgers:  document.getElementById('stBurgers'),
     tgStreak: document.getElementById('stTg'),
     perfect:  document.getElementById('stPerfect'),
+    bailouts: document.getElementById('stBailouts'),
     rank:     document.getElementById('stRank')
   };
   function refresh(){
@@ -14800,6 +15190,7 @@ addEventListener('keydown', e => {
     if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
     if (cells.tgStreak) cells.tgStreak.textContent = pilotStats.bestTgStreak || 0;
     if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
+    if (cells.bailouts) cells.bailouts.textContent = pilotStats.bailouts || 0;
     if (cells.rank){
       const cur = currentRank();
       cells.rank.textContent = cur ? cur.id : 'CADET';
