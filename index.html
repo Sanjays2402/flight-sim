@@ -946,6 +946,11 @@
       <div class="hint">Start each flight with engine off; press <kbd>I</kbd> on the ground to crank it over. Off = wheels-warm and ready to roll.</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">CO-PILOT</span><span class="val" id="setCopV">ON</span></div>
+      <button id="setCopBtn" type="button" style="width:100%">TOGGLE CO-PILOT</button>
+      <div class="hint">Soft callouts on downwind, base, and final when you're flying the standard left-hand pattern at a nearby field. OFF mutes the chirp.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">SMOKE TRAIL COLOR</span><span class="val" id="setTrailV">LIVERY</span></div>
       <select id="setTrail"></select>
       <div class="hint">Ribbon (<kbd>Y</kbd>) and airshow smoke (<kbd>~</kbd>) color. LIVERY follows your paint scheme.</div>
@@ -1251,7 +1256,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0 };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1323,6 +1328,7 @@ try {
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
     if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
     if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
+    if (typeof saved.copilot === 'boolean') settings.copilot = saved.copilot;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -8743,6 +8749,17 @@ const state = {
   // resetPlane() / takeoff so a fresh sortie starts clean.
   approachLastAGL: 9999,
   approachArmed: true,
+  // Co-pilot pattern callouts. Three soft callouts fire on the standard
+  // left-hand pattern: "gear check, abeam the numbers" when downwind passes
+  // the threshold, "base turn, flaps two" on the base leg, and "final, on
+  // speed" rolling out on final. Each leg latches per approach so a slow
+  // base doesn't multi-fire; the full set re-arms above 200m AGL after a
+  // touch-and-go (matches approachArmed). Detector reuses the pattern-entry
+  // box math so it only fires for left-hand traffic in the trainable
+  // profile (within 5 km, below 1500m AGL, free / touch-and-go modes).
+  // Gated by settings.copilot so muted-cockpit pilots can disable.
+  coPilotApAirport: null,
+  coPilotArmed: { abeam: true, base: true, final: true },
   // Go-around detector: when the player slams throttle past 95% below 300m AGL
   // within 2 km of a runway with positive vertical speed and gear still down,
   // we fire a one-shot "GO-AROUND" toast + ATC call. `goAroundArmed` re-arms
@@ -11149,6 +11166,12 @@ function resetPlane(){
   // the last-AGL latch so the first descent through 500ft fires cleanly.
   state.approachLastAGL = 9999;
   state.approachArmed = true;
+  // Co-pilot pattern callouts: clear the per-airport latch + all three legs
+  // so the first time we hit the pattern this sortie fires from scratch.
+  state.coPilotApAirport = null;
+  state.coPilotArmed.abeam = true;
+  state.coPilotArmed.base = true;
+  state.coPilotArmed.final = true;
   // Gear warning horn: fresh sortie re-arms the latch so the first
   // low-and-slow gear-up approach in the new flight gets a fresh "gear,
   // gear" pulse + ATC call. Clear the active flag so the pill drops too.
@@ -11862,6 +11885,59 @@ function playCalloutChime(){
   osc.connect(g).connect(ctx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.24);
+}
+// Co-pilot chirp: a softer, lower-pitched two-tone cue that reads as
+// "copilot, not tower" against the existing 660 Hz radalt callout pip.
+// Two muted sine pulses (G4 -> D4, ~330 ms total) layered with a lightly
+// low-passed triangle partial so it sits behind voice on the strip instead
+// of cutting through like an alarm. Reuses sfxReady() so no extra audio
+// nodes are allocated; volume tracks settings.volume like every one-shot.
+function playCopilotChirp(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.18 * settings.volume;
+  if (vol <= 0) return;
+  const tones = [
+    { f: 392.0, t: 0.00, dur: 0.14 }, // G4
+    { f: 293.66, t: 0.13, dur: 0.18 } // D4 — descending second tone
+  ];
+  for (const tn of tones){
+    const t = t0 + tn.t;
+    // Sine for the body of the tone.
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(tn.f, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + tn.dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + tn.dur + 0.02);
+    // Soft triangle partial an octave up at lower amplitude, low-passed
+    // through a one-pole filter to read as "muffled cockpit speaker" rather
+    // than a bright chime. Pure additive; no new persistent nodes.
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(tn.f * 2, t);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0, t);
+    g2.gain.linearRampToValueAtTime(vol * 0.22, t + 0.012);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + tn.dur);
+    let lp = null;
+    try {
+      if (typeof ctx.createBiquadFilter === 'function'){
+        lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(900, t);
+        osc2.connect(g2).connect(lp).connect(ctx.destination);
+      }
+    } catch(e){ /* filter optional */ }
+    if (!lp) osc2.connect(g2).connect(ctx.destination);
+    osc2.start(t);
+    osc2.stop(t + tn.dur + 0.02);
+  }
 }
 // Photo-countdown tick chime: a soft, dry sine "tick" that fires once per
 // second during the Shift+S countdown. Final tick (count === 0 i.e. the
@@ -17159,6 +17235,123 @@ function step(dt){
       // Not eligible (no runway or gear up): keep the latch high so a future
       // approach starts from "above all thresholds".
       state.approachLastAGL = 9999;
+    }
+  }
+
+  // Co-pilot pattern callouts — three soft voice cues that walk a newer
+  // pilot through a standard left-hand pattern. Reuses the same coordinate
+  // math as the pattern-entry-guide rectangle on the mini-map so a callout
+  // only fires when the plane is actually flying the pattern the guide
+  // drew. Each leg latches per approach; the full set re-arms once AGL
+  // climbs back above 200m AGL (matches approachArmed) so touch-and-go and
+  // missed approaches get a fresh sequence. Gated by settings.copilot so
+  // muted-cockpit pilots can disable, and by the same teaching-friendly
+  // profile as the visual guide (free / touch-and-go modes, within 5 km,
+  // below 1500m AGL, no crash / replay / photo / intro / pause).
+  if (settings.copilot
+      && !state.crashed && !state.introOpen && !state.photoMode
+      && !state.paused && !state.replayActive && !state.onGround
+      && (state.mode === 'free' || state.mode === 'tng')){
+    // Find the nearest non-carrier airport (carrier deck isn't a GA pattern).
+    let cpAp = null, cpD = 1e9;
+    for (const a of AIRPORTS){
+      const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+      if (d < cpD){ cpD = d; cpAp = a; }
+    }
+    if (cpAp && cpD < 5000){
+      const cpAgl = plane.position.y - cpAp.elev - GEAR_H;
+      if (cpAgl < 1500 && cpAgl > 30){
+        // Re-arm the full set on a fresh sortie OR a clean go-around above
+        // 200m AGL. Tracked per-airport so switching fields gives a fresh
+        // set even if the climb-out never crested 200m above the new field.
+        if (state.coPilotApAirport !== cpAp.id || cpAgl > 200){
+          state.coPilotApAirport = cpAp.id;
+          state.coPilotArmed.abeam = true;
+          state.coPilotArmed.base = true;
+          state.coPilotArmed.final = true;
+        }
+        // Mirror the pattern-entry-guide coordinate system exactly:
+        //   al = sinH*dx - cosH*dz  (forward in landing direction)
+        //   la = -cosH*dx - sinH*dz (lateral, NEGATIVE = LEFT of centerline)
+        // The visible guide draws final at +al=+halfLen+PG_FINAL with the
+        // landing direction running toward DECREASING al. So plane on
+        // downwind moves in +al direction; plane on final moves in -al.
+        const cosH = Math.cos(cpAp.hdg), sinH = Math.sin(cpAp.hdg);
+        const dx = plane.position.x - cpAp.x, dz = plane.position.z - cpAp.z;
+        const al = sinH * dx - cosH * dz;
+        const la = -cosH * dx - sinH * dz;
+        // Plane velocity in airport-local (same rotation as position).
+        const vx = state.vel.x, vz = state.vel.z;
+        const vAl = sinH * vx - cosH * vz;
+        const vLa = -cosH * vx - sinH * vz;
+        const groundSpd = Math.hypot(vx, vz);
+        const PG_LAT = 1500;   // matches pattern-entry-guide constant
+        const HALF = cpAp.len / 2;
+        // Common: only fire when plane is moving fast enough to be "flying"
+        // (no taxi false-fires) and clearly on the left side of the strip.
+        const onLeft = la < -PG_LAT * 0.35 && la > -PG_LAT * 1.6;
+        const movingFast = groundSpd > 25;
+        // --- Downwind abeam threshold: gear-check call ---
+        // Plane on downwind: la near -PG_LAT, velocity in +al direction.
+        // Abeam moment = al crossing +HALF upward (passing the touchdown
+        // threshold on downwind heading). Allow a generous heading cone so
+        // a slightly wide downwind still triggers.
+        if (state.coPilotArmed.abeam && movingFast
+            && la < -PG_LAT * 0.45 && la > -PG_LAT * 1.6
+            && vAl > 6   // clearly heading +al direction
+            && al > -HALF - 800 && al < HALF + 800   // along the downwind leg
+            && cpAgl > 60 && cpAgl < 600){           // plausible pattern altitude
+          // Cheap "crossed +HALF this frame" check: previous-frame al stored
+          // implicitly via velocity * dt. al - vAl*dt is the previous al.
+          const alPrev = al - vAl * dt;
+          if (alPrev < HALF && al >= HALF){
+            state.coPilotArmed.abeam = false;
+            if (typeof pushATC === 'function'){
+              pushATC('Gear check, abeam the numbers.', { tag: 'CP', now: true });
+            }
+            if (typeof playCopilotChirp === 'function') playCopilotChirp();
+          }
+        }
+        // --- Base turn: flaps call ---
+        // Plane has turned ~90 deg left from downwind to base. Position:
+        // beyond the approach end (al > +HALF + 600), still on left side.
+        // Velocity: heading dominantly in -la direction (toward centerline).
+        // Fires once when base heading is clearly established.
+        if (state.coPilotArmed.base && !state.coPilotArmed.abeam && movingFast
+            && al > HALF + 400 && al < HALF + PG_LAT + 1200
+            && onLeft
+            && vLa < -6                 // moving toward centerline (right)
+            && Math.abs(vAl) < Math.abs(vLa) * 1.5  // base heading dominates
+            && cpAgl > 40 && cpAgl < 600){
+          state.coPilotArmed.base = false;
+          if (typeof pushATC === 'function'){
+            pushATC('Base turn, flaps two.', { tag: 'CP', now: true });
+          }
+          if (typeof playCopilotChirp === 'function') playCopilotChirp();
+        }
+        // --- Final turn: on-speed call ---
+        // Rolling out on final: plane lined up with the runway centerline
+        // and moving in landing direction (-al). la near 0, |vLa| small,
+        // vAl strongly negative. Re-uses the radalt onFinal-like envelope
+        // but a touch wider so it fires on the FIRST frame of stabilized
+        // final, not after the plane is already descending past 500ft.
+        if (state.coPilotArmed.final && !state.coPilotArmed.base && movingFast
+            && al > HALF - 200 && al < HALF + PG_LAT + 1500
+            && Math.abs(la) < 250
+            && vAl < -8                 // clearly moving in landing direction
+            && Math.abs(vLa) < Math.abs(vAl) * 0.6  // aligned, not crabbing wildly
+            && cpAgl > 20 && cpAgl < 600){
+          state.coPilotArmed.final = false;
+          if (typeof pushATC === 'function'){
+            pushATC('Final, on speed.', { tag: 'CP', now: true });
+          }
+          if (typeof playCopilotChirp === 'function') playCopilotChirp();
+        }
+      }
+    } else if (cpD >= 5000){
+      // Out of pattern range: drop the airport latch so the next approach
+      // gets a fresh set even without crossing 200m AGL.
+      state.coPilotApAirport = null;
     }
   }
 
@@ -22649,6 +22842,8 @@ addEventListener('keydown', e => {
   const fogV = document.getElementById('setFogV');
   const coldBtn = document.getElementById('setColdBtn');
   const coldV = document.getElementById('setColdV');
+  const copBtn = document.getElementById('setCopBtn');
+  const copV = document.getElementById('setCopV');
   const twinBtn = document.getElementById('setTwinBtn');
   const twinV = document.getElementById('setTwinV');
   const cowlBtn = document.getElementById('setCowlBtn');
@@ -22754,6 +22949,11 @@ addEventListener('keydown', e => {
       coldBtn.textContent = settings.coldStart ? 'COLD START: ON' : 'COLD START: OFF';
       coldBtn.classList.toggle('primary', settings.coldStart);
     }
+    if (copV) copV.textContent = settings.copilot ? 'ON' : 'OFF';
+    if (copBtn){
+      copBtn.textContent = settings.copilot ? 'CO-PILOT: ON' : 'CO-PILOT: OFF';
+      copBtn.classList.toggle('primary', settings.copilot);
+    }
     if (twinV) twinV.textContent = settings.twinEngine ? 'TWIN' : 'SINGLE';
     if (twinBtn){
       twinBtn.textContent = settings.twinEngine ? 'TWIN ENGINE: ON' : 'TWIN ENGINE: OFF';
@@ -22829,6 +23029,22 @@ addEventListener('keydown', e => {
         state.coldStart = false;
         state.ignitionT = -1;
         hideStatus();
+      }
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (copBtn){
+    copBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.copilot = !settings.copilot;
+      // Flipping ON re-arms the latches so the next approach gets a fresh
+      // set; flipping OFF leaves them as-is (detector simply bails out).
+      if (settings.copilot){
+        state.coPilotApAirport = null;
+        state.coPilotArmed.abeam = true;
+        state.coPilotArmed.base = true;
+        state.coPilotArmed.final = true;
       }
       syncInputs();
       saveSettings();
