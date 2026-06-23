@@ -541,6 +541,16 @@
   #cockpitPanel.show { display:flex; }
   #cockpitPanel .gauge { display:flex; flex-direction:column; align-items:center; }
   #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); transition:filter .25s ease, border-color .25s ease, box-shadow .35s ease; }
+  /* Engine Monitor overlay (Shift+G): a wider rectangular tile that holds four
+     EGT bars + a CHT bar. Hidden by default; #cockpitPanel.eng-mon shows it
+     and swaps out the standard CHT + OIL gauges so the matched-circle layout
+     stays balanced. Same border / glow palette as the round gauges so the
+     night / dusk / alt-fail filter chain still composes cleanly. */
+  #cockpitPanel #cpEngGauge { display:none; }
+  #cockpitPanel.eng-mon #cpEngGauge { display:flex; }
+  #cockpitPanel.eng-mon #cpChtGauge,
+  #cockpitPanel.eng-mon #cpOilGauge { display:none; }
+  #cockpitPanel #cpEngGauge canvas { width:225px; height:110px; border-radius:10px; }
   #cockpitPanel .glbl { margin-top:4px; font-size:10px; letter-spacing:2px; color:#6aa; font-weight:700; transition:color .25s ease, text-shadow .25s ease; }
   /* Night-mode (Shift+;): tint every gauge canvas + the panel chrome red so the
      instruments stay readable without nuking the pilot's night vision. CSS filter
@@ -892,7 +902,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -903,8 +913,9 @@
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
   <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
-  <div class="gauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
-  <div class="gauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
+  <div class="gauge" id="cpChtGauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
+  <div class="gauge" id="cpOilGauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
+  <div class="gauge gauge-wide" id="cpEngGauge"><canvas id="cpEng" width="440" height="220" title="Engine monitor — 4 EGT bars + CHT · Shift+G toggle"></canvas><div class="glbl">ENGINE MONITOR (EGT)</div></div>
   <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
@@ -8775,6 +8786,16 @@ const state = {
   // key exists; cleared on resetPlane().
   landingLight: !!settings.landingLight,
   landingLightSuggested: false,
+  // Engine Monitor / EGT page (Shift+G). When true, the cockpit panel swaps
+  // the standard ENG TEMP + OIL gauges for a wider engine-analyzer tile that
+  // shows four per-cylinder EGT bars + a CHT bar. Pure derived readout off
+  // the existing engine model (throttle + mixture + cold-start spool) with a
+  // tiny per-cylinder jitter so the bars wobble like a real analyzer. It's
+  // an instrument page, not an alarm, so the overlay auto-hides when the
+  // engine is dead / out of fuel / on fire and reverts to the round gauges.
+  // The pilot's choice is preserved across resetPlane() (a pilot setting,
+  // not per-flight state) so a checklist-heavy sortie doesn't re-toggle.
+  engineMonitorOn: false,
   // Night-mode panel suggest latch. Shift+; toggles the red-tinted cockpit
   // panel. First time TOD crosses past 20:00 with the player in cockpit cam
   // and night mode still OFF, we fire a one-shot ATC "Recommend night panel"
@@ -9527,7 +9548,23 @@ addEventListener('keyup', e=>{
 });
 addEventListener('keydown', e=>{
   if (e.repeat) return;
-  if (e.code==='KeyG') toggleGear();
+  if (e.code==='KeyG' && !e.shiftKey) toggleGear();
+  // Shift+G toggles the Engine Monitor / EGT page overlay on the cockpit
+  // panel. Pure pilot setting — survives resetPlane() (same pattern as
+  // landingLight / cowlFlapsOpen / carbHeatOn) so a checklist-heavy sortie
+  // doesn't have to re-toggle. Gated through introOpen so a stray key on the
+  // main menu can't latch it, matching the Shift+C carb-heat / Shift+F cowl
+  // pattern. The draw side hides the overlay when the engine is dead or on
+  // fire, so this just owns the persistent intent.
+  if (e.code==='KeyG' && e.shiftKey){
+    if (state.introOpen) return;
+    e.preventDefault();
+    state.engineMonitorOn = !state.engineMonitorOn;
+    showStatus(state.engineMonitorOn ? 'ENGINE MONITOR ON' : 'ENGINE MONITOR OFF',
+               state.engineMonitorOn ? 'EGT bars + CHT · LEAN flags the hot cyl' : 'standard ENG TEMP + OIL gauges restored',
+               'good');
+    return;
+  }
   // Shift+F toggles cowl flaps. Plain F cycles wing flaps (the line below).
   // Gate through introOpen so a stray key on the main menu can't latch the
   // toggle, matching the carb-heat (Shift+C) and night-mode (Shift+;) pattern.
@@ -20613,6 +20650,8 @@ const cpChrCv = document.getElementById('cpChr');
 const cpVorCv = document.getElementById('cpVor');
 const cpDaCv  = document.getElementById('cpDa');
 const cpAdfCv = document.getElementById('cpAdf');
+const cpEngCv = document.getElementById('cpEng');
+const cpEngCtx = cpEngCv && cpEngCv.getContext('2d');
 // Smoothed cockpit panel "dusk lighting" intensity (0..1). Lazy-eased toward
 // the live runway-edge-light dusk gate inside drawCockpitPanel() each frame
 // so the amber post-light wash fades in/out glassily across sunrise/sunset.
@@ -21150,6 +21189,200 @@ function drawCockpitOil(psi){
     : (p < OIL_PSI_IDLE - 5 ? '#ffb020' : '#7ee787');
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(p), cx, cy + R*0.55);
+}
+function drawEngineMonitor(){
+  // Engine Monitor / EGT page (Shift+G). Wider rectangular canvas that
+  // shows a row of four vertical EGT bars (one per cylinder) + a single CHT
+  // bar mirroring the existing CHT gauge. EGT values are derived from the
+  // live throttle + mixture (fuel-flow + mixture maths), with a tiny
+  // per-cylinder ±2% jitter so the bars wobble realistically. The leanest
+  // cylinder is highlighted LEAN so the pilot can chase peak-EGT practice.
+  // Pure derived readout — no new physics, no new audio, no state mutation.
+  if (!cpEngCtx) return;
+  const W = cpEngCv.width, H = cpEngCv.height;
+  const ctx = cpEngCtx;
+  // Background slab (matches the round-gauge palette so the night / dusk /
+  // alt-fail filter chain composes without any new rules).
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1018';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#11151c';
+  ctx.fillRect(8, 8, W - 16, H - 16);
+  ctx.strokeStyle = '#1e3548';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(2, 2, W - 4, H - 4);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Layout: four EGT bars on the left two-thirds, one CHT bar on the right.
+  // Bar geometry: vertical bars rising from a common baseline so the eye
+  // reads relative cylinder spread at a glance.
+  const margin = 18;
+  const topY = margin + 14;     // leave room for the title
+  const botY = H - margin - 14; // leave room for the per-bar label
+  const barH = botY - topY;
+  const colCount = 5;           // 4 EGT + 1 CHT
+  const colW = (W - margin * 2) / colCount;
+  const barW = Math.min(colW - 12, 28);
+  // EGT scale: full-rich idle sits ~1100°F, peak-EGT cruise ~1450°F,
+  // sustained leaned-of-peak high-throttle hits ~1600°F. The bar floor /
+  // ceiling are picked so a realistic cruise needle sits mid-bar with
+  // visible headroom on either side for lean-of-peak chasing.
+  const EGT_MIN = 800;
+  const EGT_MAX = 1700;
+  const EGT_PEAK_WARN = 1550;   // amber band entry
+  const EGT_PEAK_HOT  = 1620;   // red band entry
+  // Derive a base EGT off throttle + mixture, mirroring the fuel-flow path's
+  // engine-live gate so the bars zero out cleanly when the engine isn't
+  // burning anything. Cold-start ramps the bars up over the spool window so
+  // the page actually moves while the pilot waits on the crank.
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  let baseEgt;
+  if (engineLive){
+    const t = Math.max(0, Math.min(1, state.throttle));
+    // Idle ~1050 F, ramps up to ~1500 F at full throttle (mild S-curve so
+    // cruise sits between idle and peak rather than perched at the top).
+    baseEgt = 1050 + 450 * (0.65 * t + 0.35 * t * t);
+    // Mixture biases the *displayed* EGT exactly the way real engines do:
+    // pulling the mixture lean of peak pushes EGT through peak and then
+    // back down. We use the existing mixtureTargetForAlt / mixtureOffBand
+    // helpers so the bars track the same single-source-of-truth band that
+    // the fuel-burn + CHT paths use.
+    const _alt = plane.position.y;
+    const tMix = mixtureTargetForAlt(_alt);
+    const cur  = state.mixture || 0;
+    const offTarget = cur - tMix;          // negative = lean of peak, positive = rich of peak
+    // Rich of peak runs cooler (excess fuel mass quenches the burn);
+    // lean of peak first walks up to peak EGT then drops off again.
+    if (offTarget <= 0){
+      // Lean-of-peak side: EGT climbs from base toward peak as the lever
+      // pulls back toward the target band, then drops once past the band.
+      const leanAmt = Math.min(1, Math.abs(offTarget) / MIX_BAND_HALF);
+      // Inside the band (leanAmt <= 1) climb toward peak; past the band
+      // (cur far below target) drop back down as the burn starves.
+      const beyond = Math.max(0, (tMix - MIX_BAND_HALF) - cur) / Math.max(0.01, MIX_BAND_HALF);
+      baseEgt += (EGT_PEAK_WARN - 1100) * 0.4 * Math.min(1, leanAmt);
+      baseEgt -= (EGT_PEAK_WARN - 1100) * 0.6 * Math.min(1, beyond);
+    } else {
+      // Rich-of-peak side: lever forward of target band cools EGT (more fuel
+      // mass than the air can burn cleanly). Scales with how far off band.
+      const overRich = Math.max(0, offTarget - MIX_BAND_HALF * 0.5) / Math.max(0.01, (1.0 - tMix));
+      baseEgt -= (EGT_PEAK_WARN - 1100) * 0.35 * Math.min(1, overRich);
+    }
+  } else if (state.coldStart){
+    baseEgt = state.ignitionT >= 0
+      ? Math.min(950, 800 + (state.ignitionT / COLD_START_SPOOL_S) * 200)
+      : 800;
+  } else {
+    baseEgt = EGT_MIN;
+  }
+  baseEgt = Math.max(EGT_MIN, Math.min(EGT_MAX, baseEgt));
+  // Per-cylinder jitter: deterministic-ish wobble so each bar wiggles on its
+  // own rather than the row marching in lockstep. We use performance.now()
+  // with prime offsets per cylinder; amplitude scales with engine load so
+  // idle is glassy and full power has visible bar movement.
+  const tNow = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.001;
+  const loadAmp = engineLive ? (0.35 + 0.65 * Math.max(0, Math.min(1, state.throttle))) : 0.1;
+  const egts = [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++){
+    // Smooth low-freq wobble (~0.7..1.4 Hz per cylinder) with a small
+    // per-cylinder fixed bias so the cylinders aren't all identical.
+    const phase = i * 1.7 + 0.4;
+    const w1 = Math.sin(tNow * (0.8 + i * 0.15) + phase);
+    const w2 = Math.sin(tNow * (1.7 + i * 0.21) + phase * 1.3);
+    const cylBias = (i - 1.5) * 4; // ±6 F spread across cylinders
+    egts[i] = baseEgt + cylBias + (w1 * 0.6 + w2 * 0.4) * baseEgt * 0.02 * loadAmp;
+    egts[i] = Math.max(EGT_MIN, Math.min(EGT_MAX, egts[i]));
+  }
+  // Find the leanest (highest EGT) cylinder so it can wear the LEAN label —
+  // mirrors the real-world engine-analyzer convention.
+  let leanIdx = 0;
+  for (let i = 1; i < 4; i++) if (egts[i] > egts[leanIdx]) leanIdx = i;
+  // Title strip up top.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillText('ENGINE MONITOR  ·  EGT °F  ·  CHT °C', W / 2, margin);
+  // Draw the four EGT bars + the CHT bar against a shared baseline grid.
+  // Horizontal reference lines at peak-warn + peak-hot so the eye reads
+  // the band edges without squinting at axis numbers.
+  ctx.strokeStyle = 'rgba(255, 176, 32, 0.32)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  const warnY = botY - barH * (EGT_PEAK_WARN - EGT_MIN) / (EGT_MAX - EGT_MIN);
+  const hotY  = botY - barH * (EGT_PEAK_HOT  - EGT_MIN) / (EGT_MAX - EGT_MIN);
+  ctx.beginPath();
+  ctx.moveTo(margin + 4, warnY);
+  ctx.lineTo(margin + colW * 4 - 4, warnY);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 82, 82, 0.35)';
+  ctx.beginPath();
+  ctx.moveTo(margin + 4, hotY);
+  ctx.lineTo(margin + colW * 4 - 4, hotY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // EGT bars (4 cylinders).
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  for (let i = 0; i < 4; i++){
+    const cx = margin + colW * i + colW / 2;
+    const bx = cx - barW / 2;
+    const v  = egts[i];
+    const t  = (v - EGT_MIN) / (EGT_MAX - EGT_MIN);
+    const bh = Math.max(2, barH * t);
+    // Color thresholds mirror the round-CHT gauge palette so the cockpit
+    // panel stays color-coded the same way across the two views.
+    const color = (v >= EGT_PEAK_HOT)  ? '#ff5252'
+                : (v >= EGT_PEAK_WARN) ? '#ffb020'
+                                       : '#7ee787';
+    // Bar background (full track) for visual reference.
+    ctx.fillStyle = '#1a2230';
+    ctx.fillRect(bx, topY, barW, barH);
+    // Live fill.
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, botY - bh, barW, bh);
+    // Cylinder label below + numeric F above the bar top.
+    ctx.fillStyle = '#9bd';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText('#' + (i + 1), cx, botY + 10);
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.fillText(Math.round(v), cx, topY - 6);
+    // LEAN flag on the hottest cylinder (only when the engine is actually
+    // running — a dead engine has nothing to lean).
+    if (engineLive && i === leanIdx){
+      ctx.fillStyle = '#ffd166';
+      ctx.font = 'bold 9px ui-monospace, monospace';
+      ctx.fillText('LEAN', cx, topY + 4);
+    }
+  }
+  // CHT bar on the right (mirrors the round CHT gauge, color rules match).
+  {
+    const cx = margin + colW * 4 + colW / 2;
+    const bx = cx - barW / 2;
+    const v  = state.engineTempC;
+    const t  = Math.max(0, Math.min(1, (v - ENG_TEMP_COLD) / (ENG_TEMP_MAX - ENG_TEMP_COLD)));
+    const bh = Math.max(2, barH * t);
+    const color = (v >= ENG_TEMP_REDLINE)     ? '#ff5252'
+                : (v >= ENG_TEMP_CRUISE + 20) ? '#ffb020'
+                                              : '#7ee787';
+    ctx.fillStyle = '#1a2230';
+    ctx.fillRect(bx, topY, barW, barH);
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, botY - bh, barW, bh);
+    // Redline tick: short red dash across the CHT bar at the redline temp
+    // so the pilot reads the limit at a glance.
+    const redY = botY - barH * (ENG_TEMP_REDLINE - ENG_TEMP_COLD) / (ENG_TEMP_MAX - ENG_TEMP_COLD);
+    ctx.strokeStyle = '#ff5252';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(bx - 4, redY);
+    ctx.lineTo(bx + barW + 4, redY);
+    ctx.stroke();
+    ctx.fillStyle = '#9bd';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText('CHT', cx, botY + 10);
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.fillText(Math.round(v) + '°', cx, topY - 6);
+  }
 }
 function drawCockpitMag(hdgDeg, dt){
   if (!cpMagCtx) return;
@@ -22032,6 +22265,19 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   drawCockpitRpm(rpmSpeed, rpmOverride);
   drawCockpitCht(chtV);
   drawCockpitOil(oilV);
+  // Engine Monitor / EGT page (Shift+G). The CSS swap hides the CHT + OIL
+  // round gauges and shows the wider rectangular monitor tile in their
+  // place. The overlay auto-hides when the engine is dead or on fire (it's
+  // an analyzer, not an alarm) so the pilot doesn't lose oil-pressure /
+  // CHT awareness during an actual emergency. Pure visual toggle — the
+  // round-gauge draws above still run so the eng-mon class can flip off
+  // mid-frame (e.g. fire ignites) without leaving stale pixels on screen.
+  {
+    const engineLive = !state.engineOut && state.fuel > 0;
+    const wantMon = !!state.engineMonitorOn && engineLive && !state.engineFire && state.selfTestT < 0;
+    cpEl.classList.toggle('eng-mon', wantMon);
+    if (wantMon) drawEngineMonitor();
+  }
   drawCockpitMag(magV, dt || 0);
   drawCockpitBrake(brkV);
   drawCockpitFuelFlow(ffOverride);
