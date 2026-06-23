@@ -1836,6 +1836,11 @@ function onCrash(){
   if (typeof state !== 'undefined'){
     state.tgStreak = 0;
     state.tgAirborneAfterTd = false;
+    // Crash also breaks the T&G Challenge chain. Best chain time stays on
+    // localStorage via the in-touchdown save when the 10th tap completes.
+    state.tngChain = 0;
+    state.tngAirborneAfterTd = false;
+    state.tngLastTdMs = 0;
     // Cross-session landing streak (consecutive good touchdowns without a
     // crash, any mode) also dies here. Lifetime peak already locked in via
     // the per-touchdown bump in the landing branch. Fire a quick toast so
@@ -7352,6 +7357,9 @@ function updateBalloons(dt){
 // and the active ring pulses green; later rings sit dim. On completion the
 // elapsed time is compared to the best stored in localStorage.
 const RING_KEY = 'flightsim.ring.v1';
+const TG_KEY = 'flightsim.tng.v1';
+const TNG_CHAIN_TARGET = 10;
+const TNG_REJOIN_WINDOW_MS = 8000; // gear must come up cleanly within 8s of touchdown
 const RING_RADIUS = 70;          // hole radius — generous, this is meant to be fun, not punishing
 const RING_TUBE = 4;             // torus tube thickness
 const RING_HIT_DEPTH = 18;       // how thick the trigger slab is along the ring's normal
@@ -7367,6 +7375,18 @@ try {
 } catch(e){ /* ignore corrupt prefs */ }
 function saveRingBest(){
   try { localStorage.setItem(RING_KEY, JSON.stringify({ bestMs: state.ringBestMs })); } catch(e){}
+}
+
+// Touch & Go Challenge persisted best chain time. 0 means "no best yet".
+try {
+  const raw = localStorage.getItem(TG_KEY);
+  if (raw){
+    const v = JSON.parse(raw);
+    if (typeof v.bestMs === 'number' && v.bestMs > 0) state.tngBestTimeMs = v.bestMs;
+  }
+} catch(e){ /* ignore corrupt prefs */ }
+function saveTngBest(){
+  try { localStorage.setItem(TG_KEY, JSON.stringify({ bestMs: state.tngBestTimeMs })); } catch(e){}
 }
 
 // Ring placement: a hand-tuned loop that starts off MAIN_AP's departure end,
@@ -10487,6 +10507,18 @@ const state = {
   tgStreak: 0,
   tgLastTdMs: 0,           // wall-clock ms of the most recent good touchdown
   tgAirborneAfterTd: false,// true once we lift off after the last touchdown
+  // Touch & Go Challenge mission chain — only ticks in state.mode === 'tng'.
+  // Stricter than tgStreak: the rotate-back-up must happen within 8s of the
+  // touchdown, otherwise the chain breaks (counts as a full-stop). Reaching
+  // TNG_CHAIN_TARGET fires the mission-complete fanfare and writes the run
+  // time to localStorage. tngBestTimeMs is loaded from storage at startup.
+  tngChain: 0,
+  tngChainStartMs: 0,      // wall-clock ms when the chain's first touchdown landed
+  tngChainElapsedMs: 0,    // latched run time once the chain completes
+  tngChainDone: false,     // true after the 10th touch-and-go fires the fanfare
+  tngLastTdMs: 0,          // wall-clock ms of the most recent counted T&G touchdown
+  tngAirborneAfterTd: false,// true once we lift off after the last counted touchdown
+  tngBestTimeMs: 0,        // persisted best chain time (ms); 0 = unset
   // Cross-session landing streak: counts every successful runway touchdown
   // without a crash in between, regardless of mode and regardless of
   // whether the pilot came to a full stop. Only crashes reset it (the
@@ -12061,6 +12093,14 @@ function updateLandCardRollout(){
     // has already captured this run's peak via the in-touchdown bump.
     state.tgStreak = 0;
     state.tgAirborneAfterTd = false;
+    // T&G Challenge chain dies on a full-stop too — the spec calls a stop
+    // "counts as a full-stop and breaks the chain". tngChainDone is left
+    // intact so a victory full-stop after the 10th tap doesn't undo the win.
+    if (!state.tngChainDone){
+      state.tngChain = 0;
+      state.tngAirborneAfterTd = false;
+      state.tngLastTdMs = 0;
+    }
     // Active-runway change suggestion: full-stop counts as "landed" so the
     // per-airport latch map clears — the next time the player gets airborne
     // again at this field the toast can re-fire if the wind still favours
@@ -12756,6 +12796,13 @@ function resetPlane(){
   state.tgStreak = 0;
   state.tgAirborneAfterTd = false;
   state.tgLastTdMs = 0;
+  // T&G Challenge chain is also per-run. Best chain time is in localStorage.
+  state.tngChain = 0;
+  state.tngAirborneAfterTd = false;
+  state.tngLastTdMs = 0;
+  state.tngChainStartMs = 0;
+  state.tngChainElapsedMs = 0;
+  state.tngChainDone = false;
   state.engineOut = false;
   state.refueling = false;
   state.repairing = false;
@@ -13142,6 +13189,16 @@ function startMission(mode){
   // Reset T&G stats per run so each session has its own scoreboard.
   if (mode === 'tng' || mode === 'hop' || mode === 'carrier'){
     state.scoreLast = null; state.scoreBest = 0; state.scoreTotal = 0; state.scoreCount = 0;
+  }
+  // Touch & Go Challenge: zero the chain at every mission start so picking
+  // T&G fresh from the menu always reads `T&G: 0/10` even mid-flight reruns.
+  if (mode === 'tng'){
+    state.tngChain = 0;
+    state.tngChainStartMs = 0;
+    state.tngChainElapsedMs = 0;
+    state.tngChainDone = false;
+    state.tngLastTdMs = 0;
+    state.tngAirborneAfterTd = false;
   }
   if (mode === 'hop'){
     // Start at MAIN_AP, then visit the other two in fixed order.
@@ -18524,6 +18581,36 @@ function step(dt){
         }
         state.tgLastTdMs = _tgNow;
         state.tgAirborneAfterTd = false;
+        // Touch & Go Challenge chain bookkeeping (tng mode only). Mirrors the
+        // tgStreak logic with a stricter 8s rotate-back-up window. The chain
+        // only ticks while the mission is in progress (tngChainDone latches
+        // on the 10th tap so a victory lap doesn't spam the counter). Once
+        // the chain hits TNG_CHAIN_TARGET we latch the elapsed time, save a
+        // new best to localStorage if applicable, and fire the mission
+        // fanfare. The chain itself breaks via the rollout / crash / reset
+        // sites that already nuke tgStreak, plus the 8s window check below.
+        if (state.mode === 'tng' && !state.tngChainDone){
+          if (state.tngChain > 0 && state.tngAirborneAfterTd && (_tgNow - state.tngLastTdMs) <= TNG_REJOIN_WINDOW_MS){
+            state.tngChain += 1;
+          } else {
+            state.tngChain = 1;
+            state.tngChainStartMs = _tgNow;
+          }
+          state.tngLastTdMs = _tgNow;
+          state.tngAirborneAfterTd = false;
+          if (state.tngChain >= TNG_CHAIN_TARGET){
+            state.tngChainDone = true;
+            state.tngChainElapsedMs = _tgNow - state.tngChainStartMs;
+            const beatBest = state.tngBestTimeMs === 0 || state.tngChainElapsedMs < state.tngBestTimeMs;
+            if (beatBest){
+              state.tngBestTimeMs = state.tngChainElapsedMs;
+              saveTngBest();
+            }
+            const subTxt = 'Touch & Go ×' + TNG_CHAIN_TARGET + ' · ' + fmtHopTime(state.tngChainElapsedMs)
+              + (beatBest && state.tngBestTimeMs > 0 ? ' · NEW BEST' : (state.tngBestTimeMs > 0 ? ' · best ' + fmtHopTime(state.tngBestTimeMs) : ''));
+            showMissionDone('MISSION COMPLETE', subTxt);
+          }
+        }
         // Cross-session landing streak — bumps on EVERY successful touchdown
         // (no 12s window, no "must lift off" gate). Resets only on crash.
         // Lifetime peak rides along in pilotStats.bestLandStreak so the
@@ -18923,6 +19010,10 @@ function step(dt){
     // count as a continued T&G. Idempotent — cleared in the touchdown block
     // when the streak ticks over.
     if (state.tgStreak > 0 && !state.tgAirborneAfterTd) state.tgAirborneAfterTd = true;
+    // Same flag, parallel chain: any liftoff after a counted T&G touchdown
+    // arms the chain for its next increment. Idempotent — the touchdown
+    // branch flips it back to false on the next wheels-down.
+    if (state.tngChain > 0 && !state.tngAirborneAfterTd) state.tngAirborneAfterTd = true;
   }
 
   // Wingtip vortex trails — fade in under high-G or near stall.
@@ -20155,8 +20246,27 @@ function step(dt){
   }
   if (state.mode === 'tng'){
     document.getElementById('msTgt').textContent = 'Any field';
-    document.getElementById('msLbl').textContent = 'Landings';
-    document.getElementById('msVal').textContent = state.scoreCount + ' · best +' + state.scoreBest;
+    // Mission HUD now shows the challenge chain alongside the legacy score
+    // count. While the chain is live it's the headline number; once the
+    // 10th tap completes, latch the final run time + best so the panel
+    // reads like a finished mission instead of waiting for the next td.
+    if (state.tngChainDone){
+      document.getElementById('msLbl').textContent = 'T&G DONE';
+      const bestTxt = state.tngBestTimeMs > 0 ? ' · best ' + fmtHopTime(state.tngBestTimeMs) : '';
+      document.getElementById('msVal').textContent = fmtHopTime(state.tngChainElapsedMs) + bestTxt;
+    } else {
+      // Live chain timer ticks once the first touchdown lands; before that
+      // we hold the readout dry so a fresh mission shows `0/10` with no clock.
+      const chainCnt = state.tngChain || 0;
+      const chainTxt = 'T&G ' + chainCnt + '/' + TNG_CHAIN_TARGET;
+      let timerTxt = '';
+      if (chainCnt > 0){
+        timerTxt = ' · ' + fmtHopTime(performance.now() - state.tngChainStartMs);
+      }
+      const bestTxt = state.tngBestTimeMs > 0 ? ' · best ' + fmtHopTime(state.tngBestTimeMs) : '';
+      document.getElementById('msLbl').textContent = 'Landings';
+      document.getElementById('msVal').textContent = state.scoreCount + ' · best +' + state.scoreBest + ' · ' + chainTxt + timerTxt + bestTxt;
+    }
   } else if (state.mode === 'hop'){
     if (state.hopDone){
       document.getElementById('msTgt').textContent = 'DONE · ' + fmtHopTime(state.hopElapsedMs);
@@ -28231,6 +28341,12 @@ updateCamModeUi();
     state.tgStreak = 0;
     state.tgAirborneAfterTd = false;
     state.tgLastTdMs = 0;
+    // T&G Challenge chain also dies on a teleport jump. The mode-gate in
+    // the jumpsel UI already keeps J out of scored missions, but being
+    // defensive keeps the chain honest if the gate ever changes.
+    state.tngChain = 0;
+    state.tngAirborneAfterTd = false;
+    state.tngLastTdMs = 0;
     state.stall = 0;
     state.vortex = 0;
     state.peakG = 0;
