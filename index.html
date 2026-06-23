@@ -402,6 +402,16 @@
   #photo .btn:hover { background:rgba(60,120,75,.95); }
   body.photo-mode { cursor:grab; }
   body.photo-mode.dragging { cursor:grabbing; }
+  /* Big centered countdown digit shown when the player triggers Shift+S in
+     photo mode. Pulses in with each tick so the count reads visually as
+     well as audibly. Hidden by default (display:none) and toggled per-tick
+     via inline style + the .pop class for the scale animation. Hidden in
+     the saved PNG via the savePhoto() overlay-hide sweep so the countdown
+     digit never shows up in the screenshot. */
+  #photoCount { position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); font-size:240px; font-weight:900; color:#7ee787; text-shadow:0 0 24px rgba(126,231,135,.65), 0 4px 0 rgba(0,0,0,.55); font-family:inherit; pointer-events:none; z-index:10; display:none; user-select:none; -webkit-user-select:none; line-height:1; opacity:0.95; }
+  #photoCount.show { display:block; }
+  @keyframes photoCountPop { 0% { transform:translate(-50%, -50%) scale(0.6); opacity:0; } 30% { transform:translate(-50%, -50%) scale(1.15); opacity:1; } 100% { transform:translate(-50%, -50%) scale(1.0); opacity:0.95; } }
+  #photoCount.pop { animation:photoCountPop 0.45s ease-out; }
   /* Cockpit instrument panel: three round analog gauges (ASI / Attitude / Altimeter)
      centered along the bottom. Only shown in cockpit cam (state.cam===1) so the
      view actually feels like sitting behind a panel. Drawn on small canvases so
@@ -687,8 +697,9 @@
 </div>
 <div id="photo">
   <div class="ttl">📸 PHOTO MODE</div>
-  <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save PNG · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span></div>
+  <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save · <kbd>Shift+S</kbd> 3-2-1 · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span></div>
 </div>
+<div id="photoCount">3</div>
 <div id="mctrl">
   <div id="mstick"><div class="knob" id="mknob"></div></div>
   <div id="mthr"><div class="lbl">THR</div><div class="fill" id="mthrfill"></div><div class="pct" id="mthrpct">0%</div></div>
@@ -7122,6 +7133,12 @@ const state = {
   photoYaw: 0,
   photoPitch: 0.25,
   photoDist: 22,
+  // Photo countdown (Shift+S): seconds remaining (3 → 2 → 1 → 0 fires save).
+  // photoCountLast tracks the last displayed integer so the per-tick chime
+  // + pop animation only fires once per second instead of every frame. Both
+  // reset to 0 on photo-mode exit so the countdown can't leak across sorties.
+  photoCountdown: 0,
+  photoCountLast: 0,
   // Pause menu: Esc mid-flight freezes the sim, opens an overlay with
   // Resume / Restart Mission / Back to Menu. While true the loop skips
   // step() and tickATC; autopilot and AI traffic naturally pause because
@@ -8649,6 +8666,28 @@ function playCalloutChime(){
   osc.connect(g).connect(ctx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.24);
+}
+// Photo-countdown tick chime: a soft, dry sine "tick" that fires once per
+// second during the Shift+S countdown. Final tick (count === 0 i.e. the
+// capture moment) is pitched a fifth higher and a touch louder so it reads
+// as the shutter cue instead of just another tick. Reuses sfxReady() so no
+// new hardware nodes; settings.volume controls master.
+function playPhotoTick(isFinal){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = (isFinal ? 0.26 : 0.18) * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(isFinal ? 1320 : 880, t0);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + (isFinal ? 0.18 : 0.09));
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + (isFinal ? 0.2 : 0.11));
 }
 // Mission-complete fanfare: a quick three-note ascending sine triad (C5-E5-G5,
 // roughly a major chord arpeggio) with a soft attack/release so it feels
@@ -15049,6 +15088,9 @@ function loop(now){
       // Throttle/control input is ignored, the prop also holds position so
       // the saved PNG isn't a motion-blurred disc.
       updatePhotoCamera(dt);
+      // Tick any active Shift+S countdown so it drains in real time even
+      // though the rest of the sim is frozen.
+      tickPhotoCountdown(dt);
     } else if (state.paused){
       // Pause menu: world is frozen. Idle the prop slowly so the cockpit
       // view doesn't look dead, keep the camera honoring its current mode,
@@ -15179,6 +15221,9 @@ function setPhotoMode(on){
     document.body.classList.remove('photo-mode');
     document.body.classList.remove('dragging');
     photoDragId = -1;
+    // Cancel any in-progress Shift+S countdown so the digit doesn't linger
+    // across the exit and so the next entry doesn't inherit stale state.
+    cancelPhotoCountdown();
   }
 }
 function updatePhotoCamera(/*dt*/){
@@ -15204,9 +15249,19 @@ function savePhoto(){
   // set on the renderer so the just-rendered framebuffer is still readable.
   const overlayWasShown = photoEl && photoEl.classList.contains('show');
   if (overlayWasShown) photoEl.classList.remove('show');
+  // Also hide the countdown digit overlay so the final "0" frame (or any
+  // mid-countdown manual save) doesn't bake the digit into the PNG.
+  const countEl = document.getElementById('photoCount');
+  const countWasShown = countEl && countEl.classList.contains('show');
+  if (countWasShown){ countEl.classList.remove('show'); countEl.classList.remove('pop'); }
   // Render immediately so the frame matches the hidden-overlay state.
   renderer.render(scene, camera);
-  const finish = () => { if (overlayWasShown) photoEl.classList.add('show'); };
+  const finish = () => {
+    if (overlayWasShown) photoEl.classList.add('show');
+    // Don't restore the countdown digit — the countdown is finished by the
+    // time savePhoto() fires from the tick path, and a manual S press should
+    // also cancel any active countdown (handled in the keydown path).
+  };
   try {
     canvas.toBlob(blob => {
       finish();
@@ -15224,6 +15279,66 @@ function savePhoto(){
     }, 'image/png');
   } catch (e){
     finish();
+  }
+}
+// Photo countdown (Shift+S): kicks off a 3-2-1 visible countdown then fires
+// savePhoto() on hitting zero. The orbit camera, drag/wheel input, and
+// settings panel all stay live during the countdown so the player can keep
+// nudging the frame; a plain S press during the countdown captures
+// immediately (cancelling the countdown). Esc / P / exiting photo mode all
+// cancel via cancelPhotoCountdown(). Repeating Shift+S while a countdown is
+// already running just resets it back to 3 — simpler than wiring a separate
+// cancel keybind on the same shortcut.
+function startPhotoCountdown(){
+  if (!state.photoMode) return;
+  state.photoCountdown = 3.0;
+  state.photoCountLast = 3;
+  const el = document.getElementById('photoCount');
+  if (el){
+    el.textContent = '3';
+    el.classList.add('show');
+    // Re-trigger the pop animation by stripping + re-adding the class on the
+    // next frame; without the rAF the browser merges the toggle into a single
+    // style commit and the animation doesn't restart.
+    el.classList.remove('pop');
+    requestAnimationFrame(() => { if (el) el.classList.add('pop'); });
+  }
+  playPhotoTick(false);
+}
+function cancelPhotoCountdown(){
+  state.photoCountdown = 0;
+  state.photoCountLast = 0;
+  const el = document.getElementById('photoCount');
+  if (el){ el.classList.remove('show'); el.classList.remove('pop'); }
+}
+function tickPhotoCountdown(dt){
+  // Drains the countdown timer once per frame while in photo mode. On each
+  // integer-second crossing, swaps the visible digit and fires playPhotoTick
+  // so the count reads both visually and audibly. On reaching zero, hides
+  // the digit and triggers savePhoto() (which already hides #photoCount in
+  // its overlay-hide sweep so the digit never bakes into the PNG).
+  if (!(state.photoCountdown > 0)) return;
+  state.photoCountdown = Math.max(0, state.photoCountdown - dt);
+  const remaining = Math.ceil(state.photoCountdown);
+  if (state.photoCountdown <= 0){
+    // Capture: 0 frame fires the save and clears the digit.
+    const el = document.getElementById('photoCount');
+    if (el){ el.classList.remove('show'); el.classList.remove('pop'); }
+    state.photoCountLast = 0;
+    playPhotoTick(true);
+    savePhoto();
+    return;
+  }
+  if (remaining !== state.photoCountLast && remaining >= 1){
+    state.photoCountLast = remaining;
+    const el = document.getElementById('photoCount');
+    if (el){
+      el.textContent = String(remaining);
+      el.classList.add('show');
+      el.classList.remove('pop');
+      requestAnimationFrame(() => { if (el) el.classList.add('pop'); });
+    }
+    playPhotoTick(false);
   }
 }
 // Mouse + touch drag to orbit. Pointer Events cover both, capturing the
@@ -15269,14 +15384,30 @@ canvas.addEventListener('wheel', e => {
 // Save button on the overlay.
 const photoSaveBtn = document.getElementById('photoSave');
 if (photoSaveBtn){
-  photoSaveBtn.addEventListener('click', e => { e.stopPropagation(); savePhoto(); });
+  photoSaveBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    // Shift+click on SAVE mirrors the Shift+S hotkey so mobile / mouse users
+    // get the same countdown affordance without needing to find the keyboard.
+    if (e.shiftKey) startPhotoCountdown(); else savePhoto();
+  });
 }
-// S = save (only when in photo mode — S is throttle otherwise). Esc also exits.
+// S = save (only when in photo mode — S is throttle otherwise). Shift+S
+// starts a 3-2-1 countdown so the player can frame an orbit drag without the
+// keypress nudging the camera at capture time. Esc also exits.
 addEventListener('keydown', e => {
   if (!state.photoMode) return;
   if (e.repeat) return;
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-  if (e.code === 'KeyS'){ e.preventDefault(); savePhoto(); }
+  if (e.code === 'KeyS' && e.shiftKey){
+    e.preventDefault();
+    startPhotoCountdown();
+  } else if (e.code === 'KeyS'){
+    e.preventDefault();
+    // Plain S during an active countdown captures immediately and clears the
+    // digit so the player has a manual override if they want to bail early.
+    if (state.photoCountdown > 0) cancelPhotoCountdown();
+    savePhoto();
+  }
   else if (e.code === 'Escape'){ e.preventDefault(); setPhotoMode(false); }
 });
 
