@@ -7208,6 +7208,18 @@ const BIRD_ORBIT_RADIUS = 220;     // m, lazy circle around the flock centre
 const BIRD_VIEW_DIST = 4500;       // m — beyond this the flock is hidden
 const BIRD_OFFSET_FROM_AP = 900;   // m, push centre off to the side of the runway
 const BIRD_AGL = 60;               // m above the airport's elevation
+// Spook reaction: when the plane buzzes a flock at speed, the birds scatter
+// perpendicular to the player's heading with a small vertical pulse, hold
+// the panic vector for a few seconds, then drift back to calm formation.
+// Pure visual layer — no new mesh, no collision math change, just an offset
+// added on top of the lazy-orbit position each frame.
+const BIRD_SPOOK_RADIUS = 50;      // m — flock starts panicking inside this ring
+const BIRD_SPOOK_SPEED_KMH = 80;   // km/h — plane must be moving this fast to spook
+const BIRD_SPOOK_COOLDOWN_MS = 2000; // one spook per flock per 2s so a slow circle doesn't re-trigger
+const BIRD_SPOOK_HOLD_S = 3.0;     // seconds the panic vector is held before drifting back
+const BIRD_SPOOK_LERP_S = 0.6;     // seconds to ramp panic offset in/out (matches return time too)
+const BIRD_SPOOK_DIST_MAX = 26;    // m — peak panic offset away from the calm orbit
+const BIRD_SPOOK_VERT_MAX = 8;     // m — peak vertical pulse on the panic vector
 const birdMatBody = new THREE.MeshLambertMaterial({ color: 0x222428 });
 const birdFlocks = [];
 function makeBird(){
@@ -7254,18 +7266,56 @@ for (let ai = 0; ai < AIRPORTS.length; ai++){
       phaseFlap:  i * 0.6 + ai * 1.3,
       // Slight per-bird radius/altitude jitter so the flock isn't a perfect ring.
       rJitter: 0.85 + (i * 0.07) % 0.3,
-      yJitter: ((i * 13.7) % 9) - 4.5
+      yJitter: ((i * 13.7) % 9) - 4.5,
+      // Spook state — panic vector + ramp/hold/return phase. Re-rolled each
+      // time the flock is spooked (see triggerFlockSpook). spookT runs 0..1
+      // (rolling spool from triggerFlockSpook into the calm formation
+      // again), pVx/pVy/pVz are the panic offset target in metres, and the
+      // overall flock spookPhase / spookEndsAt timers in the flock entry
+      // drive how spookT eases up to full and back to zero.
+      pVx: 0, pVy: 0, pVz: 0,
+      spookT: 0
     });
   }
   scene.add(group);
   // lastWarnMs latches the per-flock proximity ATC call so a slow circle
   // through a flock can't spam the strip. tickBirdProximity() clears these
   // back to -Infinity on resetPlane() so each fresh sortie re-arms.
-  birdFlocks.push({ centre, birds, group, ap: a, lastWarnMs: -Infinity });
+  // lastSpookMs / spookActive / spookEndsAt drive the panic reaction —
+  // similarly debounced and reset in resetPlane() so a fresh sortie can
+  // spook the flock again.
+  birdFlocks.push({
+    centre, birds, group, ap: a,
+    lastWarnMs: -Infinity,
+    lastSpookMs: -Infinity,
+    spookActive: false,
+    spookEndsAt: 0,
+    spookReturnUntil: 0
+  });
 }
 function updateBirds(dt){
   if (dt <= 0) return;
   const tNow = performance.now() * 0.001;
+  const nowMs = performance.now();
+  // Plane horizontal speed (km/h) and forward unit vector — used by the spook
+  // reaction below. Compute once per call so we don't repeat the work per bird.
+  const planeSpdKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+  let planeFx = 0, planeFz = -1;
+  const _vlen = Math.hypot(state.vel.x, state.vel.z);
+  if (_vlen > 1e-3){
+    planeFx = state.vel.x / _vlen;
+    planeFz = state.vel.z / _vlen;
+  } else {
+    // Falling back to nose vector when velocity is near zero (e.g. just lifted
+    // off and barely moving) so a buzz-job at idle speed still spooks correctly.
+    try {
+      const _f = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+      const _h = Math.hypot(_f.x, _f.z);
+      if (_h > 1e-3){ planeFx = _f.x / _h; planeFz = _f.z / _h; }
+    } catch(e){}
+  }
+  const liveSpook = !state.crashed && !state.paused && !state.replayActive
+                    && !state.photoMode && !state.introOpen;
   for (const flock of birdFlocks){
     // Cull whole flock when the player is far away.
     const distH = Math.hypot(
@@ -7276,22 +7326,90 @@ function updateBirds(dt){
     flock.group.visible = true;
     // Orbit speed = constant ground speed around BIRD_ORBIT_RADIUS.
     const omega = BIRD_SPEED / BIRD_ORBIT_RADIUS;
+    // Per-flock spook lifecycle: if a fast-moving plane crosses inside the
+    // spook radius and the cooldown has expired, panic the flock. The panic
+    // vector is roughly perpendicular to the plane's heading with a small
+    // randomised vertical pulse so the silhouette breaks apart visually.
+    if (liveSpook && !flock.spookActive
+        && planeSpdKmh > BIRD_SPOOK_SPEED_KMH
+        && nowMs - flock.lastSpookMs > BIRD_SPOOK_COOLDOWN_MS){
+      // Quick centre-distance test first so we don't bother with the per-bird
+      // checks for far flocks that are already in view but well clear.
+      const dCentre2 = (flock.centre.x - plane.position.x) * (flock.centre.x - plane.position.x)
+                     + (flock.centre.z - plane.position.z) * (flock.centre.z - plane.position.z);
+      const spookRange = BIRD_SPOOK_RADIUS + BIRD_ORBIT_RADIUS;
+      if (dCentre2 < spookRange * spookRange){
+        // Per-bird check: spook fires if any individual bird is inside the
+        // 50 m ring. Reuses the orbit position we'd compute below.
+        let triggered = false;
+        for (const b of flock.birds){
+          const ang = b.phaseOrbit + tNow * omega;
+          const r = BIRD_ORBIT_RADIUS * b.rJitter;
+          const bx = flock.centre.x + Math.cos(ang) * r;
+          const bz = flock.centre.z + Math.sin(ang) * r;
+          const by = flock.centre.y + b.yJitter + Math.sin(tNow * 0.6 + b.phaseFlap) * 1.5;
+          const dxh = bx - plane.position.x;
+          const dyh = by - plane.position.y;
+          const dzh = bz - plane.position.z;
+          const d2 = dxh*dxh + dyh*dyh + dzh*dzh;
+          if (d2 < BIRD_SPOOK_RADIUS * BIRD_SPOOK_RADIUS){ triggered = true; break; }
+        }
+        if (triggered) triggerFlockSpook(flock, nowMs, planeFx, planeFz);
+      }
+    }
+    // Spool the spookT envelope forward: ramp 0→1 over the lerp window, hold
+    // at 1 until spookEndsAt, then ease back to 0 over the return window.
+    const spookStartedAt = flock.spookEndsAt - BIRD_SPOOK_HOLD_S * 1000;
+    const tSinceStart = (nowMs - spookStartedAt) / 1000;
+    let envelope = 0;
+    if (flock.spookActive){
+      if (nowMs >= flock.spookEndsAt){
+        // Hold time elapsed — transition into the return ramp.
+        flock.spookActive = false;
+        flock.spookReturnUntil = nowMs + BIRD_SPOOK_LERP_S * 1000;
+        envelope = 1;
+      } else if (tSinceStart < BIRD_SPOOK_LERP_S){
+        envelope = Math.max(0, Math.min(1, tSinceStart / BIRD_SPOOK_LERP_S));
+      } else {
+        envelope = 1;
+      }
+    } else if (nowMs < flock.spookReturnUntil){
+      const remaining = (flock.spookReturnUntil - nowMs) / 1000;
+      envelope = Math.max(0, Math.min(1, remaining / BIRD_SPOOK_LERP_S));
+    }
     for (const b of flock.birds){
       const ang = b.phaseOrbit + tNow * omega;
       const r = BIRD_ORBIT_RADIUS * b.rJitter;
-      const x = flock.centre.x + Math.cos(ang) * r;
-      const z = flock.centre.z + Math.sin(ang) * r;
+      const x0 = flock.centre.x + Math.cos(ang) * r;
+      const z0 = flock.centre.z + Math.sin(ang) * r;
       // Gentle vertical bob so the flock isn't on a perfect plane.
-      const y = flock.centre.y + b.yJitter + Math.sin(tNow * 0.6 + b.phaseFlap) * 1.5;
+      const y0 = flock.centre.y + b.yJitter + Math.sin(tNow * 0.6 + b.phaseFlap) * 1.5;
+      // Spook offset: lerp the per-bird panic vector in via the flock envelope.
+      const x = x0 + b.pVx * envelope;
+      const y = y0 + b.pVy * envelope;
+      const z = z0 + b.pVz * envelope;
       b.mesh.position.set(x, y, z);
       // Heading = tangent to the orbit. Tangent of (cos,sin) is (-sin,cos);
       // convert to a yaw angle for rotation.Y. atan2(dx, -dz) keeps the same
-      // 0 = north convention used elsewhere in this file.
+      // 0 = north convention used elsewhere in this file. When panicking, blend
+      // the orbit heading toward the panic-vector heading so the silhouette
+      // visibly faces its escape direction instead of swimming sideways.
       const tx = -Math.sin(ang);
       const tz =  Math.cos(ang);
-      b.mesh.rotation.set(0, Math.atan2(tx, -tz), 0);
-      // Flap: wings rotate symmetrically on the body-local Z axis.
-      const flap = Math.sin(tNow * BIRD_FLAP_HZ * Math.PI * 2 + b.phaseFlap) * 0.55;
+      let yawCalm = Math.atan2(tx, -tz);
+      let yaw = yawCalm;
+      if (envelope > 0.01){
+        const yawPanic = Math.atan2(b.pVx, -b.pVz);
+        // Shortest-angle blend so we don't spin the long way around.
+        let dY = yawPanic - yawCalm;
+        while (dY >  Math.PI) dY -= Math.PI * 2;
+        while (dY < -Math.PI) dY += Math.PI * 2;
+        yaw = yawCalm + dY * envelope;
+      }
+      b.mesh.rotation.set(0, yaw, 0);
+      // Flap rate: panic flaps faster so the wings clearly look alarmed.
+      const flapHz = BIRD_FLAP_HZ + envelope * 4.2;
+      const flap = Math.sin(tNow * flapHz * Math.PI * 2 + b.phaseFlap) * 0.55;
       b.mesh.userData.wingL.rotation.z = -flap;
       b.mesh.userData.wingR.rotation.z =  flap;
       // Bird-strike collision: cheap squared-distance check against the plane.
@@ -7307,6 +7425,90 @@ function updateBirds(dt){
       }
     }
   }
+}
+
+// Pick a fresh panic vector for every bird in this flock and arm the spook
+// envelope. The escape direction is roughly perpendicular to the player's
+// heading (a randomly picked side, weighted slightly toward the side each
+// bird is already on so the flock visibly fans rather than collapses), with
+// a small vertical pulse. Also fires a soft chirp SFX so the spook reads
+// audibly as well as visually — debounced via flock.lastSpookMs so a slow
+// circle-back can't loop the chirp.
+function triggerFlockSpook(flock, nowMs, planeFx, planeFz){
+  flock.spookActive = true;
+  flock.spookEndsAt = nowMs + BIRD_SPOOK_HOLD_S * 1000;
+  flock.lastSpookMs = nowMs;
+  // Perpendiculars to the plane's horizontal heading. With (x east, z south),
+  // the pilot's right is (-fz, fx) and the pilot's left is (fz, -fx).
+  const rx = -planeFz, rz = planeFx;
+  // Randomise a primary side for the flock so successive spooks fan different
+  // ways instead of always scattering identically. Each bird then nudges its
+  // own vector slightly off the primary so the flock doesn't collapse into a
+  // single direction.
+  const primarySide = Math.random() < 0.5 ? -1 : 1;
+  for (const b of flock.birds){
+    // Per-bird side bias: pick the side this bird is already on relative to
+    // the orbit centre so panic naturally pushes outward, then jitter so
+    // adjacent birds don't pile up.
+    const sideBias = (Math.random() < 0.7 ? primarySide : -primarySide);
+    const horizScale = 0.7 + Math.random() * 0.6;       // 0.7..1.3
+    const lateralBias = (Math.random() - 0.5) * 0.4;    // small forward/back jitter
+    const px = (rx * sideBias + planeFx * lateralBias) * BIRD_SPOOK_DIST_MAX * horizScale;
+    const pz = (rz * sideBias + planeFz * lateralBias) * BIRD_SPOOK_DIST_MAX * horizScale;
+    // Vertical pulse: bias upward (birds tend to climb to dodge) but allow
+    // ~30% of birds to dive a little so the flock breaks apart on the y-axis
+    // instead of forming a single rising line.
+    const upBias = Math.random() < 0.7 ? 1 : -0.4;
+    const py = BIRD_SPOOK_VERT_MAX * (0.4 + Math.random() * 0.6) * upBias;
+    b.pVx = px;
+    b.pVy = py;
+    b.pVz = pz;
+    b.spookT = 0;
+  }
+  playBirdSpookChirp();
+}
+
+// Bird-spook chirp: short bandpassed-noise burst layered with a tiny sine
+// chirp so the flock's panic reads audibly. Reuses sfxReady() so no extra
+// audio nodes pile up across spooks. Volume scales with settings.volume.
+function playBirdSpookChirp(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const vol = 0.32 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  // Noise burst: ~140ms of band-passed white noise centred around ~2.4 kHz.
+  const dur = 0.16;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++){
+    const env = 1 - i / data.length;
+    data[i] = (Math.random() * 2 - 1) * env;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2400;
+  bp.Q.value = 5;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(vol, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Tiny sine chirp on top so the burst has a hint of pitch rather than
+  // sounding like pure static — sweeps 1800Hz → 2600Hz over the same window.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(1800, t0);
+  osc.frequency.exponentialRampToValueAtTime(2600, t0 + dur);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(vol * 0.5, t0);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
 }
 
 // ====== BIRD STRIKES ======
@@ -13902,8 +14104,23 @@ function resetPlane(){
   state.tcasResolvedAt = 0;
   // Bird-proximity warning — re-arm every flock's per-sortie latch so the
   // first close pass on a new flight gets a fresh "BIRDS, BIRDS" call.
+  // Also wipes the spook reaction so a fresh sortie can re-spook the flocks
+  // and the panic offset doesn't linger from a previous run.
   if (typeof birdFlocks !== 'undefined' && Array.isArray(birdFlocks)){
-    for (let i = 0; i < birdFlocks.length; i++) birdFlocks[i].lastWarnMs = -Infinity;
+    for (let i = 0; i < birdFlocks.length; i++){
+      const _fk = birdFlocks[i];
+      _fk.lastWarnMs = -Infinity;
+      _fk.lastSpookMs = -Infinity;
+      _fk.spookActive = false;
+      _fk.spookEndsAt = 0;
+      _fk.spookReturnUntil = 0;
+      if (Array.isArray(_fk.birds)){
+        for (let j = 0; j < _fk.birds.length; j++){
+          const _bd = _fk.birds[j];
+          _bd.pVx = 0; _bd.pVy = 0; _bd.pVz = 0; _bd.spookT = 0;
+        }
+      }
+    }
   }
   // Go-around latch — fresh sortie clears it so the first missed approach of
   // the new flight can still fire its toast + ATC call.
