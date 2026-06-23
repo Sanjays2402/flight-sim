@@ -914,7 +914,7 @@
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
-  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span><span id="fuelStarved" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700" title="Tank nearly dry — engine is surging on the dregs">⚠ FUEL STARVED</span></span></div>
+  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span><span id="fuelSelPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700" title="Fuel tank selector — Shift+Y cycles BOTH / LEFT / RIGHT">SEL: <span id="fuelSelPillT">BOTH</span></span><span id="fuelImbPill" style="display:none;margin-left:6px;color:#ffb020;font-weight:700" title="Left and right tanks are more than 15% apart — switch selector to even them out">⛽ IMBALANCE</span><span id="fuelStarved" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700" title="Tank nearly dry — engine is surging on the dregs">⚠ FUEL STARVED</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
   <div class="row" id="emrRow" style="display:none"><span class="lbl">EMR</span><span class="val" id="emrReadout" style="color:#ff6cf7;font-weight:700">—</span></div>
@@ -1023,7 +1023,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1041,6 +1041,7 @@
   <div class="gauge"><canvas id="cpSkid" width="220" height="220" title="Inclinometer — step on the ball for coordinated flight"></canvas><div class="glbl">SLIP / SKID</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
+  <div class="gauge"><canvas id="cpFuel" width="220" height="220" title="Fuel quantity — left wing (green) + right wing (cyan) tanks · Shift+Y cycles fuel selector BOTH / LEFT / RIGHT"></canvas><div class="glbl">FUEL QTY L/R</div></div>
   <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
   <div class="gauge"><canvas id="cpVor" width="220" height="220" title="Click around the dial to set OBS course · Right-click to center on current bearing"></canvas><div class="glbl">VOR / CDI</div></div>
   <div class="gauge"><canvas id="cpDa"  width="220" height="220" title="Pressure altitude vs density altitude · amber over +2000ft DA, red over +4000ft"></canvas><div class="glbl">DENSITY ALT ft</div></div>
@@ -1494,7 +1495,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH' };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1606,6 +1607,7 @@ try {
     if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
     if (typeof saved.copilot === 'boolean') settings.copilot = saved.copilot;
     if (typeof saved.speedUnit === 'string' && SPEED_UNIT_IDS.indexOf(saved.speedUnit) !== -1) settings.speedUnit = saved.speedUnit;
+    if (typeof saved.fuelSelector === 'string' && ['BOTH','LEFT','RIGHT'].indexOf(saved.fuelSelector) !== -1) settings.fuelSelector = saved.fuelSelector;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -10300,6 +10302,27 @@ const state = {
   // Fuel 0..1. Burns proportional to throttle. When it hits zero or pilot
   // kills the engine with X, thrust stops and the prop windmills — deadstick.
   fuel: 1,
+  // Per-tank fuel (left wing, right wing) 0..0.5 — each wing holds half
+  // the total tank, so fuelL + fuelR = state.fuel (0..1) by construction.
+  // The engine path still reads `state.fuel` (the sum of the two) so every
+  // existing fuel system — burn rate, low/critical ATC, misfire, surge,
+  // bingo divert, range ring, refuel — stays driven by one number and the
+  // burn rate is unchanged. The L/R numbers exist so the cockpit cpFuel
+  // gauge can show twin needles and the selector below can bias which tank
+  // the burn drains. `fuelSelector` is a pilot setting (mirrors carbHeatOn
+  // / mixture) so a hot reset keeps the lever where the pilot put it;
+  // settings.fuelSelector also rides across reloads. `fuelTankT` is a
+  // per-flight seconds ticker that BOTH-mode reads to alternate the
+  // *primary* drain tank every ~3 minutes (60/40 split), which is what
+  // produces the mild crossfeed-style imbalance over a long cruise.
+  // `fuelImbalanceAtcLatch` fires the one-shot "fuel imbalance, check
+  // selector" call the first frame the two tanks slide more than 15% (of
+  // each tank's own capacity) apart.
+  fuelL: 0.5,
+  fuelR: 0.5,
+  fuelSelector: (settings && settings.fuelSelector) || 'BOTH',
+  fuelTankT: 0,
+  fuelImbalanceAtcLatch: false,
   engineOut: false,
   // Cold start ritual (settings.coldStart). When true, throttle is locked at
   // 0 and the engine produces no thrust until the player taps `I` (or the
@@ -11862,7 +11885,7 @@ addEventListener('keydown', e=>{
     if (state.jumpOpen) return;
     setPhotoMode(!state.photoMode);
   }
-  if (e.code==='KeyY'){
+  if (e.code==='KeyY' && !e.shiftKey){
     // Aerobatic ribbon trail toggle. Pure flavor — a colored smoke streak in
     // the current livery accent color, great for loops/rolls and screenshots.
     // Off by default so normal cruise flights stay clean.
@@ -11870,6 +11893,23 @@ addEventListener('keydown', e=>{
     state.ribbonOn = !state.ribbonOn;
     if (!state.ribbonOn) clearRibbon();
     showStatus('RIBBON ' + (state.ribbonOn ? 'ON' : 'OFF'), null, state.ribbonOn ? 'good' : 'hard');
+  }
+  if (e.code==='KeyY' && e.shiftKey){
+    // Fuel tank selector. Cycles BOTH → LEFT → RIGHT → BOTH so a pilot can
+    // bias which wing the engine is drawing from on a long cruise to even
+    // out an imbalance, or in an emergency to draw the good tank when the
+    // other is leaking. Same lever lives in the cockpit cpFuel gauge
+    // readout, in the HUD FUEL row's SEL: pill, and persists to settings
+    // (mirrors carbHeat / cowlFlaps).
+    if (state.introOpen) return;
+    e.preventDefault();
+    const cycle = { BOTH:'LEFT', LEFT:'RIGHT', RIGHT:'BOTH' };
+    const cur = state.fuelSelector || 'BOTH';
+    const next = cycle[cur] || 'BOTH';
+    state.fuelSelector = next;
+    settings.fuelSelector = next;
+    saveSettings();
+    showStatus('FUEL SELECTOR ' + next, null, next === 'BOTH' ? 'good' : 'hard');
   }
   if (e.code==='Backquote'){
     // Airshow smoke toggle. Permanent puffy plume in the livery accent color.
@@ -13121,6 +13161,19 @@ function resetPlane(){
   state.landed = false;
   state.damage = 0;
   state.fuel = 1;
+  // Per-tank quantities + the BOTH-mode alternation ticker both reset on
+  // every fresh sortie so a hot-restart pours a fresh top-off into both
+  // wings. Each wing holds half the total (0..0.5) so the sum reads 1.0.
+  // The selector lever itself (state.fuelSelector) is intentionally
+  // preserved — it's a pilot setting that mirrors carbHeatOn / mixture, so
+  // a pilot who flew the last leg on LEFT keeps the lever on LEFT for the
+  // next leg. settings.fuelSelector also rides across reloads. The ATC
+  // imbalance latch re-arms so the next imbalance event in this flight gets
+  // a fresh nudge.
+  state.fuelL = 0.5;
+  state.fuelR = 0.5;
+  state.fuelTankT = 0;
+  state.fuelImbalanceAtcLatch = false;
   // Touch-and-go streak is per-run — a full reset wipes it. Lifetime peak
   // is already preserved in pilotStats.bestTgStreak.
   state.tgStreak = 0;
@@ -18442,7 +18495,60 @@ function step(dt){
         mixFuelMul *= 1 + MIX_FUEL_RICH_PENALTY * altT * Math.min(1, overRichF / (1.0 - 0.40));
       }
     }
-    state.fuel = Math.max(0, state.fuel - state.throttle * FUEL_BURN_RATE * mixFuelMul * dt);
+    state.fuelTankT = (state.fuelTankT || 0) + dt;
+    const burnDelta = state.throttle * FUEL_BURN_RATE * mixFuelMul * dt;
+    if (burnDelta > 0){
+      // Distribute the same total burn across the two wing tanks per
+      // selector. Each tank holds half the total (0..0.5) so the engine's
+      // overall burn rate is unchanged — we're only deciding which wing
+      // the fuel comes out of. Each tank clamps at 0 so a selector parked
+      // on an empty side just stops drawing from it; any leftover bleed
+      // rolls onto the other tank so the engine doesn't starve while there's
+      // fuel in the wing next to it (mirrors a real selector falling
+      // through to BOTH when one side runs dry).
+      const _drawFrom = (tankKey, amt) => {
+        const have = state[tankKey];
+        const take = Math.min(have, amt);
+        state[tankKey] = Math.max(0, have - take);
+        return amt - take; // leftover that couldn't be drawn from this tank
+      };
+      let leftover = 0;
+      const sel = state.fuelSelector || 'BOTH';
+      if (sel === 'LEFT'){
+        leftover = _drawFrom('fuelL', burnDelta);
+        if (leftover > 0) leftover = _drawFrom('fuelR', leftover);
+      } else if (sel === 'RIGHT'){
+        leftover = _drawFrom('fuelR', burnDelta);
+        if (leftover > 0) leftover = _drawFrom('fuelL', leftover);
+      } else {
+        // BOTH: alternate the primary tank every ~3 min with a 60/40 split so
+        // a mild crossfeed imbalance builds up across a long cruise. The
+        // pilot can level them back out with the LEFT/RIGHT selector if it
+        // bothers them.
+        const TANK_ALTERNATE_S = 180;
+        const primaryIsLeft = (Math.floor((state.fuelTankT || 0) / TANK_ALTERNATE_S) % 2) === 0;
+        const primaryKey = primaryIsLeft ? 'fuelL' : 'fuelR';
+        const secondaryKey = primaryIsLeft ? 'fuelR' : 'fuelL';
+        const PRIMARY_SHARE = 0.60;
+        let leftoverP = _drawFrom(primaryKey, burnDelta * PRIMARY_SHARE);
+        let leftoverS = _drawFrom(secondaryKey, burnDelta * (1 - PRIMARY_SHARE));
+        // Carry any leftover from the dry side back onto the other tank so
+        // the engine keeps drawing fuel as long as one tank has some.
+        if (leftoverP > 0) leftoverS += _drawFrom(secondaryKey, leftoverP);
+        if (leftoverS > 0) leftoverP = _drawFrom(primaryKey, leftoverS);
+        leftover = leftoverP + leftoverS;
+      }
+      // The leftover (if any) is fuel the engine wanted but couldn't get —
+      // both tanks were dry. We've already drained everything available, so
+      // there's nothing more to do here; the engineOut branch below trips on
+      // the recomputed state.fuel.
+    }
+    // Total fuel is the sum of the two tanks (each 0..0.5, sum 0..1) so the
+    // existing systems (HUD %, ATC nudges, misfire ramp, surge threshold,
+    // bingo divert, time-to-empty, range ring) keep reading one number and
+    // the burn rate is unchanged. Each tank starts at 0.5 so the sum is
+    // 1.0 — same total tank size the old single-fuel build had.
+    state.fuel = state.fuelL + state.fuelR;
     if (state.fuel <= 0 && !state.engineOut){
       state.engineOut = true;
       state.throttle = 0;
@@ -18673,7 +18779,17 @@ function step(dt){
     if (onApron){
       const REFUEL_RATE = 1 / 30; // empty → full in ~30s
       if (state.fuel < 1){
-        state.fuel = Math.min(1, state.fuel + REFUEL_RATE * dt);
+        // Refuel splashes both wing tanks equally (one truck, two filler
+        // caps) so the imbalance pill self-clears on a pit stop. Each tank
+        // ticks toward its 0.5 cap independently and state.fuel re-derives
+        // from the sum below, so HUD %, T/E, range ring and ATC nudges all
+        // wake up on a refill. The combined fill rate matches the old
+        // single-tank rate (REFUEL_RATE * dt total = 0.5 * REFUEL_RATE * dt
+        // per tank).
+        const _refuelPerTank = 0.5 * REFUEL_RATE * dt;
+        state.fuelL = Math.min(0.5, (state.fuelL || 0) + _refuelPerTank);
+        state.fuelR = Math.min(0.5, (state.fuelR || 0) + _refuelPerTank);
+        state.fuel = Math.min(1, state.fuelL + state.fuelR);
         state.refueling = true;
       }
       // Same rate for the airframe — 100% damage bleeds out in ~30s parked.
@@ -20397,6 +20513,63 @@ function step(dt){
       const tMix = mixtureTargetForAlt(plane.position.y);
       const off = Math.abs((state.mixture || 0) - tMix);
       mixPillEl.style.color = (off >= MIX_HUD_BAD_THRESH) ? '#ff9e3d' : '#7ee787';
+    }
+  }
+  // Fuel selector pill — only shows when the selector is off BOTH (the
+  // default state stays clean so the FUEL row doesn't get noisier for
+  // pilots who never touch the lever). LEFT / RIGHT also tints the pill
+  // green / cyan to match the gauge needles. Hidden in photo mode so saved
+  // PNGs stay clean.
+  const fuelSelPillEl = document.getElementById('fuelSelPill');
+  const fuelSelPillTEl = document.getElementById('fuelSelPillT');
+  if (fuelSelPillEl && fuelSelPillTEl){
+    const sel = state.fuelSelector || 'BOTH';
+    const showSel = !state.photoMode && sel !== 'BOTH';
+    fuelSelPillEl.style.display = showSel ? 'inline' : 'none';
+    if (showSel){
+      fuelSelPillTEl.textContent = sel;
+      fuelSelPillEl.style.color = sel === 'LEFT' ? '#7ee787' : '#6ad8ff';
+    }
+  }
+  // Fuel imbalance pill — amber when the two wing tanks drift more than
+  // 15 percentage points apart (on the 0..100% per-tank gauge scale; each
+  // raw tank stores 0..0.5, so multiply by 2 for the displayed percent).
+  // In the real airframe this matters because uneven fuel = uneven roll
+  // trim, so the player has a real reason to alternate the selector on a
+  // long cruise instead of leaving it on BOTH. Hidden in photo mode,
+  // suppressed once both tanks are empty (no point showing it when you're
+  // deadstick anyway).
+  const fuelImbPillEl = document.getElementById('fuelImbPill');
+  if (fuelImbPillEl){
+    const lPct = Math.round((state.fuelL || 0) * 200);
+    const rPct = Math.round((state.fuelR || 0) * 200);
+    const diff = Math.abs(lPct - rPct);
+    const _fuelLeft = (state.fuelL + state.fuelR) > 0.02;
+    const showImb = !state.photoMode && _fuelLeft && diff > 15;
+    fuelImbPillEl.style.display = showImb ? 'inline' : 'none';
+  }
+  // One-shot ATC nudge the first frame the imbalance crosses the threshold
+  // airborne, so a long cruise on BOTH (which slowly biases tanks) ends up
+  // with a callout instead of silently snowballing. Re-armed once the
+  // imbalance drops back under 5 percentage points (selector swap evens
+  // them out) so a future imbalance event in the same flight earns a
+  // fresh call.
+  {
+    const lPct = Math.round((state.fuelL || 0) * 200);
+    const rPct = Math.round((state.fuelR || 0) * 200);
+    const diff = Math.abs(lPct - rPct);
+    if (!state.fuelImbalanceAtcLatch
+        && diff > 15
+        && !state.onGround && !state.crashed && !state.introOpen
+        && !state.replayActive && !state.photoMode && !state.paused
+        && (state.fuelL + state.fuelR) > 0.10){
+      state.fuelImbalanceAtcLatch = true;
+      if (typeof pushATC === 'function'){
+        pushATC('Fuel imbalance, check selector.', { tag:'PILOT' });
+      }
+    }
+    if (state.fuelImbalanceAtcLatch && diff <= 5){
+      state.fuelImbalanceAtcLatch = false;
     }
   }
   // Mixture ATC nag: first frame the plane climbs past MIX_ATC_ALT_HI with
@@ -24117,6 +24290,7 @@ const cpMagCv = document.getElementById('cpMag');
 const cpSkidCv = document.getElementById('cpSkid');
 const cpBrkCv = document.getElementById('cpBrk');
 const cpFfCv  = document.getElementById('cpFf');
+const cpFuelCv = document.getElementById('cpFuel');
 const cpChrCv = document.getElementById('cpChr');
 const cpVorCv = document.getElementById('cpVor');
 const cpDaCv  = document.getElementById('cpDa');
@@ -24138,6 +24312,7 @@ const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
 const cpSkidCtx = cpSkidCv && cpSkidCv.getContext('2d');
 const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
 const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
+const cpFuelCtx = cpFuelCv && cpFuelCv.getContext('2d');
 const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
 const cpVorCtx = cpVorCv && cpVorCv.getContext('2d');
 const cpDaCtx  = cpDaCv  && cpDaCv.getContext('2d');
@@ -25221,6 +25396,94 @@ function drawCockpitFuelFlow(gphOverride){
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(f.toFixed(1), cx, cy + R*0.55);
 }
+// Per-tank fuel quantity gauge — twin needles (green = LEFT wing, cyan =
+// RIGHT wing) over a single 0..100% sweep face. Center text shows the
+// active selector (SEL: BOTH / L / R) so the pilot can read where the
+// engine is drawing from at a glance, and small digital readouts under
+// each needle give the exact percent. self-test override lets the cold-
+// start avionics sweep ramp both needles full-scale before the engine
+// catches — same trick the FUEL FLOW + RPM gauges use.
+function drawCockpitFuel(lOverride, rOverride){
+  if (!cpFuelCtx) return;
+  const W = cpFuelCv.width, H = cpFuelCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpFuelCtx;
+  _cpBezel(ctx, W, H);
+  // Same 240° sweep + start angle the rest of the round gauges use so a
+  // glance across the panel reads as one matched instrument set.
+  const sweep = Math.PI * 4/3;
+  const startA = -Math.PI - Math.PI/6;
+  const fuelL = (typeof lOverride === 'number') ? lOverride : Math.max(0, Math.min(1, (state.fuelL || 0) * 2));
+  const fuelR = (typeof rOverride === 'number') ? rOverride : Math.max(0, Math.min(1, (state.fuelR || 0) * 2));
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 16px ui-monospace, monospace';
+  // Major ticks at 0/25/50/75/100, minor every 5%. Label majors with percent
+  // so the dial reads as fuel quantity even when both needles overlap.
+  for (let v = 0; v <= 100; v += 5){
+    const a = startA + (v / 100) * sweep;
+    const major = (v % 25 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Red low-fuel arc 0..10%, amber caution 10..20% so the pilot can spot a
+  // dry tank without reading the digits.
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#ff5252';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA, startA + (10 / 100) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#ffb020';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA + (10 / 100) * sweep, startA + (20 / 100) * sweep);
+  ctx.stroke();
+  // "%" unit hint up top, mirrors the GPH/RPM/m labels on the other gauges.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('%', cx, cy - R*0.55);
+  // Twin needles: left tank in green (matches the other green callouts on
+  // the panel), right tank in cyan so the two never visually merge even
+  // when their percentages are within a point of each other.
+  const aL = startA + Math.max(0, Math.min(1, fuelL)) * sweep;
+  const aR = startA + Math.max(0, Math.min(1, fuelR)) * sweep;
+  _cpNeedle(ctx, cx, cy, aR + Math.PI/2, R - 14, '#6ad8ff', 4);
+  _cpNeedle(ctx, cx, cy, aL + Math.PI/2, R - 14, '#7ee787', 4);
+  // L / R digital readouts mirror the FUEL FLOW gauge's center number. Two
+  // small percentages, color-graded by quantity so the dial doubles as a
+  // low-fuel warning the moment either tank ducks under 10%.
+  const lPct = Math.round(fuelL * 100);
+  const rPct = Math.round(fuelR * 100);
+  const _fuelColor = pct => pct <= 10 ? '#ff5252' : pct <= 20 ? '#ffb020' : '#dfe';
+  ctx.font = 'bold 16px ui-monospace, monospace';
+  ctx.fillStyle = '#7ee787';
+  ctx.fillText('L', cx - R*0.40, cy + R*0.30);
+  ctx.fillStyle = _fuelColor(lPct);
+  ctx.fillText(lPct + '%', cx - R*0.40, cy + R*0.50);
+  ctx.fillStyle = '#6ad8ff';
+  ctx.fillText('R', cx + R*0.40, cy + R*0.30);
+  ctx.fillStyle = _fuelColor(rPct);
+  ctx.fillText(rPct + '%', cx + R*0.40, cy + R*0.50);
+  // Selector lever readout in the middle, color-keyed so a one-tank draw is
+  // visually obvious. BOTH = neutral, LEFT/RIGHT = warmer color so the
+  // pilot doesn't forget they're feeding off a single wing.
+  const sel = state.fuelSelector || 'BOTH';
+  ctx.font = 'bold 13px ui-monospace, monospace';
+  ctx.fillStyle = '#6aa';
+  ctx.fillText('SEL', cx, cy + R*0.08);
+  ctx.font = 'bold 16px ui-monospace, monospace';
+  ctx.fillStyle = sel === 'BOTH' ? '#7ee787' : sel === 'LEFT' ? '#7ee787' : '#6ad8ff';
+  ctx.fillText(sel === 'BOTH' ? 'BOTH' : (sel === 'LEFT' ? 'L' : 'R'), cx, cy + R*0.22);
+}
 function _formatChrono(ms){
   // MM:SS.t with a one-digit tenths field so the readout fits the gauge
   // face. Clamp to 59:59.9 so a forgotten clock doesn't blow the layout.
@@ -25789,6 +26052,8 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   let aiQ  = plane.quaternion;
   let ffOverride;         // undefined = let drawCockpitFuelFlow derive from state
   let daOverride;         // undefined = let drawCockpitDa derive from state
+  let fuelLOverride;      // undefined = let drawCockpitFuel derive from state
+  let fuelROverride;      // undefined = let drawCockpitFuel derive from state
   if (state.selfTestT >= 0){
     const t = Math.max(0, Math.min(1, state.selfTestT / SELF_TEST_S));
     // First half ramps 0→max, second half eases max→live so each needle
@@ -25804,6 +26069,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
     const SWEEP_BRK = 400;     // BRAKE_TEMP_MAX
     const SWEEP_FF  = 18;      // GPH near the over-burn band
     const SWEEP_DA  = 10000;   // top of the DA dial
+    const SWEEP_TANK = 1.0;    // 100% on the fuel-quantity dial
     if (t < 0.5){
       asiV = SWEEP_ASI * upPhase;
       altV = SWEEP_ALT * upPhase;
@@ -25814,6 +26080,8 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
       brkV = 30 + (SWEEP_BRK - 30) * upPhase;
       ffOverride = SWEEP_FF * upPhase;
       daOverride = SWEEP_DA * upPhase;
+      fuelLOverride = SWEEP_TANK * upPhase;
+      fuelROverride = SWEEP_TANK * upPhase;
     } else {
       asiV = SWEEP_ASI * (1 - settle) + indicatedKmh * settle;
       altV = SWEEP_ALT * (1 - settle) + altM * settle;
@@ -25824,6 +26092,13 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
       brkV = SWEEP_BRK * (1 - settle) + state.brakeTempC * settle;
       ffOverride = SWEEP_FF * (1 - settle); // settles to 0 — fuel flow doesn't start until engine catches
       daOverride = SWEEP_DA * (1 - settle) + (state.densityAltFt || 0) * settle;
+      // Fuel quantity needles settle from full-scale back to the live wing
+      // values so the self-test ends with both needles pointing at the real
+      // tank levels (typically 100% — the panel only powers up cold). Each
+      // wing tank stores 0..0.5 (half the total), so scale by 2 for the
+      // 0..100% gauge.
+      fuelLOverride = SWEEP_TANK * (1 - settle) + (state.fuelL || 0) * 2 * settle;
+      fuelROverride = SWEEP_TANK * (1 - settle) + (state.fuelR || 0) * 2 * settle;
     }
     // Attitude indicator wobble: synthesize a small pitch swing so the
     // horizon line visibly moves during the self-test, then ease back to the
@@ -25874,6 +26149,11 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   drawCockpitSkid(skidV);
   drawCockpitBrake(brkV);
   drawCockpitFuelFlow(ffOverride);
+  // Twin-needle fuel quantity (LEFT / RIGHT wings) sits next to FUEL FLOW so
+  // the cockpit finally has a complete fuel system instead of just a flow
+  // dial and a single HUD percentage. Self-test override sweeps both needles
+  // full-scale before settling on the live wing levels.
+  drawCockpitFuel(fuelLOverride, fuelROverride);
   // Tick the chronograph only while the panel is actually visible, and only
   // when the avionics self-test isn't running (the self-test "powers up" the
   // gauges — a stopwatch ticking during that ritual would feel wrong).
