@@ -8359,6 +8359,13 @@ const state = {
   // (Shift = 1° fine, plain = 5° coarse). Heading hold tracks the bug, not
   // the heading captured at engage, so the pilot can re-aim mid-flight.
   ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0, wpFollow:false, cruiseLatch:false },
+  // Mini-map zoom: 0 = CLOSE (±3 km radius), 1 = DEFAULT (±10 km radius,
+  // matches the legacy fixed scale), 2 = WIDE (±25 km radius). Cycled by
+  // Shift+wheel on the mini-map for desktop pilots and a two-finger pinch on
+  // touch. Range rings, waypoint pin, airport icons, fuel ring, etc. all read
+  // through currentMinimapRange() so the entire mini-map plumbing rescales in
+  // one place — no per-feature zoom plumbing.
+  minimapZoom: 1,
   // Mini-map waypoint: optional magenta pin the pilot can drop anywhere on the
   // mini-map (click on desktop, long-press on mobile). Stored in world coords;
   // null when no pin. The HUD shows bearing+distance to it, and pressing M
@@ -16665,25 +16672,46 @@ function maybeFireLightGun(dt){
 // and spans roughly MINIMAP_RANGE metres so distant airports stay visible.
 const minimapCv = document.getElementById('minimapCv');
 const minimapCtx = minimapCv.getContext('2d');
-const MINIMAP_RANGE = 22000; // metres across full map width
+const MINIMAP_RANGE = 22000; // metres across full map width (DEFAULT zoom)
+// Three zoom levels — CLOSE (~3 km radius / 6 km wide) for tight pattern work,
+// DEFAULT (~10 km radius / 22 km wide) for normal cruise, WIDE (~25 km radius
+// / 50 km wide) for whole-world planning. Cycled by Shift+wheel on desktop and
+// two-finger pinch on touch. currentMinimapRange() is read by drawMinimap +
+// pxToWorld + the dblclick airport-snap so every consumer agrees on the live
+// scale automatically — no per-call zoom plumbing.
+const MINIMAP_ZOOM_LEVELS = [6000, 22000, 50000];
+const MINIMAP_ZOOM_LABELS = ['CLOSE', 'DEFAULT', 'WIDE'];
+function currentMinimapRange(){
+  const z = state.minimapZoom | 0;
+  return MINIMAP_ZOOM_LEVELS[Math.max(0, Math.min(MINIMAP_ZOOM_LEVELS.length - 1, z))];
+}
 function drawMinimap(hdgDeg){
   const W = minimapCv.width, H = minimapCv.height;
   const cx = W/2, cy = H/2;
   const R = Math.min(W, H)/2 - 2;
-  const scale = (W - 8) / MINIMAP_RANGE; // metres -> pixels
+  const MR = currentMinimapRange();
+  const scale = (W - 8) / MR; // metres -> pixels
   minimapCtx.clearRect(0,0,W,H);
   // Circular background with subtle grid.
   minimapCtx.save();
   minimapCtx.beginPath(); minimapCtx.arc(cx, cy, R, 0, Math.PI*2); minimapCtx.clip();
   minimapCtx.fillStyle = 'rgba(10,18,28,0.55)';
   minimapCtx.fillRect(0,0,W,H);
-  // Faint range rings every 5 km.
+  // Faint range rings, spaced for the active zoom level so the CLOSE view
+  // still shows multiple rings and the WIDE view doesn't clutter the face.
   minimapCtx.strokeStyle = 'rgba(106,170,170,0.25)';
   minimapCtx.lineWidth = 1;
-  for (let km = 5; km <= 20; km += 5){
-    minimapCtx.beginPath();
-    minimapCtx.arc(cx, cy, km * 1000 * scale, 0, Math.PI*2);
-    minimapCtx.stroke();
+  {
+    const halfKm = MR / 2000; // visible radius in km
+    let stepKm = 5;
+    if (halfKm <= 4) stepKm = 1;
+    else if (halfKm <= 12) stepKm = 5;
+    else stepKm = 10;
+    for (let km = stepKm; km <= halfKm + 0.5; km += stepKm){
+      minimapCtx.beginPath();
+      minimapCtx.arc(cx, cy, km * 1000 * scale, 0, Math.PI*2);
+      minimapCtx.stroke();
+    }
   }
   // World axis cross (subtle).
   minimapCtx.strokeStyle = 'rgba(106,170,170,0.18)';
@@ -17224,6 +17252,30 @@ function drawMinimap(hdgDeg){
     minimapCtx.textBaseline = 'top';
     minimapCtx.fillText('W', _wcx, _wcy + 13);
   }
+  // Zoom label (top-right corner) — reads "ZOOM x1" for DEFAULT, "x0.3" for
+  // CLOSE, "x2.3" for WIDE so the player always knows which scale they're on.
+  // Multiplier is relative to DEFAULT so DEFAULT prints a clean "x1".
+  {
+    const _zMul = MR / MINIMAP_ZOOM_LEVELS[1];
+    const _zStr = _zMul >= 0.95 && _zMul <= 1.05 ? 'x1' : 'x' + _zMul.toFixed(1);
+    const _zLbl = MINIMAP_ZOOM_LABELS[Math.max(0, Math.min(MINIMAP_ZOOM_LABELS.length - 1, state.minimapZoom | 0))];
+    minimapCtx.save();
+    minimapCtx.fillStyle = 'rgba(8,14,22,0.55)';
+    minimapCtx.beginPath(); minimapCtx.arc(W - 16, 16, 13, 0, Math.PI*2); minimapCtx.fill();
+    minimapCtx.fillStyle = '#9bb';
+    minimapCtx.font = 'bold 8px ui-monospace, monospace';
+    minimapCtx.textAlign = 'center';
+    minimapCtx.textBaseline = 'middle';
+    minimapCtx.fillText('ZOOM', W - 16, 11);
+    minimapCtx.fillStyle = state.minimapZoom === 1 ? '#9bb' : '#ffd166';
+    minimapCtx.font = 'bold 9px ui-monospace, monospace';
+    minimapCtx.fillText(_zStr, W - 16, 21);
+    minimapCtx.fillStyle = 'rgba(255,255,255,0.65)';
+    minimapCtx.font = 'bold 7px ui-monospace, monospace';
+    minimapCtx.textBaseline = 'top';
+    minimapCtx.fillText(_zLbl, W - 16, 30);
+    minimapCtx.restore();
+  }
 }
 
 // ====== Weather radar mini-panel ======
@@ -17391,14 +17443,15 @@ function drawWeatherRadar(){
   }
   // Convert a canvas-relative click point (CSS px) to world (x,z) using the
   // same MINIMAP_RANGE / scale convention as drawMinimap. North is up so +y
-  // on screen maps to +z in world space.
+  // on screen maps to +z in world space. currentMinimapRange() picks up the
+  // active zoom level so clicks land where the player sees them.
   function pxToWorld(clientX, clientY){
     const r = minimapCv.getBoundingClientRect();
     // Map CSS px → internal canvas px (canvas is 320x320 displayed at 160x160).
     const sx = (clientX - r.left) * (minimapCv.width / r.width);
     const sy = (clientY - r.top)  * (minimapCv.height / r.height);
     const cx = minimapCv.width/2, cy = minimapCv.height/2;
-    const scale = (minimapCv.width - 8) / MINIMAP_RANGE;
+    const scale = (minimapCv.width - 8) / currentMinimapRange();
     const R = Math.min(minimapCv.width, minimapCv.height)/2 - 2;
     // Reject clicks outside the circular face so taps on the corner badge
     // (wind arrow) don't accidentally drop a pin.
@@ -17470,7 +17523,7 @@ function drawWeatherRadar(){
     const sy = (e.clientY - r.top)  * (minimapCv.height / r.height);
     const W = minimapCv.width, H = minimapCv.height;
     const cx = W/2, cy = H/2;
-    const scale = (W - 8) / MINIMAP_RANGE;
+    const scale = (W - 8) / currentMinimapRange();
     const R = Math.min(W, H)/2 - 2;
     // Match each airport against its actual on-screen position — on-map
     // uses the icon center, off-map uses the rim tick the player can see.
@@ -17495,6 +17548,82 @@ function drawWeatherRadar(){
     showStatus('WAYPOINT → ' + best.id, distKm.toFixed(1) + ' km · press M for AP', 'good');
     pushATC('Waypoint set to ' + best.id + ', ' + distKm.toFixed(1) + ' km.', { tag:'PILOT' });
   });
+  // ---- Mini-map zoom: wheel (desktop) + two-finger pinch (touch) ----
+  // CLOSE / DEFAULT / WIDE cycle. `dir` is +1 to zoom out (WIDE-ward) and -1
+  // to zoom in (CLOSE-ward); both clamped to the actual zoom array length so
+  // bumping past either end is a silent no-op (no toast spam). Toast says the
+  // active level + the new diameter so the player learns the scale.
+  function cycleMinimapZoom(dir){
+    const cur = state.minimapZoom | 0;
+    const next = Math.max(0, Math.min(MINIMAP_ZOOM_LEVELS.length - 1, cur + (dir > 0 ? 1 : -1)));
+    if (next === cur) return;
+    state.minimapZoom = next;
+    const _range = MINIMAP_ZOOM_LEVELS[next];
+    const _label = MINIMAP_ZOOM_LABELS[next];
+    showStatus('MAP ZOOM · ' + _label, '±' + (_range/2000).toFixed(0) + ' km radius', 'good');
+  }
+  // Wheel on the mini-map canvas cycles zoom levels. Wheel-up (negative
+  // deltaY) zooms IN toward CLOSE, wheel-down zooms OUT toward WIDE — matches
+  // how every other mapping app on the planet treats the scroll wheel. Shift
+  // is optional (spec calls it out for keyboard pilots) so a casual scroll
+  // over the badge also cycles. preventDefault stops the page from scrolling
+  // when the wheel happens to land on the small mini-map face.
+  minimapCv.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (!e.deltaY) return;
+    cycleMinimapZoom(e.deltaY > 0 ? +1 : -1);
+  }, { passive:false });
+  // Two-finger pinch on touch. We hook the existing pointer listeners on the
+  // canvas with a small two-pointer tracker. When a second touch lands, the
+  // long-press timer is cancelled (we're pinching, not dropping a pin), and
+  // we record the initial finger separation. A change of more than ~30 %
+  // cycles zoom in the corresponding direction and re-baselines so a slow
+  // sustained pinch can step through every level. Re-baseline avoids the
+  // "one big pinch fires every level in one frame" problem.
+  const pinch = { ids: [], baseDist: 0, lastPts: new Map() };
+  function pinchDist(){
+    if (pinch.ids.length < 2) return 0;
+    const a = pinch.lastPts.get(pinch.ids[0]);
+    const b = pinch.lastPts.get(pinch.ids[1]);
+    if (!a || !b) return 0;
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+  minimapCv.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    pinch.lastPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.ids.length < 2 && !pinch.ids.includes(e.pointerId)) pinch.ids.push(e.pointerId);
+    if (pinch.ids.length === 2){
+      // Second finger landed — cancel the pending long-press so we don't drop
+      // a stray pin in the middle of a pinch.
+      clearTimeout(lpTimer); lpId = -1; lpFired = false;
+      pinch.baseDist = pinchDist();
+    }
+  });
+  minimapCv.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'touch') return;
+    if (!pinch.lastPts.has(e.pointerId)) return;
+    pinch.lastPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.ids.length !== 2) return;
+    const d = pinchDist();
+    if (d < 5 || pinch.baseDist < 5) return;
+    const ratio = d / pinch.baseDist;
+    if (ratio > 1.3){
+      cycleMinimapZoom(-1); // spreading fingers = zoom IN
+      pinch.baseDist = d;
+    } else if (ratio < 0.77){
+      cycleMinimapZoom(+1); // pinching fingers = zoom OUT
+      pinch.baseDist = d;
+    }
+  });
+  function endPinchPointer(e){
+    if (e.pointerType !== 'touch') return;
+    pinch.lastPts.delete(e.pointerId);
+    const i = pinch.ids.indexOf(e.pointerId);
+    if (i >= 0) pinch.ids.splice(i, 1);
+    pinch.baseDist = pinchDist();
+  }
+  minimapCv.addEventListener('pointerup', endPinchPointer);
+  minimapCv.addEventListener('pointercancel', endPinchPointer);
   // Make sure native page gestures don't fight the long-press.
   minimapCv.style.touchAction = 'none';
 })();
