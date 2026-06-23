@@ -6370,6 +6370,35 @@ function updateAITraffic(dt){
   // Waypoint capture: advance when close enough horizontally.
   if (distH < 120){
     aiState.leg = (aiState.leg + 1) % AI_LEGS.length;
+    // Pattern-position radio calls on each leg transition. Gated by AI plane
+    // visibility + 8 km range so culled traffic stays silent, and silenced
+    // entirely during wingman mode (the lead has its own dialogue) and in
+    // photo / replay / intro / pause so the strip stays clean. Tag 'AI' so
+    // the tag renders cyan and the player can scan their own calls apart.
+    try {
+      if (typeof pushATC === 'function' && state && state.mode !== 'wing'
+          && !state.introOpen && !state.photoMode && !state.paused && !state.replayActive
+          && aiPlane && aiPlane.visible){
+        const distToPlayerCall = aiPlane.position.distanceTo(plane.position);
+        if (distToPlayerCall < 8000){
+          const apId = (MAIN_AP && MAIN_AP.id) || 'KSEA';
+          const rwy  = (typeof runwayDesignator === 'function')
+            ? runwayDesignator(MAIN_AP.hdg) : '--';
+          // Leg index AFTER advance: 0=upwind (just lifted off / clear of the
+          // active), 1=crosswind, 2=downwind, 3=base, 4=final.
+          if (aiState.leg === 2){
+            pushATC(apId + ' traffic, Cessna entering downwind RWY ' + rwy + '.', { tag:'AI' });
+          } else if (aiState.leg === 3){
+            pushATC(apId + ' traffic, Cessna turning base.', { tag:'AI' });
+          } else if (aiState.leg === 4){
+            pushATC(apId + ' traffic, Cessna turning final RWY ' + rwy + ', full stop.', { tag:'AI' });
+          } else if (aiState.leg === 0){
+            // Wrap 4 -> 0 (touch-and-go climb out): clear of the active.
+            pushATC(apId + ' traffic, Cessna clear of the active.', { tag:'AI' });
+          }
+        }
+      }
+    } catch(e){ /* never let an ATC blurb break the AI tick */ }
   }
   // Push to the visual group.
   aiPlane.position.copy(aiState.pos);
@@ -12069,6 +12098,11 @@ function pushATC(text, opts){
 function _renderATC(entry){
   if (!atcEl || !atcMsgEl) return;
   atcTagEl.textContent = entry.tag;
+  // AI traffic calls get a distinct cyan tag so the player can scan the strip
+  // and instantly tell their own callsign apart from the other plane on the
+  // frequency. Reset to inherit (amber) for any other tag so a previous AI
+  // line doesn't bleed colour into the next ATC/TWR/GRD/RA call.
+  try { atcTagEl.style.color = (entry.tag === 'AI') ? '#7ad7ff' : ''; } catch(e){ /* never let style kill the HUD */ }
   atcMsgEl.textContent = entry.text;
   // Retrigger the flash animation by toggling the class off and back on.
   atcEl.classList.remove('flash');
