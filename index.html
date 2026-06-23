@@ -502,7 +502,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -603,6 +603,11 @@
       <div class="top"><span class="name">RAIN</span><span class="val" id="setRainV">OFF</span></div>
       <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">FOG</span><span class="val" id="setFogV">OFF</span></div>
+      <select id="setFog"></select>
+      <div class="hint">Visibility haze — LIGHT cuts to ~3 km, HEAVY to ~1 km. Real IFR scan on the ILS + glideslope.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">WIPERS</span><span class="val" id="setWiperV">AUTO</span></div>
@@ -838,6 +843,11 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc8dcf0);
 scene.fog = new THREE.Fog(0xc8dcf0, 5000, 18000);
+// Default fog near/far stashed so the FOG weather toggle can clamp them down
+// to ~3 km / ~1 km on light/heavy and snap them back to clear-sky values on
+// OFF without having to remember the literals. applyFogVisible() reads these.
+const FOG_NEAR_BASE = scene.fog.near;
+const FOG_FAR_BASE = scene.fog.far;
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.5, 40000);
 
@@ -858,7 +868,19 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, aerobaticBest: 0 };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, aerobaticBest: 0 };
+// Fog weather levels. 'off' restores the default long-range haze; 'light' and
+// 'heavy' both clamp the camera fog near/far so the world dissolves into a
+// soft grey wall. Pure rendering knob — no flight-model side effects, so it
+// pairs cleanly with rain/wind/runway-wet and forces real IFR scans on the
+// ILS + glideslope HUD. Values picked to match the roadmap target (~3 km on
+// light, ~1 km on heavy) while keeping the runway visible from short final.
+const FOG_LEVELS = [
+  { id: 'off',   name: 'OFF',   near: null, far: null },
+  { id: 'light', name: 'LIGHT', near: 600,  far: 3000 },
+  { id: 'heavy', name: 'HEAVY', near: 200,  far: 1000 },
+];
+const FOG_LEVEL_IDS = FOG_LEVELS.map(f => f.id);
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -893,6 +915,7 @@ try {
     if (typeof saved.volume === 'number') settings.volume = Math.max(0, Math.min(1, saved.volume));
     if (Number.isInteger(saved.livery) && saved.livery >= 0 && saved.livery < LIVERIES.length) settings.livery = saved.livery;
     if (typeof saved.rain === 'boolean') settings.rain = saved.rain;
+    if (typeof saved.fog === 'string' && FOG_LEVEL_IDS.indexOf(saved.fog) !== -1) settings.fog = saved.fog;
     if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
     if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
     if (typeof saved.twinEngine === 'boolean') settings.twinEngine = saved.twinEngine;
@@ -10694,6 +10717,11 @@ function step(dt){
   // lives in the on-ground physics block.
   const wetEl = document.getElementById('rwyWet');
   if (wetEl) wetEl.style.display = settings.rain ? 'inline' : 'none';
+  // FOG pill — blue indicator whenever the fog weather toggle is on light or
+  // heavy. Hidden in photo mode so saved PNGs stay clean (the fog itself is
+  // still rendered, the pill just clears so the HUD doesn't show in the shot).
+  const fogEl = document.getElementById('fogPill');
+  if (fogEl) fogEl.style.display = (settings.fog && settings.fog !== 'off' && !state.photoMode) ? 'inline' : 'none';
   // Wind shear pill — yellow blinking while a shear burst is active so the
   // pilot sees the warning the same frame the wind vector slams over.
   const shearEl = document.getElementById('shearWarn');
@@ -13816,6 +13844,25 @@ function applyRunwayWetness(){
   }
 }
 applyRainVisible();
+// Fog weather toggle. OFF restores the original long-range clear-day haze;
+// LIGHT/HEAVY clamp scene.fog.near/far so the world dissolves into a soft
+// grey wall well before the camera's far plane. The fog *color* is still
+// driven by the time-of-day key (and the rain mood lerp) per frame inside
+// applyTimeOfDay(), so fog tints with sunrise/sunset/rain naturally. Pure
+// renderer knob: no flight model side-effects, so an IFR approach in heavy
+// fog forces a real ILS + glideslope scan.
+function applyFogVisible(){
+  if (!scene.fog) return;
+  const lvl = FOG_LEVELS.find(f => f.id === settings.fog) || FOG_LEVELS[0];
+  if (lvl.near == null || lvl.far == null){
+    scene.fog.near = FOG_NEAR_BASE;
+    scene.fog.far = FOG_FAR_BASE;
+  } else {
+    scene.fog.near = lvl.near;
+    scene.fog.far = lvl.far;
+  }
+}
+applyFogVisible();
 function updateRainOverlay(dt){
   if (!settings.rain || !rainCtx || state.photoMode) return;
   const w = innerWidth, h = innerHeight;
@@ -14752,6 +14799,8 @@ addEventListener('keydown', e => {
   const livV = document.getElementById('setLivV');
   const rainBtn = document.getElementById('setRainBtn');
   const rainV = document.getElementById('setRainV');
+  const fogSel = document.getElementById('setFog');
+  const fogV = document.getElementById('setFogV');
   const coldBtn = document.getElementById('setColdBtn');
   const coldV = document.getElementById('setColdV');
   const twinBtn = document.getElementById('setTwinBtn');
@@ -14810,6 +14859,17 @@ addEventListener('keydown', e => {
     }
   }
   buildWiperOptions();
+  function buildFogOptions(){
+    if (!fogSel) return;
+    fogSel.innerHTML = '';
+    for (const opt of FOG_LEVELS){
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.name;
+      fogSel.appendChild(o);
+    }
+  }
+  buildFogOptions();
   function syncInputs(){
     sens.value = Math.round(settings.sensitivity * 100);
     fov.value = Math.round(settings.fov);
@@ -14847,6 +14907,11 @@ addEventListener('keydown', e => {
     if (wiperV){
       const wm = WIPER_MODES.find(w => w.id === settings.wipers) || WIPER_MODES[0];
       wiperV.textContent = wm.name;
+    }
+    if (fogSel) fogSel.value = settings.fog;
+    if (fogV){
+      const fl = FOG_LEVELS.find(f => f.id === settings.fog) || FOG_LEVELS[0];
+      fogV.textContent = fl.name;
     }
   }
   function applyFov(){
@@ -14925,12 +14990,23 @@ addEventListener('keydown', e => {
       saveSettings();
     });
   }
+  if (fogSel){
+    fogSel.addEventListener('change', () => {
+      const v = fogSel.value;
+      if (FOG_LEVEL_IDS.indexOf(v) === -1) return;
+      settings.fog = v;
+      applyFogVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
   btnReset.addEventListener('click', () => {
     Object.assign(settings, SETTINGS_DEFAULT);
     applyFov();
     applyLivery(settings.livery);
     applyEngineConfig();
     applyRainVisible();
+    applyFogVisible();
     syncInputs();
     saveSettings();
   });
