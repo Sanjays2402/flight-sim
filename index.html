@@ -2392,6 +2392,138 @@ function updateTaxiArrows(dt){
 }
 let taxiArrowPhase = 0;
 
+// ====== GROUND CREW MARSHALLER ======
+// Small static figure (orange vest + raised wands) stands by the apron
+// taxi-chevron at each ground airport. When the player taxis within 25 m at
+// <8 km/h, the wands animate (lerp between two poses at ~1.2 Hz so it reads
+// as "come forward, slowly") and a brief ATC line fires once per arrival.
+// Pure scenery / immersion: no collision, no physics. Hidden in photo mode.
+const marshallerGroups = []; // [{ ap, group, leftWand, rightWand, atcLatched, awayFrames }]
+const MARSH_NEAR_M = 25;        // m — proximity to start wand animation
+const MARSH_SPEED_KMH = 8;      // km/h — only when player is taxiing slow
+const MARSH_ATC_REARM_M = 300;  // m — distance from marshaller before ATC re-arms for the next arrival
+const MARSH_ATC_AGL_M = 50;     // m AGL — climbing back above this also re-arms (a quick touch-and-go counts as a new arrival)
+const MARSH_WAVE_HZ = 1.2;      // Hz — wand wave rate (two poses)
+function makeMarshaller(a){
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Stand near the apron-end of the chevron row, slightly between the
+  // chevrons and the runway so a taxiing player passes within easy view as
+  // they line up. stripX = a.w/2 + 9 (chevron mid). Pull in ~3.5 m toward
+  // the runway, sit a touch beyond the first chevron toward the apron.
+  const stripX = a.w/2 + 9;
+  const standX = stripX - 3.5;            // ~5.5 m off the runway edge, clear of the strip
+  const standZ = a.len/2 + 30;            // ~6 m apron-side of the first chevron (startZ = len/2 + 24)
+  // Materials — kept Lambert so it integrates with the existing scene lighting.
+  const vestMat  = new THREE.MeshLambertMaterial({ color: 0xff7a1a });   // hi-vis orange
+  const pantMat  = new THREE.MeshLambertMaterial({ color: 0x222831 });
+  const skinMat  = new THREE.MeshLambertMaterial({ color: 0xd9a47a });
+  const wandMat  = new THREE.MeshLambertMaterial({ color: 0xffd23a, emissive: 0x553600, emissiveIntensity: 0.3 }); // yellow signal wands
+  // Body: simple boxes. Total height ~1.75 m, feet on the apron.
+  // Legs
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.85, 0.30), pantMat);
+  legs.position.set(standX, 0.425, standZ);
+  grp.add(legs);
+  // Torso (vest)
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.65, 0.30), vestMat);
+  torso.position.set(standX, 0.85 + 0.325, standZ);
+  grp.add(torso);
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), skinMat);
+  head.position.set(standX, 0.85 + 0.65 + 0.18, standZ);
+  grp.add(head);
+  // Arm + wand groups. Each arm is a pivot at the shoulder so we can rotate
+  // the wand pose by tweaking group.rotation.x. Wand sits at the end of the
+  // arm and reads as a slim yellow stick.
+  function makeArm(sideX){
+    const pivot = new THREE.Group();
+    // Shoulder position (left/right shoulder, just under the head).
+    pivot.position.set(standX + sideX * 0.30, 0.85 + 0.55, standZ);
+    // Upper arm — a slim cylinder hanging from the shoulder.
+    const arm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 0.45, 6),
+      vestMat
+    );
+    arm.position.set(0, -0.225, 0);
+    pivot.add(arm);
+    // Wand at the end of the arm.
+    const wand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.55, 6),
+      wandMat
+    );
+    wand.position.set(0, -0.45 - 0.275, 0);
+    pivot.add(wand);
+    // Initial pose: arms slightly outstretched forward and down (rest pose).
+    pivot.rotation.x = 0.25;
+    grp.add(pivot);
+    return pivot;
+  }
+  const leftWand  = makeArm(-1);
+  const rightWand = makeArm( 1);
+  marshallerGroups.push({
+    ap: a, group: grp, leftWand, rightWand,
+    standX, standZ,
+    phase: 0, animActive: 0,
+    atcLatched: false
+  });
+}
+for (const a of AIRPORTS) makeMarshaller(a);
+
+function updateMarshallers(dt){
+  // Photo mode hides the figure entirely so saved PNGs stay clean.
+  const hidden = !!(state && state.photoMode);
+  for (const m of marshallerGroups){
+    if (m.group.visible === hidden) m.group.visible = !hidden;
+  }
+  if (hidden) return;
+  // Player position in world space; marshaller position is in airport-local
+  // space, so transform local → world using a.hdg rotation around y.
+  const px = plane.position.x, pz = plane.position.z;
+  const py = plane.position.y;
+  for (const m of marshallerGroups){
+    const a = m.ap;
+    const cos = Math.cos(a.hdg), sin = Math.sin(a.hdg);
+    const wx = a.x + (m.standX * cos + m.standZ * sin);
+    const wz = a.z + (-m.standX * sin + m.standZ * cos);
+    const dx = px - wx, dz = pz - wz;
+    const dist = Math.hypot(dx, dz);
+    // Ground speed (m/s) → km/h.
+    const gsKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+    // Activation: on ground, within 25 m, taxiing slow. Animation ramps in/out
+    // smoothly so wands don't pop between poses.
+    const wantActive = !!state.onGround && dist < MARSH_NEAR_M && gsKmh < MARSH_SPEED_KMH;
+    // Lerp activation 0..1 over ~0.4s so wands ease into the wave.
+    const target = wantActive ? 1 : 0;
+    m.animActive += (target - m.animActive) * Math.min(1, dt * 2.5);
+    // Advance phase only when active (so the wand stops at rest when idle).
+    if (m.animActive > 0.02) m.phase = (m.phase + dt * MARSH_WAVE_HZ * Math.PI * 2) % (Math.PI * 2);
+    // Two poses: rest (~0.25 rad) and raised (~-1.3 rad, wands up & in front).
+    // Lerp between them on a sin wave so it reads as "wave forward, come on".
+    const wave = (Math.sin(m.phase) * 0.5 + 0.5);  // 0..1
+    const restRot   = 0.25;
+    const raisedRot = -1.3;
+    const animRot   = restRot + (raisedRot - restRot) * wave;
+    const blended   = restRot + (animRot - restRot) * m.animActive;
+    m.leftWand.rotation.x  = blended;
+    m.rightWand.rotation.x = blended;
+    // ATC call — fire once per arrival when the player rolls into the slot.
+    if (wantActive && !m.atcLatched){
+      m.atcLatched = true;
+      if (typeof pushATC === 'function') pushATC('Marshaller in sight, follow signals.', { tag:'GRD' });
+    }
+    // Re-arm when the player either taxis well clear of this marshaller or
+    // climbs back above 50 m AGL (touch-and-go pattern), so the next arrival
+    // gets a fresh call instead of staying silent.
+    if (m.atcLatched){
+      if (dist > MARSH_ATC_REARM_M || (py - a.elev) > MARSH_ATC_AGL_M){
+        m.atcLatched = false;
+      }
+    }
+  }
+}
+
 // Taxiway centerline lights — small yellow beads down the middle of the
 // taxi strip alongside each runway, gated by the same dusk window as the
 // runway edge lights so night ops finally have a guided ground path instead
@@ -11560,6 +11692,10 @@ function step(dt){
   // points new pilots toward the takeoff threshold.
   updateTaxiArrows(dt);
   updateTaxiwayLights(dt);
+  // Ground crew marshaller: static figure at each airport's apron taxi-chevron;
+  // wands animate when the player taxis within 25 m at <8 km/h, one ATC call
+  // per arrival. Pure scenery, hidden in photo mode.
+  updateMarshallers(dt);
   // Slow tug + fuel truck per airport drifting around the apron — pure
   // scenery, gated to on-ground or low-overhead near the field so air views
   // stay clean.
