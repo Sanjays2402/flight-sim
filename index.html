@@ -98,6 +98,16 @@
   #squawk.flash { animation:sqFlash 1.4s ease-out; }
   @keyframes sqFlash { 0% { border-color:#ffd166; box-shadow:0 0 12px rgba(255,209,102,.6); } 100% { border-color:#1e3548; box-shadow:none; } }
   @media (max-width: 760px){ #squawk { left:auto; right:8px; transform:none; } }
+  /* Trip / Hobbs timer pill — sits just under the squawk strip with the
+     same modal vibe. `.run` lights the digits green while the timer is
+     ticking so the pilot sees at a glance that it's live. Pointer-events
+     off; hidden in photo mode via PHOTO_HIDE_IDS. */
+  #hobbs { position:fixed; top:114px; left:50%; transform:translate(176px,0); padding:3px 10px; font-size:11px; font-weight:700; letter-spacing:2px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); font-family:inherit; z-index:5; pointer-events:none; }
+  #hobbs .lbl { color:#9bb; font-weight:600; margin-right:6px; letter-spacing:1px; }
+  #hobbs .val { color:#cfe; font-variant-numeric: tabular-nums; }
+  #hobbs.run .val { color:#7be39a; text-shadow:0 0 6px rgba(123,227,154,.35); }
+  #hobbs.flash { animation:sqFlash 1.4s ease-out; }
+  @media (max-width: 760px){ #hobbs { left:auto; right:8px; transform:none; } }
   #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #vsi canvas { display:block; width:100%; height:100%; }
   /* Glideslope indicator: vertical "meatball" / PAPI strip pinned to the
@@ -599,6 +609,7 @@
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
 <div id="squawk"><span class="lbl">SQ</span><span class="code" id="squawkCode">1200</span></div>
+<div id="hobbs"><span class="lbl">TRIP</span><span class="val" id="hobbsVal">00:00:00</span></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
 <div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
@@ -637,7 +648,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1175,8 +1186,12 @@ function closeFlightTime(){
 }
 function onLanding(score){
   // Snapshot flight-end facts BEFORE closeFlightTime zeroes flightStartMs so
-  // the logbook row gets accurate duration + origin.
-  const durSec = (flightStartMs != null) ? Math.max(0, (performance.now() - flightStartMs) / 1000) : 0;
+  // the logbook row gets accurate duration + origin. Trip / Hobbs timer is
+  // preferred when it carries a meaningful reading (it starts on the takeoff
+  // roll at 5 m/s, so it includes rollout time the air-only counter misses);
+  // fall back to the airborne counter when the trip timer was reset mid-flight.
+  const airSec = (flightStartMs != null) ? Math.max(0, (performance.now() - flightStartMs) / 1000) : 0;
+  const durSec = (typeof state !== 'undefined' && state.tripSec > 0) ? state.tripSec : airSec;
   closeFlightTime();
   pilotStats.totalLandings += 1;
   if (typeof score === 'number' && isFinite(score) && score > 0){
@@ -1204,7 +1219,11 @@ function onLanding(score){
 }
 function onCrash(){
   // Same snapshot pattern as onLanding so the crash row has real duration.
-  const durSec = (flightStartMs != null) ? Math.max(0, (performance.now() - flightStartMs) / 1000) : 0;
+  // Trip / Hobbs timer is preferred when it carries a meaningful reading
+  // (includes rollout time the airborne counter misses); falls back to the
+  // airborne counter when the trip timer was reset mid-flight.
+  const airSec = (flightStartMs != null) ? Math.max(0, (performance.now() - flightStartMs) / 1000) : 0;
+  const durSec = (typeof state !== 'undefined' && state.tripSec > 0) ? state.tripSec : airSec;
   closeFlightTime();
   pilotStats.crashes += 1;
   savePilotStats();
@@ -7389,6 +7408,14 @@ const state = {
   // fire-spam the ATC strip / chime; cleared on resetPlane() so a hot reset
   // re-arms the call immediately.
   atisCooldownUntil: 0,
+  // Trip / Hobbs timer. Auto-starts the first frame ground speed crosses
+  // 5 m/s and pauses on full-stop (<0.5 m/s) or crash. Pause-menu freeze is
+  // handled for free by step() not running. Shift+M zeros it; resetPlane()
+  // also wipes it so each fresh sortie starts at 00:00:00. Final value is
+  // written into the flight logbook row (preferred over the takeoff-anchored
+  // duration so the pilot's reset choice is what gets recorded).
+  tripSec: 0,
+  tripRunning: false,
   // Ring-chase mission state. Plane flies through `ringChain` in order; first
   // ring is armed at mission start, an axis-plane hit detector inside the
   // ring's loop advances `ringIdx`. Best time persisted to localStorage.
@@ -7850,7 +7877,17 @@ addEventListener('keydown', e=>{
     // Manual bug nudges break the waypoint-follow lock — pilot is taking aim.
     state.ap.wpFollow = false;
   }
-  if (e.code==='KeyM'){
+  if (e.code==='KeyM' && e.shiftKey){
+    // Shift+M: reset the trip / Hobbs timer to 00:00:00. Allowed in all
+    // live-play states (incl. pause / on-the-ground / crash) so the pilot
+    // can zero the chronometer whenever they want without restarting the
+    // mission. Gated against intro / replay / photo so the reset doesn't
+    // fire from a menu or while a recording is playing back.
+    if (state.introOpen || state.replayActive || state.photoMode) return;
+    resetHobbsTimer();
+    return;
+  }
+  if (e.code==='KeyM' && !e.shiftKey){
     // Waypoint AP toggle. Requires a waypoint pin (dropped on the mini-map).
     // First press engages AP if needed and locks heading-hold onto the bearing
     // to the pin (the bug is auto-driven each frame so the plane tracks even
@@ -8732,6 +8769,81 @@ function tickATC(now){
 //     change so the pilot actually notices the swap.
 const squawkEl     = document.getElementById('squawk');
 const squawkCodeEl = document.getElementById('squawkCode');
+// Trip / Hobbs timer DOM refs — hoisted alongside the squawk pill so
+// resetPlane() (which references them) finds them on first call.
+const hobbsEl    = document.getElementById('hobbs');
+const hobbsValEl = document.getElementById('hobbsVal');
+function fmtHobbs(sec){
+  const s = Math.max(0, Math.floor(sec || 0));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+}
+// Tick the trip / Hobbs chronometer. Auto-arms once ground speed crosses
+// 5 m/s, freezes on full-stop (<0.5 m/s) or crash. Cheap — just a couple
+// of guards and a textContent write per frame (only when the displayed
+// hh:mm:ss actually rolls over to a new second).
+let _hobbsLastShownSec = -1;
+function tickHobbs(dt){
+  // step() already gates intro/replay/photo/pause out of the call path, so
+  // we just need the auto-arm + auto-pause guards here.
+  const gs = state.vel.length();
+  if (state.crashed){
+    state.tripRunning = false;
+  } else if (!state.tripRunning && gs >= 5){
+    state.tripRunning = true;
+  } else if (state.tripRunning && gs < 0.5 && state.onGround){
+    // Full-stop on the ground = pause. Stays paused until next 5 m/s
+    // cross (so the next takeoff roll lights it back up).
+    state.tripRunning = false;
+  }
+  if (state.tripRunning) state.tripSec += dt;
+  if (!hobbsEl || !hobbsValEl) return;
+  const cur = Math.floor(state.tripSec);
+  if (cur !== _hobbsLastShownSec){
+    _hobbsLastShownSec = cur;
+    hobbsValEl.textContent = fmtHobbs(state.tripSec);
+  }
+  if (state.tripRunning){
+    if (!hobbsEl.classList.contains('run')) hobbsEl.classList.add('run');
+  } else {
+    if (hobbsEl.classList.contains('run')) hobbsEl.classList.remove('run');
+  }
+}
+// Reset the trip timer to 00:00:00 and pause it. Fires a soft sine pip +
+// status toast so the press is felt. Used by the Shift+M handler.
+function resetHobbsTimer(){
+  state.tripSec = 0;
+  state.tripRunning = false;
+  _hobbsLastShownSec = -1;
+  if (hobbsEl){
+    hobbsEl.classList.remove('run');
+    if (hobbsValEl) hobbsValEl.textContent = '00:00:00';
+    // Re-use the squawk flash animation — same border-pulse vibe.
+    hobbsEl.classList.remove('flash');
+    void hobbsEl.offsetWidth;
+    hobbsEl.classList.add('flash');
+  }
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (ctx){
+    const vol = 0.10 * settings.volume;
+    if (vol > 0){
+      const t0 = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 880; // A5
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0, t0);
+      g.gain.linearRampToValueAtTime(vol, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.22);
+    }
+  }
+  if (typeof showStatus === 'function') showStatus('TRIP TIMER RESET', '00:00:00 · starts on next takeoff roll', 'good');
+}
 function _rollSquawkCode(){
   // Random 4-digit code in the standard VFR/discrete range. Avoid the four
   // reserved emergency codes (7500 hijack, 7600 radio fail, 7700 emergency,
@@ -8890,6 +9002,15 @@ function resetPlane(){
   // ATIS cooldown: a hot reset re-arms the Shift+A broadcast immediately so
   // the player can grab a fresh weather read the moment the new sortie starts.
   state.atisCooldownUntil = 0;
+  // Trip / Hobbs timer: a fresh sortie always starts at 00:00:00 and not
+  // running. The auto-arm path inside step() lights it back up the first
+  // frame ground speed crosses 5 m/s.
+  state.tripSec = 0;
+  state.tripRunning = false;
+  if (typeof hobbsEl !== 'undefined' && hobbsEl){
+    hobbsEl.classList.remove('run');
+    if (typeof hobbsValEl !== 'undefined' && hobbsValEl) hobbsValEl.textContent = '00:00:00';
+  }
   // Engine fire: clear flag + visuals + starve counter so a fresh sortie
   // starts cool, and reset the random-roll cooldown so the new flight is
   // immediately eligible (after the air-time gate inside maybeRollEngineFire).
@@ -16353,6 +16474,10 @@ function loop(now){
     // once everything has calmed down. Cheap state-machine, runs every
     // frame because the underlying conditions are already-cached booleans.
     tickSquawk();
+    // Trip / Hobbs chronometer: auto-arms on takeoff roll, pauses on
+    // full-stop or crash. Also gated against replay so a post-crash
+    // playback doesn't keep adding to a frozen flight's time.
+    if (!state.replayActive) tickHobbs(dt);
   }
   updateRainOverlay(dt);
   updateBirdSplat(dt);
@@ -16393,7 +16518,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
