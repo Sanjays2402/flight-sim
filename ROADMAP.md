@@ -264,6 +264,16 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Magnetic compass card in the cockpit panel — tenth small gauge showing a live floating compass card (rolling tape behind a fixed lubber line) that reads the plane's magnetic heading independent of the HUD compass strip. Tilts slightly during turns/banks (the classic "northerly turning error" wobble, just a couple of degrees of lag/lead) so it reads as a real wet compass instead of a digital readout. Pairs with the existing gyro-style compass strip up top so the cockpit panel feels complete; pure flavor with maybe ~30 LOC for the canvas draw plus a tiny lag/lead term off `state.bank`.
+
+- [ ] Bird flock altitude warning toast — when the player crosses into the altitude band where a flock is drifting (within ±40 m vertical, ±200 m horizontal) and is closing on it at any decent speed, fire a one-shot amber `🐦 BIRDS, BIRDS — 11 O'CLOCK` style ATC line with a clock-position bearing derived from the flock's relative position. 4s cooldown per flock so a low circle doesn't spam. Gives the existing bird-strike hazard a leading-indicator instead of a surprise wet thud — players who pay attention can break away in time, players who don't still eat the strike.
+
+- [ ] Cockpit dim/night-mode toggle (`;` Shift) — Shift+`;` flips the cockpit instrument panel into a red-tinted night-mode shader (canvas tint pass on every gauge before draw, plus a soft red glow under the panel edge) so the gauges stay readable without nuking the pilot's night vision. Persists to localStorage, auto-suggests itself with a one-shot ATC `"Recommend night panel."` line the first time TOD crosses past 20:00 with the player in cockpit cam. Pairs naturally with the landing-light auto-suggest at night.
+
+- [ ] Runway holding-point line + hold-short callout — paint a thick yellow double-line (two parallel solids + two parallel dashes, real ICAO holding-point markings) on each taxiway 15 m before the runway edge at every ground airport. When the plane crosses one outbound (taxi → runway) for the first time per departure, ATC fires `"<id>, hold short of runway <DD>."` if speed is over 5 km/h and brakes aren't set; if brakes ARE set on the line, fires `"<id>, line up and wait runway <DD>."` instead. Both are one-shot per departure and re-arm on full-stop or resetPlane. Closes the taxi-out beat between the marshaller wave-off and the takeoff-clearance call so the ground phase has the same rhythm a real flight does.
+
+- [ ] Replay scrub bar — during the post-landing replay (the rolling 30s buffer), draw a thin horizontal scrub bar at the bottom of the screen showing playback position, with click-to-seek and drag-to-scrub support (touch + mouse). `←` / `→` arrow keys nudge ±1s, `Space` toggles play/pause inside the replay (separate from the existing `R`/click skip-out). Turns the replay from "watch it once and move on" into "actually study that bounce" without changing any of the existing skip plumbing.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
