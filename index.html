@@ -636,7 +636,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -7245,6 +7245,10 @@ const state = {
   // pill colors itself red only in the latter case.
   squawk: '1200',
   squawkEmerg: false,
+  // ATIS broadcast (Shift+A). Cooldown timestamp so a held shift+A doesn't
+  // fire-spam the ATC strip / chime; cleared on resetPlane() so a hot reset
+  // re-arms the call immediately.
+  atisCooldownUntil: 0,
   // Ring-chase mission state. Plane flies through `ringChain` in order; first
   // ring is armed at mission start, an axis-plane hit detector inside the
   // ring's loop advances `ringIdx`. Best time persisted to localStorage.
@@ -7549,6 +7553,17 @@ addEventListener('keydown', e=>{
   // startWarnTest() so the keyup handler can mirror the same checks.
   if (e.code==='KeyT' && e.shiftKey){ startWarnTest(); return; }
   if (e.code==='KeyT' && !e.shiftKey) state.todHours = (state.todHours + 1) % 24;
+  // Shift+A fires an ATIS broadcast for the nearest airport. Plain A is
+  // already mapped to roll-left via the global `keys` map, so we gate strictly
+  // on `e.shiftKey` here and clear the bucket entry so the keys map doesn't
+  // also see the press as a roll input on the same frame. Gating + range check
+  // (8 km of any field) lives inside triggerAtis(), so this handler stays thin.
+  if (e.code==='KeyA' && e.shiftKey){
+    e.preventDefault();
+    keys['KeyA'] = false;
+    triggerAtis();
+    return;
+  }
   // Shift+K toggles the pre-flight checklist overlay. Plain K opens the
   // transponder squawk keypad (handled in setupSquawkUi() below) and is
   // also tied to the pitch-down control via the global `keys` map, so we
@@ -8205,6 +8220,145 @@ function _nearestApId(){
   }
   return best ? best.id : 'KSEA';
 }
+// ATIS broadcast (Shift+A). Real-world ATIS is a looped automated weather +
+// runway-in-use feed. We don't run a tape loop — pressing Shift+A near an
+// airport just synthesizes the current line and pushes it through the same
+// ATC strip + a tiny sine chime + a status toast pill so it reads as
+// "📻 ATIS · KSEA ALFA · winds 240 at 12 …". The single-letter info ID is
+// stable per session (ALFA, BRAVO, …) so re-broadcasts within a session match
+// what the player heard last time, and rotates only on a fresh page load. The
+// existing `_windCall()` + `runwayDesignator()` + `state.todHours` drive every
+// number in the line so the broadcast can't drift from what the HUD shows.
+const ATIS_PHONETIC = ['ALFA','BRAVO','CHARLIE','DELTA','ECHO','FOXTROT','GOLF','HOTEL','INDIA','JULIETT','KILO','LIMA','MIKE','NOVEMBER','OSCAR','PAPA','QUEBEC','ROMEO','SIERRA','TANGO','UNIFORM','VICTOR','WHISKEY','XRAY','YANKEE','ZULU'];
+let _atisInfoId = ATIS_PHONETIC[Math.floor(Math.random() * ATIS_PHONETIC.length)];
+let _atisAltimeterInHg = (29.92 + Math.random() * 0.28); // 29.92..30.20, stable per session
+function _atisNearestAp(){
+  let best = null, bestD = 1e9;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < bestD){ bestD = d; best = a; }
+  }
+  return best ? { ap: best, dist: bestD } : null;
+}
+function _atisPhoneticDigits(str){
+  // "30.06" → "three zero point zero six". Used for altimeter so the spoken
+  // call sounds like a real ATIS read instead of mashing the digits together.
+  const map = { '0':'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'niner','.':'point','-':'dash' };
+  const out = [];
+  for (let i = 0; i < str.length; i++){
+    const c = str.charAt(i);
+    if (map[c]) out.push(map[c]);
+  }
+  return out.join(' ');
+}
+function _atisTempC(){
+  // Smooth diurnal curve: ~7°C around dawn (06:00) up to ~24°C mid-afternoon
+  // (15:00) and back down. cos() centred so 03:00 is coldest, 15:00 warmest.
+  const h = ((state.todHours % 24) + 24) % 24;
+  const base = 15.5;            // °C, daily mean
+  const swing = 8.5;            // °C, half peak-to-peak
+  const phase = (h - 15) / 24 * Math.PI * 2; // peak at 15:00
+  let t = base + swing * Math.cos(phase);
+  if (settings.rain) t -= 3;    // overcast cools things off a touch
+  return t;
+}
+function _atisZuluTimeStr(){
+  // The game world doesn't track a real timezone — emit todHours as the Zulu
+  // time so the call format still reads correct ("time eighteen thirty Zulu").
+  const h = ((state.todHours % 24) + 24) % 24;
+  const hh = Math.floor(h);
+  const mm = Math.floor((h - hh) * 60);
+  return String(hh).padStart(2,'0') + String(mm).padStart(2,'0');
+}
+function _atisRunwayInUse(ap){
+  // Wind-favoured runway end: pick whichever threshold yields the smaller
+  // tailwind component along the runway centreline (closest to a headwind).
+  // _windCall() uses the same atan2(-wx,-wz) FROM convention as the HUD, so we
+  // compute the wind vector once and project it onto both runway directions.
+  const wx = state.wind.x, wz = state.wind.z;
+  // Runway along-axis unit vector for the canonical heading (landing INTO +z
+  // when hdg=0). flip = -1 picks the opposite threshold.
+  const dotFor = (flip) => {
+    const cs = Math.cos(ap.hdg + (flip < 0 ? Math.PI : 0));
+    const sn = Math.sin(ap.hdg + (flip < 0 ? Math.PI : 0));
+    // Landing vector world XZ = (sin, cos) tilted by ap.hdg. We want the
+    // headwind component, so dot(wind, landing-direction-reversed) — i.e. the
+    // component of wind blowing INTO the landing direction. Positive = headwind.
+    return -(wx * sn + wz * cs);
+  };
+  // If wind is essentially calm, fall back to the canonical heading so the
+  // call doesn't flip-flop between equally-bad options every press.
+  const spd = Math.hypot(wx, wz);
+  if (spd < 1.5) return runwayDesignator(ap.hdg);
+  const aHead = dotFor( 1);
+  const bHead = dotFor(-1);
+  return runwayDesignator(aHead >= bHead ? ap.hdg : ap.hdg + Math.PI);
+}
+function _playAtisChime(){
+  // Two short sine pips (G5 → C6) so the broadcast reads as a structured call
+  // instead of a hollow text drop. Volume scaled by settings.volume like the
+  // rest of the one-shots.
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const vol = 0.10 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  const fire = (freq, when, dur) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, when);
+    g.gain.linearRampToValueAtTime(vol, when + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + dur + 0.02);
+  };
+  fire(784, t0,       0.16); // G5
+  fire(1047, t0 + 0.18, 0.22); // C6
+}
+// Trigger an ATIS broadcast. Gated to live flight only (not photo/replay/
+// pause/intro/crash) and requires being within 8 km of an airport so the
+// call reads as actually tuned-in instead of a desert-radio sting. The
+// 4.5s cooldown swallows double-taps so a held Shift+A doesn't fire-spam.
+function triggerAtis(){
+  if (state.introOpen || state.replayActive || state.photoMode || state.paused || state.crashed) return;
+  const now = performance.now();
+  if (state.atisCooldownUntil && now < state.atisCooldownUntil) return;
+  const found = _atisNearestAp();
+  if (!found || found.dist > 8000){
+    showStatus('NO ATIS', 'fly within 8 km of an airport', 'hard');
+    state.atisCooldownUntil = now + 1500;
+    return;
+  }
+  const ap = found.ap;
+  const info = _atisInfoId;
+  const windStr = (function(){
+    const spd = Math.hypot(state.wind.x, state.wind.z);
+    const kt = Math.round(spd * 1.94384);
+    if (kt < 3) return 'winds calm';
+    let from = Math.atan2(-state.wind.x, -state.wind.z) * 180/Math.PI;
+    if (from < 0) from += 360;
+    const dir = String(Math.round(from / 10) * 10 % 360).padStart(3,'0');
+    return 'winds ' + dir + ' at ' + kt;
+  })();
+  const altStr = _atisAltimeterInHg.toFixed(2);
+  const altSpoken = _atisPhoneticDigits(altStr);
+  const rwy = _atisRunwayInUse(ap);
+  const tempC = Math.round(_atisTempC());
+  const zStr = _atisZuluTimeStr();
+  const line = ap.id + ' information ' + info + ', ' + windStr
+             + ', altimeter ' + altSpoken
+             + ', runway ' + rwy + ' in use'
+             + ', temperature ' + tempC
+             + ', time ' + zStr + ' Zulu.';
+  pushATC(line, { tag:'ATIS', now:true });
+  _playAtisChime();
+  // ~6s on-screen pill (matches the typical spoken duration of the line).
+  showStatus('📻 ATIS · ' + ap.id + ' ' + info, windStr.toUpperCase() + ' · RWY ' + rwy + ' · ' + altStr, 'good');
+  state.atisCooldownUntil = now + 4500;
+}
 function atcIdleLines(){
   // Pool of filler lines, biased toward current state. Each entry is just a
   // string; we pick one at random when the idle timer fires. Keeping the pool
@@ -8414,6 +8568,9 @@ function resetPlane(){
   // respective thresholds (see step()).
   state.fuelWarnLow = false;
   state.fuelWarnCrit = false;
+  // ATIS cooldown: a hot reset re-arms the Shift+A broadcast immediately so
+  // the player can grab a fresh weather read the moment the new sortie starts.
+  state.atisCooldownUntil = 0;
   // Engine fire: clear flag + visuals + starve counter so a fresh sortie
   // starts cool, and reset the random-roll cooldown so the new flight is
   // immediately eligible (after the air-time gate inside maybeRollEngineFire).
