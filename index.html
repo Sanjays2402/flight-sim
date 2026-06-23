@@ -5020,6 +5020,114 @@ const PLANE_SHADOW_MAX_AGL = 600;      // fade out completely past here
 const PLANE_SHADOW_BASE_SX = 9.0;      // base width along wingspan, meters
 const PLANE_SHADOW_BASE_SZ = 7.0;      // base length along fuselage, meters
 
+// ====== ENTITY GROUND SHADOWS (AI plane + balloons) ======
+// Mirrors the player plane shadow rig for the AI circuit plane and the four
+// drifting hot-air balloons so the world stops having a single floating
+// shadow only ever under the player. Each entity gets its own thin
+// THREE.Mesh that *shares* `planeShadowTex` (one GPU upload covers all of
+// them), positioned each frame at the entity's (x,z) over terrain with the
+// same polygonOffset so it never z-fights runways/aprons/decks. Lazy-built
+// on the first tick after balloons exist (the balloons array is populated
+// further down the file).
+const entityShadows = []; // populated lazily; entries: { mesh, mat, kind, get }
+let _entityShadowsReady = false;
+function _initEntityShadows(){
+  if (_entityShadowsReady) return;
+  if (typeof aiPlane === 'undefined' || !Array.isArray(balloons)) return;
+  // AI plane shadow: same elliptical footprint as the player, slightly
+  // smaller because the AI airframe geometry is a touch shorter. Reuses
+  // planeShadowTex so no extra texture upload.
+  if (typeof aiPlane !== 'undefined' && aiPlane){
+    const aiMat = new THREE.MeshBasicMaterial({
+      map: planeShadowTex,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      blending: THREE.NormalBlending,
+    });
+    const aiMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), aiMat);
+    aiMesh.rotation.x = -Math.PI / 2;
+    aiMesh.renderOrder = 2;
+    aiMesh.visible = false;
+    scene.add(aiMesh);
+    entityShadows.push({
+      mesh: aiMesh, mat: aiMat, kind: 'aiplane',
+      get: () => aiPlane,
+      baseSx: 8.6, baseSz: 6.6,
+    });
+  }
+  // Balloons: a fat circular disc (no bank, no pitch — they're round). One
+  // shadow per balloon, all sharing the same texture as the player so the
+  // GPU only ever holds one shadow bitmap.
+  for (const b of balloons){
+    const bMat = new THREE.MeshBasicMaterial({
+      map: planeShadowTex,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      blending: THREE.NormalBlending,
+    });
+    const bMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), bMat);
+    bMesh.rotation.x = -Math.PI / 2;
+    bMesh.renderOrder = 2;
+    bMesh.visible = false;
+    scene.add(bMesh);
+    entityShadows.push({
+      mesh: bMesh, mat: bMat, kind: 'balloon',
+      get: () => b.mesh,
+      baseSx: 16, baseSz: 16, // sphere envelope ~14m radius -> a wide round shadow
+    });
+  }
+  _entityShadowsReady = true;
+}
+function updateEntityShadows(dt){
+  _initEntityShadows();
+  if (entityShadows.length === 0) return;
+  // Same global gates as the player shadow — intro/replay/photo wipe.
+  const hideAll = state.introOpen || state.replayActive || state.photoMode;
+  for (const ent of entityShadows){
+    const m = ent.get && ent.get();
+    if (!m || hideAll || !m.visible){
+      if (ent.mesh.visible) ent.mesh.visible = false;
+      continue;
+    }
+    const px = m.position.x, pz = m.position.z;
+    const groundY = (typeof terrainHeight === 'function')
+      ? terrainHeight(px, pz)
+      : 0;
+    const agl = Math.max(0, m.position.y - groundY);
+    if (agl > PLANE_SHADOW_MAX_AGL){
+      if (ent.mesh.visible) ent.mesh.visible = false;
+      continue;
+    }
+    const k = 1 - (agl / PLANE_SHADOW_MAX_AGL);
+    const opacity = 0.10 + 0.55 * k;
+    const sizeK = 1.0 + 1.4 * (agl / PLANE_SHADOW_MAX_AGL);
+    let sx = ent.baseSx * sizeK;
+    let sz = ent.baseSz * sizeK;
+    if (ent.kind === 'aiplane'){
+      // Match the player rig: stretch with bank/pitch so the disc reads as
+      // the silhouette projected straight down.
+      const roll  = m.rotation.z || 0;
+      const pitch = m.rotation.x || 0;
+      sx *= 1 / Math.max(0.35, Math.abs(Math.cos(roll)));
+      sz *= 1 / Math.max(0.55, Math.abs(Math.cos(pitch)));
+      ent.mesh.rotation.z = m.rotation.y || 0;
+    } else {
+      // Balloons are round — no yaw, no bank stretch.
+      ent.mesh.rotation.z = 0;
+    }
+    ent.mesh.position.set(px, groundY, pz);
+    ent.mesh.scale.set(sx, sz, 1);
+    ent.mat.opacity = opacity;
+    if (!ent.mesh.visible) ent.mesh.visible = true;
+  }
+}
+
 // matFuse / matAccent are shared across every airframe part, so swapping their
 // color repaints the whole plane in one shot. applyLivery() does the swap and
 // is called once at startup plus whenever the player picks a new scheme.
@@ -24593,6 +24701,7 @@ function loop(now){
   updateBinoculars(dt);
   updateSunGlare(dt);
   updatePlaneShadow(dt);
+  updateEntityShadows(dt);
   updateGVision(dt);
   // Crash debris field — advances shard physics + ages the smoke column.
   // Lives outside step() so shards still settle and smoke still drifts
