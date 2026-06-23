@@ -718,6 +718,11 @@
       <div class="hint">Cockpit windshield wipers. <kbd>N</kbd> cycles OFF/SLOW/FAST in flight. AUTO runs them while rain is on.</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">VOICE</span><span class="val" id="setVoiceV">RADIO</span></div>
+      <select id="setVoice"></select>
+      <div class="hint">Pilot/ATC voice callouts on the radio. RADIO = important calls only (clearance, gear, wind shear, terrain, fuel, ATIS, bird strike). FULL = every line on the strip. OFF = silent strip like before.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">COLD START</span><span class="val" id="setColdV">ON</span></div>
       <button id="setColdBtn" type="button" style="width:100%">TOGGLE COLD START</button>
       <div class="hint">Start each flight with engine off; press <kbd>I</kbd> on the ground to crank it over. Off = wheels-warm and ready to roll.</div>
@@ -996,7 +1001,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, aerobaticBest: 0 };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, aerobaticBest: 0, voice: 'radio' };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1033,6 +1038,18 @@ const WIPER_MODES = [
   { id: 'fast', name: 'FAST',  hz: 1.8 },
 ];
 const WIPER_MODE_IDS = WIPER_MODES.map(w => w.id);
+// Pilot voice callout modes for the ATC strip. OFF keeps the legacy silent
+// strip, RADIO speaks only the high-priority calls (clearance, gear warning,
+// wind shear, terrain pull-up, fuel critical, ATIS, bird strike), FULL speaks
+// every line that hits _renderATC. The synth itself is a tiny clipped-radio
+// formant emitter (chained sines + bandpass noise per syllable) wired through
+// the existing WebAudio context — no real TTS engine, no external assets.
+const VOICE_MODES = [
+  { id: 'radio', name: 'RADIO' },
+  { id: 'full',  name: 'FULL'  },
+  { id: 'off',   name: 'OFF'   },
+];
+const VOICE_MODE_IDS = VOICE_MODES.map(v => v.id);
 const settings = Object.assign({}, SETTINGS_DEFAULT);
 try {
   const raw = localStorage.getItem(SETTINGS_KEY);
@@ -1052,6 +1069,7 @@ try {
     if (typeof saved.pitotHeat === 'boolean') settings.pitotHeat = saved.pitotHeat;
     if (typeof saved.carbHeat === 'boolean') settings.carbHeat = saved.carbHeat;
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
+    if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -8630,6 +8648,13 @@ function _renderATC(entry){
   atcLastShownMs = performance.now();
   // Push the next idle filler back so we don't double up right after an event.
   atcNextIdleMs = atcLastShownMs + ATC_IDLE_MS;
+  // Speak the line through the radio voice synth when the setting allows it.
+  // Pure side-effect; defensive try so a synth glitch never breaks the strip.
+  try {
+    if (typeof speakVoiceLine === 'function' && _voiceShouldSpeak(entry)){
+      speakVoiceLine(entry.text);
+    }
+  } catch(e){ /* never let audio kill the HUD */ }
 }
 function _runwayFor(hdgRad){
   // Convert runway heading (radians, 0 = north along +z) into a 2-digit
@@ -9436,6 +9461,230 @@ function sfxReady(){
   const { ctx } = stallAudio;
   if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
   return ctx;
+}
+// ====== Pilot voice callouts ======
+// Tiny formant-ish radio voice. Not real TTS — each word is rasterized into a
+// short sequence of "syllable" tones (chained sine oscs at speech-like F1/F2
+// centred near 380/1700 Hz with a small pseudo-random vowel wobble) plus a
+// noise burst for any consonant in the syllable so it sounds like a clipped
+// radio voice (think distant flight-line chatter, not Siri). Whole signal is
+// pushed through a 300–2400 Hz bandpass + light waveshaper so the output
+// reads as "AM radio" instead of synthesizer test tones. Calls are queued
+// off the same WebAudio context as the rest of the SFX so we don't pile up
+// hardware nodes; volume tracks `settings.volume`. Voice priority list keeps
+// RADIO mode tight so the chatter doesn't become noise.
+const VOICE_PRIORITY_PHRASES = [
+  'cleared for takeoff', 'cleared to land', 'cleared to taxi',
+  'check gear down', 'gear down', 'gear up, check',
+  'wind shear', 'terrain', 'pull up',
+  'fuel state low', 'fuel critical', 'fuel exhausted',
+  'bird strike',
+  'mayday', 'declaring emergency', 'engine fire',
+  'oil pressure', 'engine overheat', 'airspeed unreliable',
+  'brakes overheated', 'carb ice'
+];
+function _voiceShouldSpeak(entry){
+  if (!entry || !entry.text) return false;
+  const mode = (settings.voice || 'off');
+  if (mode === 'off') return false;
+  if (state && state.photoMode) return false;
+  if (mode === 'full') return true;
+  // RADIO: only important calls. Prioritize by tag (ATIS / RA / PILOT mayday
+  // class) plus a keyword scan so phrasing variations still trip the filter.
+  const tag = (entry.tag || '').toUpperCase();
+  if (tag === 'ATIS') return true;
+  if (tag === 'RA') return true;
+  const lower = entry.text.toLowerCase();
+  for (let i = 0; i < VOICE_PRIORITY_PHRASES.length; i++){
+    if (lower.indexOf(VOICE_PRIORITY_PHRASES[i]) !== -1) return true;
+  }
+  return false;
+}
+let _voiceNextStartT = 0;          // ctx.currentTime cutoff to prevent overlap
+let _voiceShaperCurve = null;       // cached waveshaper curve
+function _voiceShaperCurveOnce(){
+  if (_voiceShaperCurve) return _voiceShaperCurve;
+  const n = 1024;
+  const c = new Float32Array(n);
+  const k = 2.8;                    // mild saturation — radio bite, not fuzz
+  for (let i = 0; i < n; i++){
+    const x = (i / (n - 1)) * 2 - 1;
+    c[i] = (1 + k) * x / (1 + k * Math.abs(x));
+  }
+  _voiceShaperCurve = c;
+  return _voiceShaperCurve;
+}
+function _voiceTokenize(text){
+  // Strip ATC tag-like clutter, split on whitespace + punctuation. Keep short
+  // tokens (numbers, ATC digits) intact so "runway 27" reads as two pulses.
+  return text
+    .replace(/[\u2014\u2013]/g, ' ')   // em/en dash → space
+    .replace(/[^a-zA-Z0-9\s]+/g, ' ')   // strip punctuation
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 24);                       // never read more than ~24 words
+}
+function _voiceWordSyllables(word){
+  // Rough syllable estimate — every run of vowels counts once, minimum 1.
+  const m = word.toLowerCase().match(/[aeiouy]+/g);
+  let n = m ? m.length : 1;
+  if (n < 1) n = 1;
+  if (n > 4) n = 4;
+  return n;
+}
+function _voiceWordHasFricative(word){
+  return /[sftxzkc]/i.test(word);
+}
+function _voiceWordVowelHint(word){
+  // Pick a vowel-driven formant bias so different vowels read distinctly
+  // (rough approximations: ee~270/2300, ah~700/1100, oh~450/800). Falls back
+  // to a mid-vowel when there is no vowel character.
+  const w = word.toLowerCase();
+  if (/ee|ea|ie|y/.test(w))         return { f1: 320,  f2: 2200 };
+  if (/oo|ou|ow/.test(w))           return { f1: 360,  f2: 900  };
+  if (/oh|oa/.test(w))              return { f1: 470,  f2: 880  };
+  if (/aw|au|al/.test(w))           return { f1: 600,  f2: 950  };
+  if (/a/.test(w))                  return { f1: 680,  f2: 1100 };
+  if (/e/.test(w))                  return { f1: 520,  f2: 1700 };
+  if (/i/.test(w))                  return { f1: 380,  f2: 2000 };
+  if (/o/.test(w))                  return { f1: 460,  f2: 850  };
+  if (/u/.test(w))                  return { f1: 400,  f2: 1100 };
+  return { f1: 480, f2: 1500 };
+}
+function speakVoiceLine(text){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const vol = 0.42 * settings.volume;
+  if (vol <= 0) return;
+  const tokens = _voiceTokenize(text);
+  if (!tokens.length) return;
+  // Shared bandpass + saturator stage — every syllable mixes into this one
+  // chain so the whole utterance sounds like a single radio source.
+  const bus = ctx.createGain();
+  bus.gain.value = 1.0;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1400;
+  bp.Q.value = 0.85;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 280;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2600;
+  const shaper = ctx.createWaveShaper();
+  shaper.curve = _voiceShaperCurveOnce();
+  shaper.oversample = '2x';
+  const out = ctx.createGain();
+  out.gain.value = vol;
+  bus.connect(hp).connect(bp).connect(lp).connect(shaper).connect(out).connect(ctx.destination);
+  // Schedule start: at-most one utterance at a time — if a previous voice
+  // line is still mid-readout, queue this one to start right after it ends.
+  let t = Math.max(ctx.currentTime + 0.04, _voiceNextStartT);
+  // Squelch click at the head of the transmission.
+  {
+    const sq = ctx.createOscillator();
+    sq.type = 'square';
+    sq.frequency.setValueAtTime(2400, t);
+    sq.frequency.exponentialRampToValueAtTime(900, t + 0.045);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t);
+    sg.gain.exponentialRampToValueAtTime(0.18, t + 0.005);
+    sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);
+    sq.connect(sg).connect(bus);
+    sq.start(t);
+    sq.stop(t + 0.06);
+  }
+  t += 0.06;
+  // Pre-build a small noise buffer for fricatives — reuse across syllables.
+  const nbuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.18), ctx.sampleRate);
+  {
+    const d = nbuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1);
+  }
+  for (let wi = 0; wi < tokens.length; wi++){
+    const word = tokens[wi];
+    const syl = _voiceWordSyllables(word);
+    const hint = _voiceWordVowelHint(word);
+    const hasFric = _voiceWordHasFricative(word);
+    const wordDur = 0.07 + Math.min(0.18, 0.045 * syl + 0.02 * word.length);
+    const sylDur = wordDur / syl;
+    for (let s = 0; s < syl; s++){
+      const ts = t + s * sylDur;
+      // Tiny per-syllable jitter so adjacent words don't read as identical pulses.
+      const f1 = hint.f1 * (1 + (Math.random() - 0.5) * 0.08);
+      const f2 = hint.f2 * (1 + (Math.random() - 0.5) * 0.06);
+      const f3 = 2600 + (Math.random() - 0.5) * 200;
+      // Two formant oscillators — sawtooth gives a buzzier vowel than sine.
+      const o1 = ctx.createOscillator();
+      o1.type = 'sawtooth';
+      o1.frequency.setValueAtTime(f1 * 0.5, ts);
+      o1.frequency.linearRampToValueAtTime(f1 * 0.5 * (1 + (Math.random()-0.5)*0.04), ts + sylDur * 0.9);
+      const g1 = ctx.createGain();
+      g1.gain.setValueAtTime(0.0001, ts);
+      g1.gain.exponentialRampToValueAtTime(0.25, ts + 0.015);
+      g1.gain.setValueAtTime(0.25, ts + sylDur * 0.65);
+      g1.gain.exponentialRampToValueAtTime(0.0005, ts + sylDur * 0.97);
+      o1.connect(g1).connect(bus);
+      o1.start(ts);
+      o1.stop(ts + sylDur);
+      const o2 = ctx.createOscillator();
+      o2.type = 'sine';
+      o2.frequency.setValueAtTime(f2, ts);
+      o2.frequency.linearRampToValueAtTime(f2 * (1 + (Math.random()-0.5)*0.05), ts + sylDur * 0.85);
+      const g2 = ctx.createGain();
+      g2.gain.setValueAtTime(0.0001, ts);
+      g2.gain.exponentialRampToValueAtTime(0.16, ts + 0.012);
+      g2.gain.exponentialRampToValueAtTime(0.0005, ts + sylDur * 0.95);
+      o2.connect(g2).connect(bus);
+      o2.start(ts);
+      o2.stop(ts + sylDur);
+      const o3 = ctx.createOscillator();
+      o3.type = 'sine';
+      o3.frequency.setValueAtTime(f3, ts);
+      const g3 = ctx.createGain();
+      g3.gain.setValueAtTime(0.0001, ts);
+      g3.gain.exponentialRampToValueAtTime(0.045, ts + 0.01);
+      g3.gain.exponentialRampToValueAtTime(0.0003, ts + sylDur * 0.92);
+      o3.connect(g3).connect(bus);
+      o3.start(ts);
+      o3.stop(ts + sylDur);
+      // Sharp consonant burst on syllables that own a fricative — short
+      // bandpassed noise hit at the head of the syllable.
+      if (hasFric && (s === 0 || s === syl - 1)){
+        const src = ctx.createBufferSource();
+        src.buffer = nbuf;
+        src.loop = false;
+        const nb = ctx.createBiquadFilter();
+        nb.type = 'bandpass';
+        nb.frequency.value = 3200 + Math.random() * 800;
+        nb.Q.value = 1.2;
+        const ng = ctx.createGain();
+        const tCons = ts + (s === 0 ? 0 : sylDur * 0.55);
+        ng.gain.setValueAtTime(0.0001, tCons);
+        ng.gain.exponentialRampToValueAtTime(0.12, tCons + 0.006);
+        ng.gain.exponentialRampToValueAtTime(0.0003, tCons + Math.min(0.08, sylDur * 0.5));
+        src.connect(nb).connect(ng).connect(bus);
+        src.start(tCons, Math.random() * 0.05, Math.min(0.09, sylDur * 0.55));
+      }
+    }
+    t += wordDur + 0.025;   // small inter-word breath
+  }
+  // Trailing squelch click — the unmistakable PTT release pop.
+  {
+    const sq = ctx.createOscillator();
+    sq.type = 'square';
+    sq.frequency.setValueAtTime(1800, t);
+    sq.frequency.exponentialRampToValueAtTime(700, t + 0.04);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t);
+    sg.gain.exponentialRampToValueAtTime(0.14, t + 0.004);
+    sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    sq.connect(sg).connect(bus);
+    sq.start(t);
+    sq.stop(t + 0.055);
+  }
+  _voiceNextStartT = t + 0.18;
 }
 function playGearClunk(){
   const ctx = sfxReady();
@@ -17084,6 +17333,8 @@ addEventListener('keydown', e => {
   const trailV = document.getElementById('setTrailV');
   const wiperSel = document.getElementById('setWiper');
   const wiperV = document.getElementById('setWiperV');
+  const voiceSel = document.getElementById('setVoice');
+  const voiceV = document.getElementById('setVoiceV');
   if (!panel || !btnOpen) return;
   // Build the livery chip row once. Each chip stores its index and repaints the
   // plane on click via applyLivery(); selection state is reflected on syncInputs.
@@ -17134,6 +17385,17 @@ addEventListener('keydown', e => {
     }
   }
   buildWiperOptions();
+  function buildVoiceOptions(){
+    if (!voiceSel) return;
+    voiceSel.innerHTML = '';
+    for (const opt of VOICE_MODES){
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.name;
+      voiceSel.appendChild(o);
+    }
+  }
+  buildVoiceOptions();
   function buildFogOptions(){
     if (!fogSel) return;
     fogSel.innerHTML = '';
@@ -17182,6 +17444,11 @@ addEventListener('keydown', e => {
     if (wiperV){
       const wm = WIPER_MODES.find(w => w.id === settings.wipers) || WIPER_MODES[0];
       wiperV.textContent = wm.name;
+    }
+    if (voiceSel) voiceSel.value = settings.voice;
+    if (voiceV){
+      const vm = VOICE_MODES.find(v => v.id === settings.voice) || VOICE_MODES[0];
+      voiceV.textContent = vm.name;
     }
     if (fogSel) fogSel.value = settings.fog;
     if (fogV){
@@ -17263,6 +17530,20 @@ addEventListener('keydown', e => {
       settings.wipers = v;
       syncInputs();
       saveSettings();
+    });
+  }
+  if (voiceSel){
+    voiceSel.addEventListener('change', () => {
+      const v = voiceSel.value;
+      if (VOICE_MODE_IDS.indexOf(v) === -1) return;
+      settings.voice = v;
+      syncInputs();
+      saveSettings();
+      // Quick demo when the player picks a non-OFF mode so they hear what
+      // they just selected without having to wait for an event.
+      if (v !== 'off'){
+        try { speakVoiceLine('Radio check, voice ' + (v === 'full' ? 'full' : 'radio') + '.'); } catch(e){}
+      }
     });
   }
   if (fogSel){
