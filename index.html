@@ -990,6 +990,7 @@
   <div class="gauge" id="cpOilGauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
   <div class="gauge gauge-wide" id="cpEngGauge"><canvas id="cpEng" width="440" height="220" title="Engine monitor — 4 EGT bars + CHT · Shift+G toggle"></canvas><div class="glbl">ENGINE MONITOR (EGT)</div></div>
   <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
+  <div class="gauge"><canvas id="cpSkid" width="220" height="220" title="Inclinometer — step on the ball for coordinated flight"></canvas><div class="glbl">SLIP / SKID</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
   <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
@@ -10181,6 +10182,13 @@ const state = {
   brakeTempC: 30,
   brakeOverheatLatch: false,
   brakeFadeT: 0,
+  // Slip-ball (inclinometer) deflection, smoothed. Range roughly [-1..+1]:
+  // +1 = ball pinned right (skidding right / slipping left), -1 = ball pinned
+  // left. Published from the physics step using the body-frame sideslip angle
+  // `beta` (rad). The cockpit Skid Ball gauge reads this directly; nothing
+  // else in the sim physics depends on it. Smoothed each frame so the ball
+  // floats naturally instead of snapping with single-frame jitter.
+  slipBall: 0,
   // Pitot icing (U toggles `pitotHeatOn`). Above PITOT_ICE_TRIGGER_ALT in
   // rain or cold-weather TOD windows, the pitot tube slowly freezes: the
   // airspeed indicator reading drifts toward 0 over ~25s, the player sees a
@@ -17446,6 +17454,22 @@ function step(dt){
   let aoa = 0;
   if (Math.abs(vFwd) > 0.5) aoa = Math.atan2(-vVert, Math.abs(vFwd));
   const beta = Math.abs(vFwd) > 0.5 ? Math.atan2(vBody.x, Math.abs(vFwd)) : 0;
+  // Publish a smoothed slip-ball deflection for the cockpit inclinometer.
+  // In flight the ball reads pure sideslip (beta in rad → roughly ±0.35 rad
+  // is a fully-pegged ball). On the ground / at very low speed beta collapses
+  // to 0, so fall back to a lateral-G proxy from body-frame lateral velocity
+  // so the ball still drifts during a taxi turn. EMA smoothing avoids the
+  // per-frame jitter pilots would otherwise see while the rudder is dancing.
+  {
+    const fast = Math.abs(vFwd) > 5;
+    const rawBall = fast
+      ? -(beta / 0.35)
+      : -(vBody.x / 6);
+    const _bk = Math.min(1, dt * 5);
+    state.slipBall += (rawBall - state.slipBall) * _bk;
+    if (state.slipBall >  1.6) state.slipBall =  1.6;
+    if (state.slipBall < -1.6) state.slipBall = -1.6;
+  }
 
   const flapDeg = state.flapDeg[state.flaps];
   const flapRad = flapDeg * Math.PI/180;
@@ -22788,6 +22812,7 @@ const cpRpmCv = document.getElementById('cpRpm');
 const cpChtCv = document.getElementById('cpCht');
 const cpOilCv = document.getElementById('cpOil');
 const cpMagCv = document.getElementById('cpMag');
+const cpSkidCv = document.getElementById('cpSkid');
 const cpBrkCv = document.getElementById('cpBrk');
 const cpFfCv  = document.getElementById('cpFf');
 const cpChrCv = document.getElementById('cpChr');
@@ -22808,6 +22833,7 @@ const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
 const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
 const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
+const cpSkidCtx = cpSkidCv && cpSkidCv.getContext('2d');
 const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
 const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
 const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
@@ -23619,6 +23645,97 @@ function drawCockpitMag(hdgDeg, dt){
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.fillText('MAG', cx, cy - R * 0.35);
 }
+function drawCockpitSkid(slipNorm){
+  // Classic inclinometer ("step on the ball"). A shallow curved glass tube
+  // sits across the lower half of the gauge face with an amber ball that
+  // drifts opposite the body-frame lateral acceleration: a left skid pushes
+  // the ball right ("step on the right rudder"), a right slip pushes it
+  // left. Two black reference posts mark the centered coordinated-flight
+  // position. Pure visual readout — nothing in the physics depends on it.
+  if (!cpSkidCtx) return;
+  const W = cpSkidCv.width, H = cpSkidCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpSkidCtx;
+  _cpBezel(ctx, W, H);
+  // Curved tube geometry: a wide, shallow arc whose chord runs across the
+  // lower third of the face. tubeR is the arc radius; tubeCY is the arc
+  // center sitting well below the visible face so only the bottom of the
+  // arc shows through. The ball travels along that arc.
+  const tubeCY = cy + R * 1.55;
+  const tubeR  = R * 1.85;
+  // Half-angle of the visible tube (from straight down). Wider = ball has
+  // more room to roam; this matches the look of a real C172 "step on the
+  // ball" inclinometer.
+  const halfA  = 0.42;
+  const aStart = -Math.PI/2 - halfA;
+  const aEnd   = -Math.PI/2 + halfA;
+  // Tube channel: a wide grey track with a slightly lighter inner stroke so
+  // the ball reads as sitting inside a glass tube instead of on a flat line.
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#2a3a4e';
+  ctx.lineWidth   = 22;
+  ctx.beginPath();
+  ctx.arc(cx, tubeCY, tubeR, aStart, aEnd);
+  ctx.stroke();
+  ctx.strokeStyle = '#0a1018';
+  ctx.lineWidth   = 14;
+  ctx.beginPath();
+  ctx.arc(cx, tubeCY, tubeR, aStart, aEnd);
+  ctx.stroke();
+  // Two black reference posts marking the coordinated (centered) ball
+  // position. These are the visual cue pilots line the ball up between.
+  const postHalf = 0.075;
+  function postAt(a, w, color){
+    const r1 = tubeR - 16;
+    const r2 = tubeR + 16;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, tubeCY + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, tubeCY + Math.sin(a) * r2);
+    ctx.stroke();
+  }
+  postAt(-Math.PI/2 - postHalf, 3.5, '#dfe');
+  postAt(-Math.PI/2 + postHalf, 3.5, '#dfe');
+  // Ball: amber glass marble, drifts along the tube with a subtle gradient
+  // so it reads as a sphere rather than a flat dot. Clamp the deflection so
+  // a hard slip pins the ball at the tube wall instead of running off the
+  // face of the gauge.
+  const dev    = Math.max(-1, Math.min(1, slipNorm || 0));
+  const ballA  = -Math.PI/2 + dev * halfA;
+  const ballX  = cx     + Math.cos(ballA) * tubeR;
+  const ballY  = tubeCY + Math.sin(ballA) * tubeR;
+  const ballR  = 10;
+  const grad = ctx.createRadialGradient(ballX - 3, ballY - 3, 2, ballX, ballY, ballR);
+  grad.addColorStop(0,   '#fff0b8');
+  grad.addColorStop(0.55,'#f0b020');
+  grad.addColorStop(1,   '#8a5a08');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(ballX, ballY, ballR, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#3a2a08';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(ballX, ballY, ballR, 0, Math.PI*2);
+  ctx.stroke();
+  // "INC" unit hint up top, matching the °C/PSI/MAG labels on neighboring
+  // gauges so the matched-set look survives.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('INC', cx, cy - R * 0.35);
+  // Coaching cue — only when the ball is noticeably off-center, and only in
+  // flight (on the ground every turn is uncoordinated by design, no point
+  // nagging the pilot during taxi). Whispers "L RUDDER" or "R RUDDER" so a
+  // new pilot learns to step on the ball.
+  const offMag = Math.abs(dev);
+  if (offMag > 0.22 && !state.onGround){
+    ctx.fillStyle = (offMag > 0.6) ? '#ff7a52' : '#ffb020';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText(dev > 0 ? 'R RUDDER' : 'L RUDDER', cx, cy + R * 0.78);
+  }
+}
 function drawCockpitBrake(tempC){
   if (!cpBrkCtx) return;
   const W = cpBrkCv.width, H = cpBrkCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
@@ -24429,6 +24546,22 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
     if (wantMon) drawEngineMonitor();
   }
   drawCockpitMag(magV, dt || 0);
+  // Inclinometer (slip/skid ball): published from the physics step into
+  // `state.slipBall`. During the avionics self-test, sweep the ball from
+  // the right wall back to center to mirror the other gauges' power-up
+  // dance; the live value picks up automatically once the self-test ends.
+  let skidV = state.slipBall || 0;
+  if (state.selfTestT >= 0){
+    const tT = Math.max(0, Math.min(1, state.selfTestT / SELF_TEST_S));
+    const upPhase = (tT < 0.5) ? (tT / 0.5) : 1;
+    const settle  = (tT < 0.5) ? 0 : ((tT - 0.5) / 0.5);
+    if (tT < 0.5){
+      skidV = upPhase;          // ball drifts to the right tube wall
+    } else {
+      skidV = (1 - settle) * 1 + settle * (state.slipBall || 0);
+    }
+  }
+  drawCockpitSkid(skidV);
   drawCockpitBrake(brkV);
   drawCockpitFuelFlow(ffOverride);
   // Tick the chronograph only while the panel is actually visible, and only
