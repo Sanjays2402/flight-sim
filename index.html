@@ -30,6 +30,13 @@
      PHOTO_HIDE_IDS so saved screenshots stay clean. */
   #windshieldRain { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #windshieldRain.show { display:block; }
+  /* Animated windshield wipers: two thin black blades sweeping across the
+     lower half of the screen in cockpit cam when rain wiping is active. Sits
+     just above #windshieldRain so the blades visibly streak the droplets off
+     the glass. Pointer-events off; hidden in photo mode via PHOTO_HIDE_IDS
+     so saved screenshots stay clean. */
+  #wipers { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
+  #wipers.show { display:block; }
   /* Soft additive sun glare. Sits above the 3D canvas but below the HUD,
      pointer-events off so clicks go through, hidden in photo mode so saved
      PNGs stay clean. */
@@ -453,6 +460,7 @@
 <canvas id="rainOverlay"></canvas>
 <canvas id="birdSplat"></canvas>
 <canvas id="windshieldRain"></canvas>
+<canvas id="wipers"></canvas>
 <canvas id="sunGlare"></canvas>
 <div id="bino"></div>
 <div id="hud" class="panel">
@@ -514,7 +522,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>Shift</kbd>+<kbd>I</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>Shift</kbd>+<kbd>I</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -563,6 +571,11 @@
       <div class="top"><span class="name">RAIN</span><span class="val" id="setRainV">OFF</span></div>
       <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">WIPERS</span><span class="val" id="setWiperV">AUTO</span></div>
+      <select id="setWiper"></select>
+      <div class="hint">Cockpit windshield wipers. <kbd>N</kbd> cycles OFF/SLOW/FAST in flight. AUTO runs them while rain is on.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">COLD START</span><span class="val" id="setColdV">ON</span></div>
@@ -806,7 +819,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto' };
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -821,6 +834,16 @@ const TRAIL_COLORS = [
   { id: 'magenta', name: 'MAGENTA', hex: 0xff4ad2 },
 ];
 const TRAIL_COLOR_IDS = TRAIL_COLORS.map(t => t.id);
+// Windshield wiper modes. `auto` runs at a steady cadence whenever rain is on,
+// `off` parks the blades, `slow`/`fast` are manual cycles. The `N` key cycles
+// off→slow→fast→off; the settings panel dropdown exposes the auto mode.
+const WIPER_MODES = [
+  { id: 'auto', name: 'AUTO',  hz: 0   }, // runs when rain is on at the slow rate
+  { id: 'off',  name: 'OFF',   hz: 0   },
+  { id: 'slow', name: 'SLOW',  hz: 1.0 },
+  { id: 'fast', name: 'FAST',  hz: 1.8 },
+];
+const WIPER_MODE_IDS = WIPER_MODES.map(w => w.id);
 const settings = Object.assign({}, SETTINGS_DEFAULT);
 try {
   const raw = localStorage.getItem(SETTINGS_KEY);
@@ -835,6 +858,7 @@ try {
     if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
     if (typeof saved.twinEngine === 'boolean') settings.twinEngine = saved.twinEngine;
     if (typeof saved.landingLight === 'boolean') settings.landingLight = saved.landingLight;
+    if (typeof saved.wipers === 'string' && ['off','slow','fast','auto'].indexOf(saved.wipers) !== -1) settings.wipers = saved.wipers;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -5271,6 +5295,22 @@ function toggleLandingLight(){
   setLandingLightBtn();
   showStatus('LANDING LIGHT ' + (state.landingLight ? 'ON' : 'OFF'), null, state.landingLight ? 'good' : 'hard');
 }
+// Manual wiper cycle: off → slow → fast → off. Auto stays parked in the
+// settings panel so a stray keypress can't unexpectedly latch the auto mode.
+// Persists the new mode to settings + flashes a status toast so the player
+// sees the change confirmed.
+function cycleWipers(){
+  const order = ['off','slow','fast'];
+  let i = order.indexOf(settings.wipers);
+  // If we were on 'auto', drop into the manual cycle starting at slow so a
+  // single tap on N feels predictable instead of jumping by two states.
+  if (i === -1) i = 0;
+  const next = order[(i + 1) % order.length];
+  settings.wipers = next;
+  saveSettings();
+  const label = next.toUpperCase();
+  showStatus('WIPERS ' + label, null, next === 'off' ? 'hard' : 'good');
+}
 // (Button wiring lives below the `state` declaration so the click handler can
 // read state.airshowSmoke safely; const TDZ would bite if we wired it here.)
 function updateAirshowSmoke(dt){
@@ -6450,7 +6490,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyQ','KeyE','KeyR','KeyJ','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyQ','KeyE','KeyR','KeyJ','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -6672,6 +6712,13 @@ addEventListener('keydown', e=>{
     // player toggles manually so we don't double-prompt the same approach.
     if (state.introOpen) return;
     toggleLandingLight();
+  }
+  if (e.code==='KeyN'){
+    // Windshield wipers cycle: off → slow → fast → off. Auto stays in the
+    // settings panel so the hotkey is a predictable three-step manual cycle
+    // (no surprise auto re-engagement on a stray press).
+    if (state.introOpen) return;
+    cycleWipers();
   }
   if (e.code==='KeyV'){
     // Quick-look check (cockpit only). Record the press time on keydown so
@@ -12929,6 +12976,167 @@ function updateWindshieldRain(dt){
   wsRainCtx.globalAlpha = 1.0;
 }
 
+// ====== WIPERS ======
+// Two black wiper blades pivoted near the bottom of the screen sweeping in
+// a synchronized fan pattern across the lower cockpit windshield. Only shown
+// in cockpit cam; modes are off / slow / fast (manual, `N` cycles) and auto
+// (runs at the slow cadence whenever it's raining). A short bandpassed-noise
+// "thwip" fires on each direction change. Hidden in photo / pause / replay /
+// intro so saved PNGs and frozen frames stay clean. Layers above the
+// windshield-rain canvas so the blades visibly streak across the droplets.
+const wiperCanvas = document.getElementById('wipers');
+const wiperCtx = wiperCanvas && wiperCanvas.getContext('2d');
+function sizeWiperCanvas(){
+  if (!wiperCanvas) return;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio, 2);
+  wiperCanvas.width = Math.max(1, Math.floor(w * dpr));
+  wiperCanvas.height = Math.max(1, Math.floor(h * dpr));
+  wiperCanvas.style.width = w + 'px';
+  wiperCanvas.style.height = h + 'px';
+  if (wiperCtx) wiperCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+sizeWiperCanvas();
+// Sweep phase in radians; advances each frame at the current mode's rate.
+// Wiper angle = sin(phase) * SWEEP_AMP, so phase=0 puts both blades parked at
+// center and the sin sweep gives a smooth ease-in/ease-out at each end.
+const WIPER_SWEEP_AMP = 0.62;   // ~36° half-arc on each side of center
+const WIPER_BLADE_LEN_FRAC = 0.36; // blade reaches ~36% of the canvas height
+let wiperPhase = 0;
+let wiperLastSign = 0;         // tracks sin(phase) sign for thwip trigger
+let wiperLastThwipMs = -1;     // simple debounce so re-entry can't spam SFX
+// Resolve the current sweep rate (Hz) from the mode + rain state. Auto runs
+// at the slow rate while rain is on, otherwise idle (rate=0). Off always 0.
+function wiperRateHz(){
+  const mode = (WIPER_MODES.find(w => w.id === settings.wipers) || WIPER_MODES[0]).id;
+  if (mode === 'off') return 0;
+  if (mode === 'slow') return 1.0;
+  if (mode === 'fast') return 1.8;
+  // auto: cadence keyed to rain. Tighten this later if rain ever gets an
+  // intensity setting; today rain is a boolean toggle.
+  return settings.rain ? 1.0 : 0;
+}
+// Soft bandpassed-noise "thwip" each time the blades reverse. Reuses the
+// shared sfx context so no new hardware nodes get allocated.
+function playWiperThwip(){
+  const now = performance.now();
+  if (wiperLastThwipMs > 0 && (now - wiperLastThwipMs) < 120) return; // dedup
+  wiperLastThwipMs = now;
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const vol = 0.07 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  const dur = 0.075;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1) * (1 - i/data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 900;
+  bp.Q.value = 1.6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.01);
+}
+function updateWipers(dt){
+  if (!wiperCanvas || !wiperCtx) return;
+  // Same gating rules every other windshield overlay follows.
+  const cockpit = state.cam === 1;
+  const show = cockpit && !state.photoMode && !state.replayActive && !state.paused && !state.introOpen;
+  if (!show){
+    wiperCanvas.classList.remove('show');
+    // Park the phase at 0 so re-entering cockpit cam doesn't start mid-sweep.
+    wiperPhase = 0;
+    wiperLastSign = 0;
+    return;
+  }
+  const hz = wiperRateHz();
+  if (hz <= 0){
+    // Mode is off (or auto + rain off). Ease the blades back to parked and
+    // skip drawing entirely once they're settled so we don't burn pixels.
+    wiperCanvas.classList.remove('show');
+    wiperPhase = 0;
+    wiperLastSign = 0;
+    return;
+  }
+  wiperCanvas.classList.add('show');
+  // Advance phase. Multiplying by 2pi turns Hz into rad/sec; one full sin
+  // cycle = one left–right–left sweep, which matches a real wiper pass.
+  wiperPhase += hz * Math.PI * 2 * dt;
+  // Detect zero crossings of sin(phase) to fire the thwip at end-of-stroke
+  // (where real wipers smack into the reverse stop). We trigger on the sign
+  // flip of cos(phase), which is the sweep velocity — reverses exactly when
+  // the blade reaches its travel limit.
+  const vel = Math.cos(wiperPhase);
+  const sign = vel > 0 ? 1 : (vel < 0 ? -1 : 0);
+  if (sign !== 0 && wiperLastSign !== 0 && sign !== wiperLastSign){
+    playWiperThwip();
+  }
+  if (sign !== 0) wiperLastSign = sign;
+  // Draw the two blades. Pivots sit just below the lower edge so the arc
+  // sweeps across the visible cockpit area; blade length is a fraction of
+  // canvas height so it scales naturally with window size. Offset by a small
+  // angle bias per blade so the driver/passenger blades don't perfectly
+  // overlap at the center of their sweeps.
+  const w = innerWidth, h = innerHeight;
+  wiperCtx.clearRect(0, 0, w, h);
+  const angle = Math.sin(wiperPhase) * WIPER_SWEEP_AMP;
+  const len = h * WIPER_BLADE_LEN_FRAC;
+  // Two blades: left half and right half of the windshield. Pivots at the
+  // outer bottom corners of an imaginary 80%-wide glass pane, so the arms
+  // sweep inward toward each other at center sweep — the classic dual-arm
+  // fan layout.
+  const py = h + 8; // 8px below the bottom edge so the pivot hub is offscreen
+  const xL = w * 0.30, xR = w * 0.70;
+  const blades = [
+    { px: xL, base: -0.05, dir: 1 },  // sweeps right with positive angle
+    { px: xR, base:  0.05, dir: 1 },  // mirrors slightly so they fan together
+  ];
+  wiperCtx.lineCap = 'round';
+  wiperCtx.lineJoin = 'round';
+  for (const b of blades){
+    const a = b.base + angle * b.dir - Math.PI / 2; // -pi/2 = straight up
+    const tipX = b.px + Math.cos(a) * len;
+    const tipY = py + Math.sin(a) * len;
+    // Wiper arm (slim dark line).
+    wiperCtx.strokeStyle = 'rgba(12, 14, 18, 0.78)';
+    wiperCtx.lineWidth = 3.0;
+    wiperCtx.beginPath();
+    wiperCtx.moveTo(b.px, py);
+    wiperCtx.lineTo(tipX, tipY);
+    wiperCtx.stroke();
+    // Wiper blade rubber (slightly thicker, slightly inset along the arm).
+    const dx = tipX - b.px, dy = tipY - py;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+    // Perpendicular for blade width.
+    const nx = -uy, ny = ux;
+    const inset = len * 0.18;
+    const bladeStartX = b.px + ux * inset;
+    const bladeStartY = py   + uy * inset;
+    const bladeEndX = tipX - ux * (len * 0.02);
+    const bladeEndY = tipY - uy * (len * 0.02);
+    wiperCtx.strokeStyle = 'rgba(20, 22, 26, 0.88)';
+    wiperCtx.lineWidth = 5.5;
+    wiperCtx.beginPath();
+    wiperCtx.moveTo(bladeStartX + nx * 0.5, bladeStartY + ny * 0.5);
+    wiperCtx.lineTo(bladeEndX   + nx * 0.5, bladeEndY   + ny * 0.5);
+    wiperCtx.stroke();
+    // Tiny pivot hub for the arm so the bottom of the screen reads as a
+    // mechanical mount, not a floating line.
+    wiperCtx.fillStyle = 'rgba(36, 40, 46, 0.9)';
+    wiperCtx.beginPath();
+    wiperCtx.arc(b.px, py, 6, 0, Math.PI * 2);
+    wiperCtx.fill();
+  }
+}
+
 // ====== SUN GLARE ======
 // Soft additive glare disc plus a faint streak across the frame whenever the
 // camera looks roughly toward the sun. Fades out as the angle widens and as
@@ -13148,6 +13356,7 @@ function loop(now){
   updateRainOverlay(dt);
   updateBirdSplat(dt);
   updateWindshieldRain(dt);
+  updateWipers(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
   renderer.render(scene, camera);
@@ -13160,6 +13369,7 @@ addEventListener('resize', ()=>{
   sizeRainCanvas();
   sizeBirdSplatCanvas();
   sizeWindshieldRainCanvas();
+  sizeWiperCanvas();
   sizeSunGlareCanvas();
 });
 
@@ -13180,7 +13390,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -13501,6 +13711,8 @@ addEventListener('keydown', e => {
   const twinV = document.getElementById('setTwinV');
   const trailSel = document.getElementById('setTrail');
   const trailV = document.getElementById('setTrailV');
+  const wiperSel = document.getElementById('setWiper');
+  const wiperV = document.getElementById('setWiperV');
   if (!panel || !btnOpen) return;
   // Build the livery chip row once. Each chip stores its index and repaints the
   // plane on click via applyLivery(); selection state is reflected on syncInputs.
@@ -13540,6 +13752,17 @@ addEventListener('keydown', e => {
     }
   }
   buildTrailOptions();
+  function buildWiperOptions(){
+    if (!wiperSel) return;
+    wiperSel.innerHTML = '';
+    for (const opt of WIPER_MODES){
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.name;
+      wiperSel.appendChild(o);
+    }
+  }
+  buildWiperOptions();
   function syncInputs(){
     sens.value = Math.round(settings.sensitivity * 100);
     fov.value = Math.round(settings.fov);
@@ -13572,6 +13795,11 @@ addEventListener('keydown', e => {
     if (trailV){
       const tc = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
       trailV.textContent = tc.name;
+    }
+    if (wiperSel) wiperSel.value = settings.wipers;
+    if (wiperV){
+      const wm = WIPER_MODES.find(w => w.id === settings.wipers) || WIPER_MODES[0];
+      wiperV.textContent = wm.name;
     }
   }
   function applyFov(){
@@ -13637,6 +13865,15 @@ addEventListener('keydown', e => {
       const v = trailSel.value;
       if (TRAIL_COLOR_IDS.indexOf(v) === -1) return;
       settings.trailColor = v;
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (wiperSel){
+    wiperSel.addEventListener('change', () => {
+      const v = wiperSel.value;
+      if (WIPER_MODE_IDS.indexOf(v) === -1) return;
+      settings.wipers = v;
       syncInputs();
       saveSettings();
     });
