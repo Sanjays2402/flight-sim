@@ -2027,6 +2027,183 @@ function applyTimeOfDay(h){
   skyUniforms.sunColor = m.uniforms.sunColor;
 }
 
+// ====== STAR DOME ======
+// A celestial dome of additive point sprites that fades in past dusk using
+// the same sun-altitude curve the runway edge lights already drive (nightT,
+// returned by applyTimeOfDay). ~400 dim background stars + ~30 brighter
+// "named" stars near the zenith that twinkle on a slow sin² flicker so the
+// eye actually picks the night sky out as alive. The whole group counter-
+// rotates against the day cycle (one full revolution per in-sim day, opposite
+// the sun) so a long night flight visibly drifts the star field across the
+// sky instead of leaving it pinned. Pure scenery — one CanvasTexture, two
+// THREE.Points meshes, no audio, no allocations per frame.
+let starDimMat = null, starBrightMat = null, starGroup = null;
+let starBrightTwinklePhases = null; // Float32Array, one per bright star
+let starBrightAttr = null;          // BufferAttribute for live opacity-per-vertex
+{
+  // Soft round additive dot texture so PointsMaterial doesn't render boxy.
+  const starCv = document.createElement('canvas');
+  starCv.width = starCv.height = 32;
+  const sctx = starCv.getContext('2d');
+  const grd = sctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.35, 'rgba(220,235,255,0.7)');
+  grd.addColorStop(1, 'rgba(180,210,255,0)');
+  sctx.fillStyle = grd;
+  sctx.fillRect(0, 0, 32, 32);
+  const starTex = new THREE.CanvasTexture(starCv);
+  starTex.minFilter = THREE.LinearFilter;
+  starTex.magFilter = THREE.LinearFilter;
+
+  starGroup = new THREE.Group();
+  scene.add(starGroup);
+
+  const STAR_RADIUS = 16000; // safely inside the 20000 sky-dome shell
+
+  // ---- Dim background stars (~400) ----
+  const DIM_COUNT = 400;
+  const dimPos = new Float32Array(DIM_COUNT * 3);
+  const dimColor = new Float32Array(DIM_COUNT * 3);
+  for (let i = 0; i < DIM_COUNT; i++){
+    // Uniform distribution on the upper hemisphere (y >= 0 keeps stars
+    // above the horizon; below-horizon stars would clip through terrain).
+    const u = Math.random();
+    const v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(v); // 0..π/2 => upper hemisphere only
+    const sx = STAR_RADIUS * Math.sin(phi) * Math.cos(theta);
+    const sy = STAR_RADIUS * Math.cos(phi);
+    const sz = STAR_RADIUS * Math.sin(phi) * Math.sin(theta);
+    dimPos[i*3+0] = sx;
+    dimPos[i*3+1] = sy;
+    dimPos[i*3+2] = sz;
+    // Slight blue-white color jitter so the field isn't monochrome.
+    const warmth = Math.random();
+    dimColor[i*3+0] = 0.78 + warmth * 0.22;
+    dimColor[i*3+1] = 0.86 + warmth * 0.14;
+    dimColor[i*3+2] = 1.0;
+  }
+  const dimGeo = new THREE.BufferGeometry();
+  dimGeo.setAttribute('position', new THREE.BufferAttribute(dimPos, 3));
+  dimGeo.setAttribute('color', new THREE.BufferAttribute(dimColor, 3));
+  starDimMat = new THREE.PointsMaterial({
+    map: starTex,
+    size: 110,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.0,           // driven by tickStarDome -> nightT
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+    fog: false              // fog would swallow stars at 16km
+  });
+  const dimPoints = new THREE.Points(dimGeo, starDimMat);
+  dimPoints.frustumCulled = false;
+  dimPoints.renderOrder = -1; // paint right after the sky shell, before clouds
+  starGroup.add(dimPoints);
+
+  // ---- Brighter "named" stars (~30) near the zenith, with twinkle ----
+  const BRIGHT_COUNT = 30;
+  const brPos = new Float32Array(BRIGHT_COUNT * 3);
+  const brColor = new Float32Array(BRIGHT_COUNT * 3);
+  const brOpacity = new Float32Array(BRIGHT_COUNT); // per-vertex live alpha
+  starBrightTwinklePhases = new Float32Array(BRIGHT_COUNT);
+  for (let i = 0; i < BRIGHT_COUNT; i++){
+    const u = Math.random();
+    // Bias toward zenith: cos(phi) closer to 1 means higher in the sky.
+    // Mapping v from a soft floor keeps the bright cluster overhead.
+    const v = 0.55 + Math.random() * 0.45;
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(v);
+    const sx = STAR_RADIUS * Math.sin(phi) * Math.cos(theta);
+    const sy = STAR_RADIUS * Math.cos(phi);
+    const sz = STAR_RADIUS * Math.sin(phi) * Math.sin(theta);
+    brPos[i*3+0] = sx;
+    brPos[i*3+1] = sy;
+    brPos[i*3+2] = sz;
+    const warmth = Math.random();
+    brColor[i*3+0] = 0.85 + warmth * 0.15;
+    brColor[i*3+1] = 0.92 + warmth * 0.08;
+    brColor[i*3+2] = 1.0;
+    brOpacity[i] = 1.0;
+    starBrightTwinklePhases[i] = Math.random() * Math.PI * 2;
+  }
+  const brGeo = new THREE.BufferGeometry();
+  brGeo.setAttribute('position', new THREE.BufferAttribute(brPos, 3));
+  brGeo.setAttribute('color', new THREE.BufferAttribute(brColor, 3));
+  starBrightAttr = new THREE.BufferAttribute(brOpacity, 1);
+  starBrightAttr.setUsage(THREE.DynamicDrawUsage);
+  brGeo.setAttribute('aOpacity', starBrightAttr);
+  starBrightMat = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: starTex },
+      uGlobalAlpha: { value: 0.0 }
+    },
+    vertexShader: `
+      attribute vec3 color;
+      attribute float aOpacity;
+      varying vec3 vColor;
+      varying float vOpacity;
+      void main(){
+        vColor = color;
+        vOpacity = aOpacity;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = 240.0 * (300.0 / max(1.0, -mv.z));
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform float uGlobalAlpha;
+      varying vec3 vColor;
+      varying float vOpacity;
+      void main(){
+        vec4 t = texture2D(map, gl_PointCoord);
+        gl_FragColor = vec4(vColor * t.rgb, t.a * vOpacity * uGlobalAlpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false
+  });
+  const brPoints = new THREE.Points(brGeo, starBrightMat);
+  brPoints.frustumCulled = false;
+  brPoints.renderOrder = -1;
+  starGroup.add(brPoints);
+
+  // Hidden until first nightT push so day load shows nothing.
+  starGroup.visible = false;
+}
+let _starTwinkleT = 0;
+function tickStarDome(dt, nightT){
+  if (!starGroup) return;
+  const visible = nightT > 0.001;
+  starGroup.visible = visible;
+  if (!visible) return;
+  // Counter-rotate the celestial dome against the day cycle: one full
+  // revolution per in-sim day, opposite the sun's east→west arc, so a long
+  // dusk→dawn sit visibly sweeps stars across the sky.
+  starGroup.rotation.y = -((state.todHours || 0) * (Math.PI / 12));
+  // Dim layer fades smoothly to peak alpha at full night.
+  if (starDimMat) starDimMat.opacity = 0.85 * nightT;
+  // Bright layer: per-star sin² twinkle on a slow 1.4 Hz beat with
+  // individual phase offsets so the cluster doesn't pulse in lockstep.
+  if (starBrightMat && starBrightAttr && starBrightTwinklePhases){
+    _starTwinkleT += dt;
+    starBrightMat.uniforms.uGlobalAlpha.value = nightT;
+    const arr = starBrightAttr.array;
+    const phases = starBrightTwinklePhases;
+    for (let i = 0; i < arr.length; i++){
+      const s = Math.sin(_starTwinkleT * 1.4 + phases[i]);
+      // sin² keeps the wave gentle and >=0; bias into a 0.55..1.0 range so
+      // even "dim" twinkle frames still read as a star.
+      arr[i] = 0.55 + 0.45 * (s * s);
+    }
+    starBrightAttr.needsUpdate = true;
+  }
+}
+
 // ====== TERRAIN ======
 const WORLD = 30000;
 const T_SEG = 160;
@@ -16904,7 +17081,10 @@ function step(dt){
   // the freshly-decayed flare value when it sets emissive colors.
   tickRunwayFlares(dt);
   tickSkidmarks(dt);
-  applyTimeOfDay(state.todHours);
+  const _tod = applyTimeOfDay(state.todHours);
+  // Star dome fades in/out and twinkles on the same sun-altitude curve the
+  // runway edge lights already use, so dawn/dusk transitions stay smooth.
+  tickStarDome(dt, (_tod && _tod.nightT) || 0);
   tickAirportBeacons(dt);
   tickNavLights(dt);
   tickLandingLight(dt);
