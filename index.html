@@ -10457,6 +10457,9 @@ function _renderATC(entry){
   atcLastShownMs = performance.now();
   // Push the next idle filler back so we don't double up right after an event.
   atcNextIdleMs = atcLastShownMs + ATC_IDLE_MS;
+  // Squelch / mic-key burst so the strip reads as a real radio coming alive.
+  // Internally photo-mode + strip-hidden + 4-in-2s gated so it can't spam.
+  try { if (typeof _maybePlayATCSquelch === 'function') _maybePlayATCSquelch(); } catch(e){ /* never let audio kill the HUD */ }
   // Speak the line through the radio voice synth when the setting allows it.
   // Pure side-effect; defensive try so a synth glitch never breaks the strip.
   try {
@@ -11831,6 +11834,82 @@ function playFlapWhoosh(){
   src.connect(bp).connect(g).connect(ctx.destination);
   src.start(t0);
   src.stop(t0 + dur + 0.02);
+}
+// Squelch / mic-key burst that fires whenever a new ATC line hits the strip.
+// Two layers stacked so it reads as a real radio coming alive instead of a
+// random hiss: (1) a very short ~14 ms bandpass-noise "click" at ~2.4 kHz to
+// sell the PTT key-down, then (2) the ~80 ms tail of bandpassed white noise
+// at ~1.6 kHz that fades out as if the carrier is releasing. Volume is low
+// enough that it sits under the engine and the voice synth without stomping
+// either. Reuses the shared sfxReady() WebAudio context — no new hardware
+// nodes, no new assets.
+function playRadioSquelch(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.10 * settings.volume;
+  if (vol <= 0) return;
+  // (1) Mic-key click: 14 ms narrow bandpass burst.
+  const clkDur = 0.014;
+  const clkBuf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * clkDur)), ctx.sampleRate);
+  const clkData = clkBuf.getChannelData(0);
+  for (let i = 0; i < clkData.length; i++) clkData[i] = (Math.random()*2-1) * (1 - i/clkData.length);
+  const clkSrc = ctx.createBufferSource();
+  clkSrc.buffer = clkBuf;
+  const clkBp = ctx.createBiquadFilter();
+  clkBp.type = 'bandpass';
+  clkBp.frequency.value = 2400;
+  clkBp.Q.value = 1.8;
+  const clkG = ctx.createGain();
+  clkG.gain.setValueAtTime(vol * 0.85, t0);
+  clkG.gain.exponentialRampToValueAtTime(0.0001, t0 + clkDur + 0.01);
+  clkSrc.connect(clkBp).connect(clkG).connect(ctx.destination);
+  clkSrc.start(t0);
+  clkSrc.stop(t0 + clkDur + 0.02);
+  // (2) Squelch hiss: ~80 ms bandpass noise tail, opens just after the click.
+  const hissStart = t0 + clkDur * 0.5;
+  const hissDur = 0.08;
+  const hissBuf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * hissDur)), ctx.sampleRate);
+  const hissData = hissBuf.getChannelData(0);
+  for (let i = 0; i < hissData.length; i++) hissData[i] = (Math.random()*2-1);
+  const hissSrc = ctx.createBufferSource();
+  hissSrc.buffer = hissBuf;
+  const hissBp = ctx.createBiquadFilter();
+  hissBp.type = 'bandpass';
+  hissBp.frequency.value = 1600;
+  hissBp.Q.value = 0.9;
+  const hissG = ctx.createGain();
+  hissG.gain.setValueAtTime(0.0, hissStart);
+  hissG.gain.linearRampToValueAtTime(vol * 0.55, hissStart + 0.008);
+  hissG.gain.exponentialRampToValueAtTime(0.0001, hissStart + hissDur);
+  hissSrc.connect(hissBp).connect(hissG).connect(ctx.destination);
+  hissSrc.start(hissStart);
+  hissSrc.stop(hissStart + hissDur + 0.02);
+}
+// Ring buffer of recent squelch times (ms). Keeps the radio from machine-
+// gunning the player when several pushATC calls fire in the same beat
+// (e.g. flap + gear + wind shear all landing inside 1 s). Capped at the
+// last 4 firings; the moment a 5th wants to fire inside 2 s it gets eaten.
+const _atcSquelchTimes = [];
+function _maybePlayATCSquelch(){
+  // Skip when the strip itself isn't visible — photo mode hides #atc via
+  // PHOTO_HIDE_IDS and setHudHidden sets display:none, so reading that
+  // covers both the photo path and any future explicit hide.
+  if (!atcEl) return;
+  if (state && state.photoMode) return;
+  // Inline-style check: when setHudHidden hides the strip it sets
+  // style.display = 'none', so we can read that without touching the
+  // computed style every frame.
+  if (atcEl.style && atcEl.style.display === 'none') return;
+  const now = performance.now();
+  // Drop expired entries before the cap check so the limiter only counts
+  // firings inside the last 2 s.
+  while (_atcSquelchTimes.length && now - _atcSquelchTimes[0] > 2000){
+    _atcSquelchTimes.shift();
+  }
+  if (_atcSquelchTimes.length >= 4) return; // machine-gun guard
+  _atcSquelchTimes.push(now);
+  try { playRadioSquelch(); } catch(e){ /* never let audio kill the HUD */ }
 }
 // GPWS "PULL UP" beep — sharp, short, urgent. Two-tone square-ish chirp
 // (~900Hz → 1200Hz) so it cuts through the engine and stall horn. Called
