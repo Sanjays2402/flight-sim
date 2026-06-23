@@ -174,6 +174,16 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Squawk code on the HUD — small `SQ 1200` readout under the ATC ticker that shows a 4-digit transponder code (VFR default `1200`, hop missions get a unique random per-leg code, emergencies auto-set `7700` on engine fire / low fuel red / airframe damage past 80%, and a fading amber pulse when the code changes). Free flavor that finally puts the transponder dial pilots actually fiddle with in real life onto the HUD without any new physics.
+
+- [ ] Brake-temperature gauge — seventh small canvas in the cockpit panel showing brake disc temperature (°C). Climbs while `B` is held against ground roll (scaled by speed × brake force × dt), bleeds back to ambient at ~3°C/sec free-rolling, and to ~8°C/sec when stopped on apron (cooling airflow). Green band 30-180°C, red redline past 320°C. Past the redline, brake friction drops 50% for the next 6s (latched + ATC "Brakes overheated, cool before next stop" call) so dragging brakes down a long rollout has a real consequence. Cools naturally with the existing apron-refuel hang time, so the loop self-balances.
+
+- [ ] Touch-and-go counter on the HUD — small `T&G x3` pill that ticks up every time the player completes a runway touchdown + lift-off within 12s without coming to a full stop. Resets to 0 on a full-stop landing or a crash, and bumps a permanent `BEST T&G STREAK` row in pilot stats when the current streak beats it. Pure scorekeeping — no new physics — that finally rewards the touch-and-go practice loop instead of treating every pass as a fresh landing in the logbook.
+
+- [ ] Wind direction labels on the windsock pole — paint a tiny white compass-rose ring (N/E/S/W ticks + degree marks) on the base of each airport windsock pole, ~1.2 m diameter, lying flat on the ground. Pilots taxiing past now get a runway-aligned visual cue for where the wind is actually blowing from without having to read the HUD wind readout. Reuses the existing windsock anchor so it's three lines of `CircleGeometry` + a canvas-texture material per airport, zero new physics. Pairs naturally with the existing sock inflation animation so the whole assembly reads as one weather station.
+
+- [ ] Distance-to-runway readout on the HUD — small `RWY 1.4km` pill under the AGL readout that shows straight-line distance to the nearest runway threshold (whichever end you're closer to), with a small arrow next to it pointing toward the threshold. Updates live as you maneuver, hides above 5 km or when on the ground. Reuses the same `landingProj` / nearest-runway plumbing the glideslope indicator already runs every frame so it's basically a free derived readout — but turns the existing mini-map distance estimate into an actual hard number pilots can call out on downwind to base.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
