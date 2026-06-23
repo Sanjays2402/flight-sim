@@ -42,6 +42,18 @@
      PNGs stay clean. */
   #sunGlare { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; mix-blend-mode:screen; }
   #sunGlare.show { display:block; }
+  /* G-force vision effects: positive Gs above ~5 g fade a black radial vignette
+     in from the edges (greyout → full tunnel vision near 8 g), prolonged
+     negative Gs below -2 g fade a soft red tint over the frame (redout).
+     Two stacked layers in one div so opacities ease independently — the
+     vignette is a radial gradient (transparent center, opaque edges) layered
+     under a flat red wash. Pointer-events off so it never eats clicks, sits
+     above the 3D world and weather but below all HUD chrome so gauges stay
+     readable through the tunnel. Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #gvision { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
+  #gvision.show { display:block; }
+  #gvision .grey { position:absolute; inset:0; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,1) 100%); opacity:0; }
+  #gvision .red  { position:absolute; inset:0; background: rgba(180,20,20,0.55); mix-blend-mode:multiply; opacity:0; }
   /* Binoculars overlay: dark vignette + faint reticle ring that fades in while
      the player holds B in an external cam. Sits above the 3D world and rain but
      below all HUD chrome (z-index:2) so the gauges and minimap stay readable
@@ -477,6 +489,7 @@
 <canvas id="windshieldRain"></canvas>
 <canvas id="wipers"></canvas>
 <canvas id="sunGlare"></canvas>
+<div id="gvision"><div class="grey"></div><div class="red"></div></div>
 <div id="bino"></div>
 <div id="hud" class="panel">
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h<span id="asiTag" style="display:none;margin-left:6px;color:#ff5252;font-weight:700">ASI</span><span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
@@ -6196,6 +6209,15 @@ const state = {
   // overlay fade smoothly rather than snapping. Release to snap back.
   binoActive: false,
   binoT: 0,
+  // G-force vision effects: greyout/redout. gSigned mirrors the lift-derived
+  // G load WITHOUT clamping to zero so we can detect negative-G pushovers
+  // (inverted). gGreyT eases the greyout vignette opacity 0..1 (above ~5 g),
+  // gRedT eases the redout tint opacity 0..1 (below ~-2 g). Both ease in over
+  // ~1.5s and out over ~2s so a brief snap pull doesn't dim the world, and
+  // both reset to 0 on resetPlane / pause / photo / replay / intro.
+  gSigned: 1.0,
+  gGreyT: 0,
+  gRedT: 0,
   // Quick-look check: in cockpit cam, hold V to swing the head ~90° left and
   // release to snap back; tap-tap V toggles a 90° right lock so you can hold
   // the wing-view while flying a long crosswind base. lookYaw is the eased
@@ -7582,6 +7604,9 @@ function resetPlane(){
   state.peakG = 0;
   state.peakSink = 0;
   state.gLoad = 1.0;
+  state.gSigned = 1.0;
+  state.gGreyT = 0;
+  state.gRedT = 0;
   // Logbook per-flight trackers: peak altitude, captured origin, and the
   // last-{landing,crash} snapshots used by appendLogEntry(). Wiped here so a
   // ground-only reset (R on the runway) doesn't pollute the next sortie's row.
@@ -10138,6 +10163,11 @@ function step(dt){
   // Stash live G-load on state so the HUD can render it (G-meter readout).
   // On the ground we pin it to 1.0 so the HUD doesn't twitch from taxi noise.
   state.gLoad = state.onGround ? 1.0 : gLoad;
+  // Signed G for the vision overlay — negative when cl goes negative on a
+  // pushover / inverted flight. Pinned to 1.0 on the ground so taxi noise
+  // doesn't blip the redout. The HUD G-meter keeps using state.gLoad so the
+  // existing readout / peak tick behavior is unchanged.
+  state.gSigned = state.onGround ? 1.0 : ((liftMag / MASS) / G);
   // Peak trackers for the post-crash report card. Only count airborne values
   // so taxi bumps and parked weight don't pollute the readout.
   if (!state.onGround && !state.crashed){
@@ -14222,6 +14252,66 @@ function binosAllowed(){
   if (state.crashed) return false;
   return true;
 }
+// G-force vision effects (greyout / redout). Sustained positive Gs above
+// ~5 g fade a black vignette in from the edges (peaking near 8 g tunnel
+// vision); sustained negative Gs below -2 g fade a soft red tint over the
+// frame. Eases in over ~1.5s and out over ~2s so a brief snap pull doesn't
+// dim the world. Gated to live flight only — hidden in photo / pause /
+// replay / intro / cold-start so saved PNGs stay clean and frozen frames
+// don't carry the effect. Target opacities are computed off state.gSigned
+// (signed G) — only one of grey/red can be non-zero at a time because the
+// gates are disjoint (>5 vs <-2). Resets snap to zero so a hard pullup at
+// the start of the next sortie has to re-build the tunnel.
+const GVISION_EASE_IN  = 1.0 / 1.5;   // 1/s — full ease ~1.5s
+const GVISION_EASE_OUT = 1.0 / 2.0;   // 1/s — full decay ~2.0s
+function updateGVision(dt){
+  const el = document.getElementById('gvision');
+  if (!el) return;
+  const grey = el.querySelector('.grey');
+  const red  = el.querySelector('.red');
+  // Hard gate: nothing shows during pause / replay / photo / intro / crash
+  // or while on the ground, so saved screenshots and the cold-start ritual
+  // stay clean. Decays the existing eases toward zero so an in-progress
+  // tunnel fades out on Esc instead of snapping.
+  const live = !state.paused && !state.replayActive && !state.photoMode
+    && !state.introOpen && !state.crashed && !state.onGround;
+  let greyTarget = 0;
+  let redTarget = 0;
+  if (live){
+    const g = state.gSigned || 0;
+    // Greyout ramps 0..1 from 5 g (onset) to 8 g (full tunnel). Stays at 0
+    // below 5 g and pegs at 1 above 8 g, matching the human GLOC threshold
+    // band roughly without modeling onset-rate physiology.
+    if (g > 5)       greyTarget = Math.min(1, (g - 5) / 3);
+    // Redout ramps 0..1 from -2 g (onset) to -4 g (full red wash). Pilots
+    // pull negative far less often, so the ramp is shorter and the tint is
+    // visible faster.
+    else if (g < -2) redTarget  = Math.min(1, (-g - 2) / 2);
+  }
+  // Asymmetric ease: in is slower than out so a snap pull doesn't punish,
+  // but the tunnel lingers a beat after you unload so the player feels the
+  // recovery instead of getting their world back instantly.
+  const greyRate = greyTarget > state.gGreyT ? GVISION_EASE_IN : GVISION_EASE_OUT;
+  const redRate  = redTarget  > state.gRedT  ? GVISION_EASE_IN : GVISION_EASE_OUT;
+  const kGrey = 1 - Math.exp(-greyRate * Math.max(0, dt));
+  const kRed  = 1 - Math.exp(-redRate  * Math.max(0, dt));
+  state.gGreyT += (greyTarget - state.gGreyT) * kGrey;
+  state.gRedT  += (redTarget  - state.gRedT)  * kRed;
+  if (state.gGreyT < 0.0005) state.gGreyT = 0;
+  if (state.gRedT  < 0.0005) state.gRedT  = 0;
+  // Display flip: only pay for the gradient when the player is actually
+  // pulling enough Gs to dim anything. Skips style writes most frames.
+  const visible = state.gGreyT > 0 || state.gRedT > 0;
+  if (visible){
+    if (!el.classList.contains('show')) el.classList.add('show');
+    if (grey) grey.style.opacity = String(state.gGreyT);
+    if (red)  red.style.opacity  = String(state.gRedT);
+  } else if (el.classList.contains('show')){
+    el.classList.remove('show');
+    if (grey) grey.style.opacity = '0';
+    if (red)  red.style.opacity  = '0';
+  }
+}
 function updateBinoculars(dt){
   const wantOn = !!(keys['KeyB']) && binosAllowed();
   state.binoActive = wantOn;
@@ -14315,6 +14405,7 @@ function loop(now){
   updateWipers(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
+  updateGVision(dt);
   renderer.render(scene, camera);
 }
 
@@ -14346,7 +14437,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -15111,6 +15202,9 @@ updateCamModeUi();
     state.peakG = 0;
     state.peakSink = 0;
     state.gLoad = 1.0;
+    state.gSigned = 1.0;
+    state.gGreyT = 0;
+    state.gRedT = 0;
     state.crashReport = null;
     hideCrashCard();
     state.landReport = null;
