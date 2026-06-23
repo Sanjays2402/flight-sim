@@ -274,6 +274,20 @@
   #replay { position:fixed; top:100px; left:50%; transform:translateX(-50%); padding:6px 14px; font-size:12px; letter-spacing:2px; color:#ffd166; background:rgba(8,14,22,.78); border:1px solid #ffd166; border-radius:6px; font-weight:700; display:none; z-index:9; text-align:center; }
   #replay .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#ff3030; margin-right:8px; vertical-align:middle; animation: blink 1s steps(2) infinite; }
   #replay small { display:block; font-size:10px; letter-spacing:1px; color:#9bb; font-weight:500; margin-top:2px; }
+  /* Replay scrub bar: lives at the bottom-center during the post-landing replay.
+     Click-to-seek, drag-to-scrub (touch + mouse), arrow keys nudge ±1s, Space
+     toggles play/pause. Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #replayScrub { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); width:520px; max-width:calc(100% - 24px); padding:8px 12px 10px; background:rgba(8,14,22,.82); border:1px solid #ffd166; border-radius:8px; color:#cfe; font-size:11px; letter-spacing:1px; display:none; z-index:10; backdrop-filter:blur(8px); user-select:none; -webkit-user-select:none; touch-action:none; }
+  #replayScrub .meta { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-variant-numeric:tabular-nums; }
+  #replayScrub .meta .ps { color:#ffd166; font-weight:700; }
+  #replayScrub .meta .ts { color:#9bb; font-weight:600; }
+  #replayScrub .meta .hint { color:#7a8a98; font-size:9px; letter-spacing:1px; }
+  #replayScrub .meta .hint kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; margin:0 1px; font-family:inherit; }
+  #replayScrub .track { position:relative; height:14px; cursor:pointer; }
+  #replayScrub .track .rail { position:absolute; left:0; right:0; top:6px; height:3px; background:#1e3548; border-radius:2px; }
+  #replayScrub .track .fill { position:absolute; left:0; top:6px; height:3px; background:#ffd166; border-radius:2px; width:0%; pointer-events:none; }
+  #replayScrub .track .knob { position:absolute; top:1px; width:12px; height:12px; margin-left:-6px; background:#ffd166; border:1px solid #6a4a10; border-radius:50%; box-shadow:0 0 6px rgba(255,209,102,.55); pointer-events:none; }
+  #replayScrub.scrubbing .knob { background:#fff; border-color:#ffd166; }
   /* Crash report card — pops in after a crash so every wreck becomes a lesson.
      Lives bottom-center so the replay banner up top stays visible. Click or
      press R/Esc to dismiss. Auto-cleared on resetPlane(). */
@@ -753,6 +767,18 @@
   </div>
 </div>
 <div id="replay"><span class="dot"></span>REPLAY · LAST 30s<small>click or press <b>R</b> to skip</small></div>
+<div id="replayScrub">
+  <div class="meta">
+    <span class="ps" id="rsState">▶ PLAY</span>
+    <span class="hint"><kbd>←</kbd><kbd>→</kbd> nudge ·1s · <kbd>Space</kbd> play/pause · <kbd>R</kbd> skip</span>
+    <span class="ts" id="rsTime">0.0 / 0.0s</span>
+  </div>
+  <div class="track" id="rsTrack">
+    <div class="rail"></div>
+    <div class="fill" id="rsFill"></div>
+    <div class="knob" id="rsKnob" style="left:0%"></div>
+  </div>
+</div>
 <div id="crashcard">
   <h3>CRASH REPORT</h3>
   <div class="verdict" id="ccVerdict">—</div>
@@ -7944,6 +7970,12 @@ const state = {
   replayHead: 0,        // ring write head (live mode)
   replayCount: 0,       // how many snapshots are populated (capped at REPLAY_MAX)
   replayLastSampleT: 0,  // timestamp of last buffered snapshot (ms)
+  // Replay scrub controls. replayPaused freezes playback; replayScrubbing
+  // is true while the pilot is actively dragging the scrub knob (used to
+  // hold the bar's "scrubbing" visual state). Both reset on startReplay
+  // / stopReplay so a new replay always starts playing from t=0.
+  replayPaused: false,
+  replayScrubbing: false,
   // Photo mode: P freezes the sim, hides every HUD element, and gives the
   // player a free-orbit camera around the plane. Mouse drag rotates around
   // the airframe; wheel zooms in/out. S saves a PNG screenshot of whatever's
@@ -8035,6 +8067,30 @@ for (let i = 0; i < REPLAY_MAX; i++){
   };
 }
 const replayEl = document.getElementById('replay');
+const replayScrubEl  = document.getElementById('replayScrub');
+const rsTrackEl      = document.getElementById('rsTrack');
+const rsFillEl       = document.getElementById('rsFill');
+const rsKnobEl       = document.getElementById('rsKnob');
+const rsTimeEl       = document.getElementById('rsTime');
+const rsStateEl      = document.getElementById('rsState');
+function replayTotalSec(){
+  // Total replay length given how much of the ring is populated. With < 2
+  // samples there's nothing to lerp between, so guard with a tiny floor.
+  return Math.max(0.001, (state.replayCount - 1) * REPLAY_DT);
+}
+function updateReplayScrubUi(){
+  // Push current scrub position + play/pause label to the bar. Cheap to call
+  // every frame; updateReplay() does so unconditionally while the replay
+  // is active so the knob tracks playback smoothly.
+  if (!replayScrubEl || replayScrubEl.style.display === 'none') return;
+  const tot = replayTotalSec();
+  const cur = Math.max(0, Math.min(tot, state.replayT));
+  const pct = (cur / tot) * 100;
+  rsFillEl.style.width = pct + '%';
+  rsKnobEl.style.left  = pct + '%';
+  rsTimeEl.textContent = cur.toFixed(1) + ' / ' + tot.toFixed(1) + 's';
+  rsStateEl.textContent = state.replayPaused ? '❚❚ PAUSED' : '▶ PLAY';
+}
 function recordReplayFrame(now){
   // Sample at most every REPLAY_DT seconds. The buffer is a ring so older
   // entries get overwritten naturally — no shift, no copy churn.
@@ -8060,12 +8116,27 @@ function startReplay(){
   if (state.replayCount < REPLAY_HZ * 0.5) return;
   state.replayActive = true;
   state.replayT = 0;
+  state.replayPaused = false;
+  state.replayScrubbing = false;
   replayEl.style.display = 'block';
+  // The scrub bar is photo-mode-aware: PHOTO_HIDE_IDS hides it for clean
+  // screenshots and restores its prior display when photo mode exits.
+  if (replayScrubEl){
+    replayScrubEl.classList.remove('scrubbing');
+    replayScrubEl.style.display = 'block';
+    updateReplayScrubUi();
+  }
 }
 function stopReplay(){
   if (!state.replayActive) return;
   state.replayActive = false;
+  state.replayPaused = false;
+  state.replayScrubbing = false;
   replayEl.style.display = 'none';
+  if (replayScrubEl){
+    replayScrubEl.classList.remove('scrubbing');
+    replayScrubEl.style.display = 'none';
+  }
 }
 function replaySnapshotAt(i){
   // i is 0..(replayCount-1) where 0 is the OLDEST sample, replayCount-1 is the NEWEST.
@@ -8075,11 +8146,21 @@ function replaySnapshotAt(i){
 function updateReplay(dt){
   // Play the buffered snapshots in real time. When we hit the end, dismiss
   // the replay so live play resumes on the next frame.
-  state.replayT += dt;
-  const totalSec = (state.replayCount - 1) * REPLAY_DT;
-  if (state.replayT >= totalSec){
-    stopReplay();
-    return;
+  //
+  // Scrub bar: while paused (Space) or actively scrubbed (drag), don't
+  // advance state.replayT — the pose still gets re-applied from the
+  // current replayT, so the frozen / scrubbed frame renders correctly.
+  const totalSec = replayTotalSec();
+  if (!state.replayPaused && !state.replayScrubbing){
+    state.replayT += dt;
+    if (state.replayT >= totalSec){
+      stopReplay();
+      return;
+    }
+  } else {
+    // Clamp so a held-Right at end-of-replay doesn't slip past the buffer.
+    if (state.replayT < 0) state.replayT = 0;
+    if (state.replayT > totalSec) state.replayT = totalSec;
   }
   // Find the two surrounding samples and lerp the plane between them.
   const idxF = state.replayT / REPLAY_DT;
@@ -8115,6 +8196,9 @@ function updateReplay(dt){
   gearGrp.visible = gearAnim < 0.999;
   // Camera follows the replayed plane in whatever cam mode is active.
   updateCamera(dt);
+  // Push position / play-pause state to the scrub bar every frame so the
+  // knob tracks playback smoothly without a separate timer.
+  updateReplayScrubUi();
 }
 
 const keys = {};
@@ -8126,6 +8210,26 @@ const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
   if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote','Backslash'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
+});
+// Replay scrub controls. Active only while the post-landing replay banner is
+// up; otherwise these keys keep their normal in-flight roles (Space = nothing,
+// Arrow keys = browser scroll). Space toggles play/pause, Left/Right nudge
+// the playhead ±1s. Skip-out stays on R / click (handled in the main keydown).
+addEventListener('keydown', e=>{
+  if (!state.replayActive) return;
+  if (e.code === 'Space'){
+    e.preventDefault();
+    state.replayPaused = !state.replayPaused;
+    updateReplayScrubUi();
+    return;
+  }
+  if (e.code === 'ArrowLeft' || e.code === 'ArrowRight'){
+    e.preventDefault();
+    const dir = (e.code === 'ArrowLeft') ? -1 : 1;
+    const tot = replayTotalSec();
+    state.replayT = Math.max(0, Math.min(tot, state.replayT + dir * 1.0));
+    updateReplayScrubUi();
+  }
 });
 addEventListener('keyup', e=>{
   keys[e.code]=false;
@@ -18239,6 +18343,46 @@ addEventListener('resize', ()=>{
 // Click anywhere on the replay banner to dismiss it.
 replayEl.addEventListener('click', () => stopReplay());
 
+// ====== REPLAY SCRUB BAR ======
+// Pointer-driven seek/scrub for the post-landing replay. We use pointer
+// events so the same handlers cover mouse + touch + stylus. Scrubbing sets
+// state.replayScrubbing so updateReplay() freezes playback while the pilot
+// is dragging; releasing resumes from the new position (and keeps the
+// previous play/pause state intact). Click-without-drag inside the track
+// just seeks to that position.
+(function(){
+  if (!rsTrackEl) return;
+  function seekFromEvent(ev){
+    const rect = rsTrackEl.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const f = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+    state.replayT = f * replayTotalSec();
+    updateReplayScrubUi();
+  }
+  rsTrackEl.addEventListener('pointerdown', ev => {
+    if (!state.replayActive) return;
+    ev.preventDefault();
+    state.replayScrubbing = true;
+    replayScrubEl.classList.add('scrubbing');
+    try { rsTrackEl.setPointerCapture(ev.pointerId); } catch (_) {}
+    seekFromEvent(ev);
+  });
+  rsTrackEl.addEventListener('pointermove', ev => {
+    if (!state.replayScrubbing) return;
+    ev.preventDefault();
+    seekFromEvent(ev);
+  });
+  const endScrub = ev => {
+    if (!state.replayScrubbing) return;
+    ev.preventDefault();
+    state.replayScrubbing = false;
+    replayScrubEl.classList.remove('scrubbing');
+    try { rsTrackEl.releasePointerCapture(ev.pointerId); } catch (_) {}
+  };
+  rsTrackEl.addEventListener('pointerup',     endScrub);
+  rsTrackEl.addEventListener('pointercancel', endScrub);
+})();
+
 // ====== PHOTO MODE ======
 // Press P to freeze the world, hide every HUD element, and give the player a
 // free-orbit camera around the plane plus a one-tap PNG save. Mouse drag or
@@ -18253,7 +18397,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
