@@ -9024,6 +9024,18 @@ const ENG_TEMP_REDLINE    = 230;   // °C — warning fires, damage tick arms
 const ENG_TEMP_WARN_HYST  = 10;    // °C — below (redline - hyst) clears the latch
 const ENG_TEMP_OVERHEAT_SECS = 15; // sustained seconds above redline before damage + ATC
 const ENG_TEMP_DAMAGE_PER_SEC = 0.003; // ~0.3% airframe per second while cooked
+// Overheat cough/sputter: CHT past redline for OVERHEAT_COUGH_ARM_SECS arms an
+// intermittent cough that fires every OVERHEAT_COUGH_GAP_MIN..MAX seconds and
+// briefly drops delivered throttle to OVERHEAT_COUGH_THROTTLE_MUL of commanded
+// for OVERHEAT_COUGH_DURATION so the player feels + hears the engine struggle.
+// Disarms when CHT cools back under OVERHEAT_COUGH_REARM_C (hysteresis under
+// the existing engineTempWarnLatch clear so the cough quits before the latch).
+const OVERHEAT_COUGH_ARM_SECS      = 8;
+const OVERHEAT_COUGH_GAP_MIN       = 2.0;  // seconds — min spacing between coughs
+const OVERHEAT_COUGH_GAP_MAX       = 4.0;  // seconds — max spacing between coughs
+const OVERHEAT_COUGH_DURATION      = 0.4;  // seconds — thrust dip length per cough
+const OVERHEAT_COUGH_THROTTLE_MUL  = 0.65; // delivered thrust scalar while a cough is live
+const OVERHEAT_COUGH_REARM_C       = 190;  // °C — below this clears the cough latch
 const ENG_TEMP_WARMUP_RATE   = 18; // °C/s heating coefficient toward target
 const ENG_TEMP_COOLDOWN_RATE = 22; // °C/s cooling coefficient toward target
 // Cowl flaps cooling lever. Open = louvers dump airflow over the cylinders.
@@ -9161,12 +9173,43 @@ function updateEngineTemp(dt){
     if (state.engineOverheatT >= ENG_TEMP_OVERHEAT_SECS){
       state.damage = Math.min(1, state.damage + ENG_TEMP_DAMAGE_PER_SEC * dt);
     }
+    // Cough/sputter scheduler. After OVERHEAT_COUGH_ARM_SECS sustained over
+    // redline, fire a one-shot PILOT ATC nudge and start scheduling coughs
+    // every OVERHEAT_COUGH_GAP_MIN..MAX seconds. Each cough plays a short
+    // sputter SFX and stamps state.overheatCoughUntil so the thrust path
+    // multiplies delivered power by OVERHEAT_COUGH_THROTTLE_MUL until the
+    // window expires. Only runs while the engine is actually firing (engine
+    // out / dry tank / cold-start: the engine has bigger problems than chop).
+    const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+    if (engineLive && state.engineOverheatT >= OVERHEAT_COUGH_ARM_SECS){
+      const nowMs = performance.now();
+      if (!state.overheatCoughLatch){
+        state.overheatCoughLatch = true;
+        if (typeof pushATC === 'function') pushATC('Engine running rough, check temps.', { tag:'PILOT', now:true });
+        // Schedule first cough immediately so the call lands with the sound.
+        state.overheatNextCoughAt = nowMs;
+      }
+      if (state.overheatNextCoughAt > 0 && nowMs >= state.overheatNextCoughAt){
+        if (typeof playOverheatCough === 'function') playOverheatCough();
+        state.overheatCoughUntil = nowMs + OVERHEAT_COUGH_DURATION * 1000;
+        const gap = OVERHEAT_COUGH_GAP_MIN + Math.random() * (OVERHEAT_COUGH_GAP_MAX - OVERHEAT_COUGH_GAP_MIN);
+        state.overheatNextCoughAt = nowMs + gap * 1000;
+      }
+    }
   } else {
     state.engineOverheatT = 0;
     // Latch clears with hysteresis so a quick dip-and-rebound doesn't re-fire
     // the ATC call every couple seconds.
     if (state.engineTempWarnLatch && state.engineTempC <= ENG_TEMP_REDLINE - ENG_TEMP_WARN_HYST){
       state.engineTempWarnLatch = false;
+    }
+    // Cough latch clears once CHT cools back under OVERHEAT_COUGH_REARM_C so
+    // the next overheat event re-arms a fresh ATC call + cough sequence.
+    // Also nuke any in-flight cough schedule the moment we leave redline so
+    // the engine smooths out immediately when the player pulls power.
+    if (state.engineTempC <= OVERHEAT_COUGH_REARM_C){
+      state.overheatCoughLatch = false;
+      state.overheatNextCoughAt = 0;
     }
   }
   // Cowl-flap auto-suggest: first frame CHT crosses into the warm band
@@ -10743,6 +10786,15 @@ const state = {
   engineTempC: 40,
   engineOverheatT: 0,
   engineTempWarnLatch: false,
+  // Overheat cough/sputter scheduler. `overheatCoughLatch` is the one-shot ATC
+  // "engine running rough, check temps" call — set the first frame the cough
+  // arms and cleared once CHT cools back under OVERHEAT_COUGH_REARM_C so a
+  // re-entry into redline earns a fresh callout. `overheatNextCoughAt` and
+  // `overheatCoughUntil` are perf-clock-relative timestamps driving the
+  // throttle dip + audio fire schedule (0 = unscheduled / not currently dipping).
+  overheatCoughLatch: false,
+  overheatNextCoughAt: 0,
+  overheatCoughUntil: 0,
   // Oil pressure (PSI). Sits ~65 at cruise on a healthy engine, drops fast
   // while the engine is on fire or sustained-overheat latched, bottoms to 0
   // on engine kill / fuel-out / cold start. `oilLowAtcLatch` arms a one-shot
@@ -13280,6 +13332,11 @@ function resetPlane(){
   state.engineTempC = ENG_TEMP_COLD;
   state.engineOverheatT = 0;
   state.engineTempWarnLatch = false;
+  // Overheat cough scheduler: wipe latch + timestamps so the next sortie
+  // re-arms cleanly. Mirrors the engineTempWarnLatch reset above.
+  state.overheatCoughLatch = false;
+  state.overheatNextCoughAt = 0;
+  state.overheatCoughUntil = 0;
   // Oil pressure: bottom out on reset so the cockpit gauge climbs back during
   // the cold-start ritual / first idle, and clear the warn latch so the next
   // sortie re-arms the ATC call.
@@ -15847,6 +15904,56 @@ function playCrankCough(){
     osc.connect(og).connect(ctx.destination);
     osc.start(tp);
     osc.stop(tp + 0.2);
+  }
+}
+
+// Overheat cough — fired periodically while CHT is past redline. Mirrors
+// playCrankCough() but with a slightly lower base pitch and a shorter envelope
+// so it reads as "engine struggling under heat" rather than "engine failed to
+// catch on the starter". Reuses the same noise-burst + descending-sub-thump
+// architecture (and the same sfxReady() short-lived nodes) so no new audio
+// graph is introduced. Volume scales with master like every other engine SFX.
+function playOverheatCough(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.22 * settings.volume;
+  if (vol <= 0) return;
+  // Low-passed noise burst, shorter than crank-cough so it doesn't drown the
+  // throttle dip.
+  const dur = 0.22;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let k = 0; k < data.length; k++) data[k] = (Math.random()*2 - 1) * (1 - k/data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 360; // lower than crank-cough (420) for a heavier, hotter thud
+  lp.Q.value = 0.7;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0, t0);
+  ng.gain.linearRampToValueAtTime(vol * 0.9, t0 + 0.018);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Two descending sub-thumps, lower freq + tighter envelope than crank-cough.
+  for (let i = 0; i < 2; i++){
+    const tp = t0 + i * 0.10;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    const startHz = 110 - i * 22;
+    const endHz   = 58 - i * 12;
+    osc.frequency.setValueAtTime(startHz, tp);
+    osc.frequency.exponentialRampToValueAtTime(endHz, tp + 0.13);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0, tp);
+    og.gain.linearRampToValueAtTime(vol * 0.55, tp + 0.010);
+    og.gain.exponentialRampToValueAtTime(0.0001, tp + 0.14);
+    osc.connect(og).connect(ctx.destination);
+    osc.start(tp);
+    osc.stop(tp + 0.16);
   }
 }
 
@@ -18855,7 +18962,14 @@ function step(dt){
   // cockpit DA gauge reading and the felt thrust are the same source of
   // truth.
   const densityMul = state.densityAltMul || 1;
-  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul * mixMul * misfireMul * starvedMul * densityMul : 0;
+  // Overheat cough power dip: while a cough window is live (set by
+  // updateEngineTemp() after sustained-over-redline arming), bias delivered
+  // thrust down to OVERHEAT_COUGH_THROTTLE_MUL so the player feels the engine
+  // briefly load up and give back power. Pure multiplier; engine off / dry
+  // tank / cold-start still gate to zero through engineLive below.
+  const overheatCoughMul = (state.overheatCoughUntil > 0 && performance.now() < state.overheatCoughUntil)
+    ? OVERHEAT_COUGH_THROTTLE_MUL : 1;
+  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul * mixMul * misfireMul * starvedMul * densityMul * overheatCoughMul : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
