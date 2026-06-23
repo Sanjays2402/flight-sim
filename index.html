@@ -252,6 +252,7 @@
   #mbtns { position:fixed; right:18px; bottom:230px; display:flex; flex-direction:column; gap:6px; z-index:8; }
   #mbtns button { width:64px; height:36px; border-radius:6px; background:rgba(8,14,22,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:11px; font-weight:700; letter-spacing:1px; cursor:pointer; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
   #mbtns button:active { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #mbtns button.on { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
   /* Settings panel: small ⚙ button bottom-right (just above cam pill), opens a centered modal.
      Lets the player tune control sensitivity, FOV, and master audio volume. Stored in localStorage. */
   #setbtn { position:fixed; bottom:46px; right:12px; padding:4px 9px; font-size:13px; color:#cfe; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:6px; cursor:pointer; font-family:inherit; line-height:1; user-select:none; -webkit-user-select:none; }
@@ -475,6 +476,7 @@
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
   <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
+  <div class="row"><span id="landingLight" style="display:none;color:#fff3a8;font-weight:700">💡 LIGHT</span></div>
   <div class="row"><span id="pbrake" style="display:none;color:#ffd166;font-weight:700">🅿 BRK</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
@@ -511,7 +513,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>I</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>Shift</kbd>+<kbd>I</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -621,6 +623,7 @@
     <button id="mbBrk">BRK</button>
     <button id="mbCam">CAM</button>
     <button id="mbIgn">IGN</button>
+    <button id="mbLight">LIGHT</button>
   </div>
 </div>
 <div id="status"></div>
@@ -801,7 +804,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false };
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -829,6 +832,7 @@ try {
     if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
     if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
     if (typeof saved.twinEngine === 'boolean') settings.twinEngine = saved.twinEngine;
+    if (typeof saved.landingLight === 'boolean') settings.landingLight = saved.landingLight;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -3139,6 +3143,89 @@ function applyEngineConfig(){
 }
 applyEngineConfig();
 
+// ====== LANDING LIGHT (L key) ======
+// Forward-facing white SpotLight on the left wing root, plus a faint cone
+// mesh so the beam reads visually even in mid-air (where there's no surface
+// for the spot to actually paint). Default OFF; settings.landingLight persists
+// the user's choice across reloads, and L toggles it (matching the airshow /
+// ribbon / pitot-heat pattern). Cone visibly brightens runway / taxiway under
+// the plane on night ops (TOD < 6 or > 19) and during rain; fades softly
+// during day so it doesn't blow out the scene. Auto-on suggestion fires the
+// first time you cross 200m AGL inbound at night.
+const LANDING_LIGHT_OFFSET = new THREE.Vector3(-2.0, -0.05, -0.85); // left wing root, just forward of LE
+const LANDING_LIGHT_RANGE = 220;        // metres — visible at typical pattern altitudes
+const LANDING_LIGHT_HALF_ANGLE = 0.28;  // ~16° half-angle, narrow landing-light cone
+const LANDING_LIGHT_DAY = 0.20;         // wash intensity in broad daylight (still a little visible against runway)
+const LANDING_LIGHT_NIGHT = 1.85;       // full punch at night
+const LANDING_LIGHT_RAIN_BOOST = 0.55;  // extra punch when rain is on (overcast sky)
+const landingLightSpot = new THREE.SpotLight(0xffffff, 0, LANDING_LIGHT_RANGE, LANDING_LIGHT_HALF_ANGLE, 0.45, 1.5);
+landingLightSpot.position.copy(LANDING_LIGHT_OFFSET);
+landingLightSpot.castShadow = false; // shadows are expensive and our scene has none
+plane.add(landingLightSpot);
+// SpotLight needs a target Object3D it can aim at; we parent it to the plane
+// so the cone follows attitude (pitching the nose paints the cone up/down).
+const landingLightTarget = new THREE.Object3D();
+landingLightTarget.position.set(LANDING_LIGHT_OFFSET.x, LANDING_LIGHT_OFFSET.y - 8, LANDING_LIGHT_OFFSET.z - 60);
+plane.add(landingLightTarget);
+landingLightSpot.target = landingLightTarget;
+// Faint additive cone mesh so the beam reads in mid-air too (real landing
+// lights are visible from outside the plane as a soft volumetric shaft, esp.
+// in rain / fog). ConeGeometry default points +y; we rotate so it points
+// along the spot's aim (−z in plane local space).
+const LANDING_CONE_LEN = 55;
+const LANDING_CONE_RAD = 9;  // matches the spot's half-angle at the far end
+const landingLightConeMat = new THREE.MeshBasicMaterial({
+  color: 0xfff4c8,
+  transparent: true,
+  opacity: 0,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  fog: true,
+  side: THREE.DoubleSide
+});
+const landingLightCone = new THREE.Mesh(new THREE.ConeGeometry(LANDING_CONE_RAD, LANDING_CONE_LEN, 18, 1, true), landingLightConeMat);
+landingLightCone.rotation.x = -Math.PI / 2; // cone tip toward plane, base forward
+// Anchor: tip at the spot position, base LANDING_CONE_LEN/2 forward.
+landingLightCone.position.set(LANDING_LIGHT_OFFSET.x, LANDING_LIGHT_OFFSET.y, LANDING_LIGHT_OFFSET.z - LANDING_CONE_LEN / 2);
+landingLightCone.visible = false;
+plane.add(landingLightCone);
+let landingLightK = 0; // eased 0..1 visibility so flips don't snap
+
+// Update spot intensity + cone opacity each frame based on TOD, rain, on/off
+// state, and photo-mode. Cheap: one sunDirFor() call shared with the rest of
+// the night-lighting ticks. Hidden in photo mode so saved PNGs stay clean.
+function tickLandingLight(dt){
+  const wantOn = !!state.landingLight
+    && !state.photoMode
+    && !state.introOpen;
+  // Ease the visible intensity rather than snap, so toggling on/off looks
+  // mechanical instead of a single-frame pop. 4/sec converges in ~0.25s.
+  const targetK = wantOn ? 1 : 0;
+  const k = landingLightK + (targetK - landingLightK) * Math.min(1, 4.0 * dt);
+  landingLightK = k;
+  if (k <= 0.001){
+    landingLightSpot.intensity = 0;
+    landingLightConeMat.opacity = 0;
+    landingLightCone.visible = false;
+    return;
+  }
+  // Day/night curve from the existing sun direction: dir.y > ~0.25 = clearly
+  // daytime, dir.y < ~-0.05 = clearly nighttime. Lerp in between so dusk
+  // ramps the beam up gradually.
+  const dir = sunDirFor(state.todHours);
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / 0.30));
+  const dayBase = LANDING_LIGHT_DAY + (LANDING_LIGHT_NIGHT - LANDING_LIGHT_DAY) * nightT;
+  // Rain bumps the intensity a bit because the sky is overcast/dim under
+  // the rain toggle; same logic the runway-wet pill uses for visibility.
+  const intensity = dayBase + (settings.rain ? LANDING_LIGHT_RAIN_BOOST : 0);
+  landingLightSpot.intensity = intensity * k;
+  // Volumetric cone fades with k AND with night so daytime use doesn't draw a
+  // weird beam through clear sky. Rain bumps the cone visibility too.
+  const coneOpacity = (0.04 + 0.22 * nightT + (settings.rain ? 0.10 : 0)) * k;
+  landingLightConeMat.opacity = coneOpacity;
+  landingLightCone.visible = coneOpacity > 0.005;
+}
+
 const gearGrp = new THREE.Group();
 plane.add(gearGrp);
 function buildGear(){
@@ -5111,6 +5198,26 @@ function toggleAirshowSmoke(){
   setAirshowSmokeBtn();
   showStatus('AIRSHOW SMOKE ' + (state.airshowSmoke ? 'ON' : 'OFF'), null, state.airshowSmoke ? 'good' : 'hard');
 }
+
+// Landing light helpers — paired with the L key handler and the mobile LIGHT
+// button. setLandingLightBtn() flips the mobile button's `.on` class so it
+// reads at a glance; toggleLandingLight() flips state + settings + UI in one
+// shot and shows the same status banner the airshow / pitot toggles use.
+function setLandingLightBtn(){
+  const btn = document.getElementById('mbLight');
+  if (!btn) return;
+  if (state.landingLight) btn.classList.add('on'); else btn.classList.remove('on');
+}
+function toggleLandingLight(){
+  state.landingLight = !state.landingLight;
+  settings.landingLight = state.landingLight;
+  saveSettings();
+  // Player took manual action — don't pop the auto-suggest toast on this
+  // approach. The latch re-arms on resetPlane() for the next sortie.
+  state.landingLightSuggested = true;
+  setLandingLightBtn();
+  showStatus('LANDING LIGHT ' + (state.landingLight ? 'ON' : 'OFF'), null, state.landingLight ? 'good' : 'hard');
+}
 // (Button wiring lives below the `state` declaration so the click handler can
 // read state.airshowSmoke safely; const TDZ would bite if we wired it here.)
 function updateAirshowSmoke(dt){
@@ -5879,6 +5986,14 @@ const state = {
   // the current livery accent color. Off by default; great for loops/rolls
   // and screenshots, hidden anywhere we wouldn't want a live trail (paused,
   // replay, photo mode, on the ground, crashed).
+  // Landing light (L key). Default OFF; settings.landingLight persists the
+  // pilot's choice across sessions. `landingLight` mirrors the setting at
+  // sim start and on resetPlane(), then tracks the live toggle. The
+  // `landingLightSuggested` latch fires once per flight when descending
+  // through 200m AGL inbound to a runway at night so the player learns the
+  // key exists; cleared on resetPlane().
+  landingLight: !!settings.landingLight,
+  landingLightSuggested: false,
   ribbonOn: false,
   // Airshow smoke: HUD-toggleable permanent colored smoke trail off the tail
   // in the livery accent color (toggle via the `~` button or key). Pairs with
@@ -6144,6 +6259,9 @@ state.burgerAp = pickBurgerAirport(null);
     toggleAirshowSmoke();
   });
   setAirshowSmokeBtn();
+  // Prime mobile LIGHT button visual to match the persisted setting so a
+  // returning pilot with the light habitually-on sees it lit right away.
+  setLandingLightBtn();
 })();
 
 // Replay ring buffer. We sample at REPLAY_HZ for REPLAY_SECONDS of history.
@@ -6255,7 +6373,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyQ','KeyE','KeyR','KeyJ','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyQ','KeyE','KeyR','KeyJ','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -6471,6 +6589,13 @@ addEventListener('keydown', e=>{
     if (state.introOpen) return;
     toggleAirshowSmoke();
   }
+  if (e.code==='KeyL'){
+    // Landing light toggle. Persists to settings so the pilot's preference
+    // survives reloads. Cancels the auto-suggest latch the moment the
+    // player toggles manually so we don't double-prompt the same approach.
+    if (state.introOpen) return;
+    toggleLandingLight();
+  }
   if (e.code==='KeyV'){
     // Quick-look check (cockpit only). Record the press time on keydown so
     // keyup can tell a tap from a hold. The actual yaw target is recomputed
@@ -6607,12 +6732,16 @@ function lookAllowed(){
   const bBrk  = document.getElementById('mbBrk');
   const bCam  = document.getElementById('mbCam');
   const bIgn  = document.getElementById('mbIgn');
+  const bLight = document.getElementById('mbLight');
   if (bGear) bGear.addEventListener('click', e => { e.preventDefault(); toggleGear(); });
   if (bFlap) bFlap.addEventListener('click', e => { e.preventDefault(); cycleFlaps(); });
   if (bCam)  bCam.addEventListener('click',  e => { e.preventDefault(); state.cam = (state.cam + 1) % 4; updateCamModeUi(); });
   // Ignition: only fires when either ignition sequence is armed. Same gate as
   // the I key handler so the button can't sneak around the rules.
   if (bIgn)  bIgn.addEventListener('click',  e => { e.preventDefault(); if (state.coldStart || state.airRestart) beginIgnition(); });
+  // Landing light: tap toggles, same path as the L key. Visible "on" state
+  // tracked via setLandingLightBtn() after each flip.
+  if (bLight) bLight.addEventListener('click', e => { e.preventDefault(); toggleLandingLight(); });
   // Brakes are a hold-to-engage action so a quick taxi stop feels natural.
   if (bBrk){
     const press = e => { e.preventDefault(); touch.brake = true; };
@@ -7149,6 +7278,11 @@ function resetPlane(){
   // first throttle push past 70% with brakes off.
   state.takeoffClearArmed = true;
   state.takeoffClearFired = false;
+  // Landing light: a fresh sortie re-arms the auto-suggest latch so the
+  // first night approach in the new flight gets the prompt again. The actual
+  // on/off bit stays where the pilot left it (mirrors how pitot heat is
+  // intentionally preserved across reset).
+  state.landingLightSuggested = false;
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
@@ -9080,6 +9214,7 @@ function step(dt){
   applyTimeOfDay(state.todHours);
   tickAirportBeacons(dt);
   tickNavLights(dt);
+  tickLandingLight(dt);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
   // changing mid-flight. Wrap-aware: a midnight wrap (prev > now) only
@@ -9218,6 +9353,10 @@ function step(dt){
   // Reverse-thrust HUD pill: visible while the visual lerp is non-zero so it
   // tracks the ease-in/out rather than snapping when the player releases Z.
   document.getElementById('reverser').style.display = (state.reverserT > 0.05) ? 'inline' : 'none';
+
+  // Landing-light HUD pill: visible whenever the light is on so pilots can
+  // see at a glance the bulb is still burning (easy to forget after taxi-in).
+  document.getElementById('landingLight').style.display = state.landingLight ? 'inline' : 'none';
 
   // Parking-brake HUD pill: shows whenever the latch is set. Auto-release
   // (above ~5 km/h ground speed) clears state.parkingBrake in step() so the
@@ -9589,6 +9728,22 @@ function step(dt){
             }
             playCalloutChime();
             break; // one call per frame is plenty
+          }
+        }
+        // Landing-light auto-suggest: first time we descend through 200m AGL
+        // inbound to a runway at night with the light still off, fire a one-
+        // shot ATC nudge + status banner so the player learns the key exists.
+        // Latched per-flight (cleared on resetPlane) and bypassed entirely if
+        // the light is already on or the pilot already toggled it manually.
+        if (!state.landingLightSuggested && !state.landingLight
+            && state.approachLastAGL > 200 && aglApp <= 200){
+          const _isNight = (state.todHours < 6 || state.todHours > 19);
+          if (_isNight){
+            state.landingLightSuggested = true;
+            showStatus('LANDING LIGHTS', 'press L to switch on', 'hard');
+            if (typeof pushATC === 'function'){
+              pushATC('Landing lights on, runway in sight.', { tag: 'PILOT', now: true });
+            }
           }
         }
       }
