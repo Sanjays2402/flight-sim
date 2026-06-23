@@ -9353,6 +9353,20 @@ const OIL_RISE_RATE      = 55;    // PSI/s warmup approach toward target
 const OIL_FALL_RATE      = 75;    // PSI/s cooldown approach toward target
 const OIL_DROP_FIRE_PER_SEC      = 22; // PSI/s additional drop while on fire
 const OIL_DROP_OVERHEAT_PER_SEC  = 14; // PSI/s additional drop while latched-overheated
+// ====== Engine startup oil-pressure rise ======
+// When the engine catches (finishIgnition), the oil pressure gauge runs a
+// scripted rise instead of the live updateOilPressure() target. Real piston
+// engines pin the needle near 0 until the starter spins the pump, then sweep
+// up to cruise with a slight overshoot before settling — this captures that
+// moment so the cockpit panel gets one more honest beat after the engine
+// catches. If the needle never makes it above the low-warn line within
+// OIL_STARTUP_FAIL_S, a forced-shutdown branch fires.
+const OIL_STARTUP_RISE_S      = 3.0;   // sweep duration from 0 to overshoot peak
+const OIL_STARTUP_OVERSHOOT   = 85;    // PSI peak just past cruise
+const OIL_STARTUP_SETTLE_S    = 0.9;   // overshoot eases back to live target over this window
+const OIL_STARTUP_FAIL_S      = 5.0;   // PSI must climb above LOW_WARN within this window
+const OIL_STARTUP_KILL_S      = 3.0;   // delay between fail latch and forced engine kill
+const OIL_STARTUP_FAIL_TARGET = 15;    // PSI ceiling for the failed-startup curve (stays in red)
 function updateOilPressure(dt){
   // Skip while paused / replaying / intro so the gauge doesn't drift while the
   // sim is frozen — mirrors updateEngineTemp's guard.
@@ -9375,6 +9389,90 @@ function updateOilPressure(dt){
   if (state.engineFire) target -= 60;
   // Sustained overheat latch = the bearings are starving, pressure tanks.
   if (state.engineTempWarnLatch) target -= 35;
+  // Startup rise sequence: while state.oilStartupT >= 0, override the gauge
+  // with a scripted sweep so the needle visibly walks up from 0 → overshoot
+  // → settle the first ~4s after engine catch. Live updateOilPressure() math
+  // resumes once the sequence completes. Gated against engineLive so a stall
+  // mid-sequence (fuel out, X-kill) ends the scripted curve cleanly.
+  if (state.oilStartupT >= 0){
+    state.oilStartupT += dt;
+    // Failure check: if pressure hasn't crossed LOW_WARN by OIL_STARTUP_FAIL_S
+    // (cold-oil + restricted-orifice scenario), latch the fail flag and stamp
+    // the kill countdown. Skipped once we've already started the success ride.
+    if (!state.oilStartupFailLatch
+        && !state.oilStartupSuccessLatch
+        && state.oilStartupT >= OIL_STARTUP_FAIL_S
+        && state.oilPsi < OIL_PSI_LOW_WARN){
+      state.oilStartupFailLatch = true;
+      state.oilStartupKillCountdown = OIL_STARTUP_KILL_S;
+      if (typeof pushATC === 'function') pushATC('Low oil pressure, shutting down.', { tag:'PILOT', now:true });
+    }
+    if (state.oilStartupFailLatch){
+      // Hold the needle low (creeps toward OIL_STARTUP_FAIL_TARGET) so the
+      // pilot can see the gauge stuck in the red while the kill counts down.
+      const failCur = state.oilPsi;
+      const failTgt = engineLive ? OIL_STARTUP_FAIL_TARGET : OIL_PSI_OFF;
+      const kFail = 1 - Math.exp(-OIL_RISE_RATE * dt / 60);
+      state.oilPsi = failCur + (failTgt - failCur) * kFail;
+      state.oilStartupKillCountdown = Math.max(0, (state.oilStartupKillCountdown || 0) - dt);
+      if (engineLive && state.oilStartupKillCountdown <= 0){
+        // Forced shutdown — engine quits like the pilot pulled the mixture.
+        state.engineOut = true;
+        state.throttle = 0;
+        if (typeof showStatus === 'function') showStatus('ENGINE SHUTDOWN', 'oil pressure never came up', 'hard');
+        // End the startup sequence; the live oil-pressure math now drains
+        // the gauge to OIL_PSI_OFF on the next frame.
+        state.oilStartupT = -1;
+      }
+    } else if (engineLive){
+      // Healthy startup curve. Phase 1: 0..OIL_STARTUP_RISE_S sweeps 0 → peak
+      // with a soft ease-out so the needle accelerates off the peg and slows
+      // as it nears the overshoot. Phase 2: settle back from peak to the live
+      // updateOilPressure target (cruise/idle/etc) over OIL_STARTUP_SETTLE_S.
+      // Special case: state.oilStartupShouldFail (3% per cold catch) clamps
+      // the curve below LOW_WARN so the t=5s failure timer trips.
+      if (state.oilStartupShouldFail){
+        // Sluggish creep up to ~18 PSI — visibly trying but never makes it
+        // into the green band, so the fail timer reliably catches it.
+        const failPeak = OIL_PSI_LOW_WARN - 7;
+        const u = Math.min(state.oilStartupT / OIL_STARTUP_FAIL_S, 1);
+        const eased = 1 - Math.pow(1 - u, 2);
+        state.oilPsi = Math.max(0, Math.min(OIL_PSI_MAX, failPeak * eased));
+      } else {
+        const tRise = Math.min(state.oilStartupT, OIL_STARTUP_RISE_S);
+        const uRise = tRise / OIL_STARTUP_RISE_S;
+        // Cubic ease-out for the rise — punchy off zero, gentle at the top.
+        const eRise = 1 - Math.pow(1 - uRise, 3);
+        let scripted = OIL_STARTUP_OVERSHOOT * eRise;
+        if (state.oilStartupT > OIL_STARTUP_RISE_S){
+          const tSettle = state.oilStartupT - OIL_STARTUP_RISE_S;
+          const uSettle = Math.min(tSettle / OIL_STARTUP_SETTLE_S, 1);
+          // Smoothstep for the ease back so the overshoot dissipates naturally.
+          const eSet = uSettle * uSettle * (3 - 2 * uSettle);
+          scripted = OIL_STARTUP_OVERSHOOT * (1 - eSet) + target * eSet;
+          if (uSettle >= 1){
+            // Toast fires once when the needle has settled on the live target.
+            if (!state.oilStartupSuccessLatch && typeof showToast === 'function'){
+              state.oilStartupSuccessLatch = true;
+              showToast('\u2714\uFE0F', 'OIL PRESS \u2713', 'Pressure stable in the green.');
+            }
+            // Hand control back to the live curve.
+            state.oilStartupT = -1;
+          }
+        }
+        state.oilPsi = Math.max(0, Math.min(OIL_PSI_MAX, scripted));
+      }
+    } else {
+      // Engine quit mid-sequence (fuel out / X-kill) — abort the scripted
+      // sweep so the live math drains the gauge naturally.
+      state.oilStartupT = -1;
+      state.oilStartupFailLatch = false;
+      state.oilStartupSuccessLatch = false;
+      state.oilStartupKillCountdown = 0;
+      state.oilStartupShouldFail = false;
+    }
+    return;
+  }
   // Approach the target with asymmetric rates so a drop reads punchy while
   // recovery (after restart / cooldown) feels reassuring.
   const cur = state.oilPsi;
@@ -10982,6 +11080,16 @@ const state = {
   // low threshold, and clears with hysteresis once pressure recovers.
   oilPsi: 0,
   oilLowAtcLatch: false,
+  // Scripted oil-pressure rise after engine catch. `oilStartupT >= 0` puts
+  // updateOilPressure() into override mode (sweep 0 → overshoot → settle).
+  // `oilStartupSuccessLatch` gates the OIL PRESS ✓ toast to one-shot.
+  // `oilStartupFailLatch` + `oilStartupKillCountdown` drive the forced
+  // shutdown branch when pressure never rises above LOW_WARN in time.
+  oilStartupT: -1,
+  oilStartupSuccessLatch: false,
+  oilStartupFailLatch: false,
+  oilStartupKillCountdown: 0,
+  oilStartupShouldFail: false,
   // Brake disc temperature (°C). Starts at ambient, climbs while `B` is held
   // against ground roll (scaled by speed × brake force × dt), bleeds back to
   // ambient at a small free-rolling rate and a higher "airflow over a stopped
@@ -13524,6 +13632,14 @@ function resetPlane(){
   // sortie re-arms the ATC call.
   state.oilPsi = 0;
   state.oilLowAtcLatch = false;
+  // Startup oil-pressure rise sequence — wipe so finishIgnition() arms a
+  // fresh sweep on the next engine catch and the LOW OIL PRESS branch starts
+  // clean.
+  state.oilStartupT = -1;
+  state.oilStartupFailLatch = false;
+  state.oilStartupSuccessLatch = false;
+  state.oilStartupKillCountdown = 0;
+  state.oilStartupShouldFail = false;
   // Emergency checklist (#emergencycard): wipe the active flow + per-row
   // pip mask + all-green stamp + CHT-fall tracker so the next sortie's
   // engine-failure latches start with a clean panel and re-pip from row 1.
@@ -15840,6 +15956,20 @@ function finishIgnition(){
   // Mark primed for the rest of this session so a quick X-restart on the
   // apron doesn't demand another primer cycle (the fuel system is wet now).
   state.primed = true;
+  // Engine just caught — arm the scripted oil-pressure rise sequence so the
+  // cockpit gauge sweeps from 0 → overshoot → cruise over the next ~4s.
+  // updateOilPressure() drives the curve, fires the OIL PRESS ✓ toast on
+  // settle, and branches to a forced shutdown if pressure never comes up.
+  state.oilStartupT = 0;
+  state.oilStartupFailLatch = false;
+  state.oilStartupSuccessLatch = false;
+  state.oilStartupKillCountdown = 0;
+  // Rare "oil pump never primes" outcome — ~3% per catch and only on a true
+  // cold-start (not a hot air-restart). When armed, updateOilPressure()
+  // clamps the scripted sweep below LOW_WARN so the failure timer trips and
+  // the engine auto-shuts-down. Skipped while the engine-fire branch is
+  // active so we don't double-punish an already-cooked sortie.
+  state.oilStartupShouldFail = wasColdStart && !state.engineFire && (Math.random() < 0.03);
   // If the engine was killed (X) AND we're going through cold-start to bring
   // it back, also clear the engine-out so thrust returns when the player
   // pushes the throttle. Pure mission-start path already has engineOut=false.
@@ -25323,6 +25453,19 @@ function drawCockpitOil(psi){
     : (p < OIL_PSI_IDLE - 5 ? '#ffb020' : '#7ee787');
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(p), cx, cy + R*0.55);
+  // LOW OIL PRESS gauge tag — lights when the startup-fail latch is armed so
+  // the pilot can see exactly which gauge tripped the shutdown. Pulses on a
+  // performance.now() driven sine so the warning visibly breathes even on
+  // slow frames. Cleared with the latch on resetPlane().
+  if (state.oilStartupFailLatch){
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() * 0.012);
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = '#ff5252';
+    ctx.font = 'bold 13px ui-monospace, monospace';
+    ctx.fillText('LOW OIL PRESS', cx, cy + R*0.78);
+    ctx.restore();
+  }
 }
 function drawEngineMonitor(){
   // Engine Monitor / EGT page (Shift+G). Wider rectangular canvas that
