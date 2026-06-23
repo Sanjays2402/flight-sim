@@ -7693,7 +7693,7 @@ addEventListener('keydown', e=>{
     toggleCarbHeat();
     return;
   }
-  if (e.code==='KeyC' && !e.shiftKey) { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
+  if (e.code==='KeyC' && !e.shiftKey) { state.cam = (state.cam + 1) % CAM_NAMES.length; updateCamModeUi(); }
   // Shift+T runs the cockpit warning-chime self-test (stall horn / gear /
   // GPWS / fire / oil pressure) so the pilot can verify audio settings
   // before takeoff. Plain T still bumps the time-of-day by an hour. Gating
@@ -8250,7 +8250,7 @@ function findEmergencyLandingSite(){
   const bLight = document.getElementById('mbLight');
   if (bGear) bGear.addEventListener('click', e => { e.preventDefault(); toggleGear(); });
   if (bFlap) bFlap.addEventListener('click', e => { e.preventDefault(); cycleFlaps(); });
-  if (bCam)  bCam.addEventListener('click',  e => { e.preventDefault(); state.cam = (state.cam + 1) % 4; updateCamModeUi(); });
+  if (bCam)  bCam.addEventListener('click',  e => { e.preventDefault(); state.cam = (state.cam + 1) % CAM_NAMES.length; updateCamModeUi(); });
   // Ignition: only fires when either ignition sequence is armed. Same gate as
   // the I key handler so the button can't sneak around the rules.
   if (bIgn)  bIgn.addEventListener('click',  e => { e.preventDefault(); if (state.coldStart || state.airRestart) beginIgnition(); });
@@ -15418,7 +15418,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
 }
 
 // ====== Camera ======
-const CAM_NAMES = ['CHASE', 'COCKPIT', 'FLYBY', 'ORBIT'];
+const CAM_NAMES = ['CHASE', 'COCKPIT', 'FLYBY', 'ORBIT', 'TOWER'];
 const cmNameEl = document.getElementById('cmName');
 const camModeEl = document.getElementById('cammode');
 function updateCamModeUi(){
@@ -15576,7 +15576,7 @@ function updateCamera(dt){
     camera.position.copy(state.flyByPos);
     camera.lookAt(plane.position);
     if (state.flyByT > 4){ state.flyByActive = false; }
-  } else {
+  } else if (state.cam === 3){
     const t = performance.now()*0.0003;
     const r = 22;
     camera.position.set(
@@ -15585,6 +15585,44 @@ function updateCamera(dt){
       plane.position.z + Math.sin(t)*r
     );
     camera.lookAt(plane.position);
+  } else {
+    // TOWER view: pin to the nearest airport's beacon-tower position at ~12m
+    // above the ground and track the plane like the controller would. Tower
+    // is parked on the right-front side of the runway (mirrors the visible
+    // airport beacon pole built in makeAirportBeacon), so the framing reads
+    // as "watching from the tower cab". Falls back to chase-cam behavior
+    // when no airport is within ~10 km so the camera never strands itself
+    // out in empty terrain. Reuses the same nearest-airport math the radalt
+    // callouts use — no new geometry, no new state owners.
+    const TOWER_RANGE_M = 10000;
+    const TOWER_HEIGHT_M = 12;
+    let bestAp = null, bestD = TOWER_RANGE_M;
+    for (let i = 0; i < AIRPORTS.length; i++){
+      const a = AIRPORTS[i];
+      const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+      if (d < bestD){ bestD = d; bestAp = a; }
+    }
+    if (bestAp){
+      // Match the beacon tower position from makeAirportBeacon so the camera
+      // sits at the same landmark the player can see from the air. Local
+      // tower offset (a.w/2 + 9, a.len/2 - 18) is rotated by the airport's
+      // heading into world coords.
+      const lx = bestAp.w/2 + 9;
+      const lz = bestAp.len/2 - 18;
+      const cs = Math.cos(bestAp.hdg), sn = Math.sin(bestAp.hdg);
+      const wx = bestAp.x + lx * cs + lz * sn;
+      const wz = bestAp.z - lx * sn + lz * cs;
+      camera.position.set(wx, bestAp.elev + TOWER_HEIGHT_M, wz);
+      camera.lookAt(plane.position);
+    } else {
+      // No airport in range — degrade gracefully to the chase pose so the
+      // camera stays useful instead of staring into nothing.
+      const desired = plane.position.clone()
+        .addScaledVector(fwd, -14)
+        .addScaledVector(up,   4.5);
+      camera.position.lerp(desired, Math.min(1, 5*dt));
+      camera.lookAt(plane.position.clone().addScaledVector(fwd, 6));
+    }
   }
 
   // Stall buffet: shake the camera based on stall intensity (post-position so all cams get it).
