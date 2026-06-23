@@ -648,7 +648,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -7497,6 +7497,16 @@ const state = {
   // `;` (nose down) and `'` (nose up); Shift = 1% fine, plain = 5% coarse.
   // Autopilot ignores trim (AP owns pitch). Reset to 0 on resetPlane().
   trim: 0,
+  // Altimeter (Kollsman) setting, inHg. Default 29.92 (standard). Pilot nudges
+  // with `Shift+,` (down 0.01) and `Shift+.` (up 0.01); clamped to 28.00..31.00.
+  // The HUD/cockpit altitude reading biases by 1000 ft per 1 inHg vs the
+  // session's actual field pressure (`_atisAltimeterInHg`) so dialing 30.10
+  // on a 29.92 field reads ~180 ft high. Real altimeters keep their setting
+  // between flights, so resetPlane() does NOT zero this. `baroSetMsgFired`
+  // latches the one-shot post-ATIS `SET BARO XX.XX` nudge per session so it
+  // doesn't spam every broadcast.
+  baroInHg: 29.92,
+  baroSetMsgFired: false,
   // Replay system: rolling ~30s ring buffer of plane snapshots. After a
   // landing (good or bad) we rewind and play back so you can watch your
   // touchdown from any camera angle. Live physics is paused while replaying.
@@ -7943,6 +7953,20 @@ addEventListener('keydown', e=>{
     const step = e.shiftKey ? 0.01 : 0.05;
     const dir  = (e.code === 'Semicolon') ? -1 : 1;
     state.trim = Math.max(-1, Math.min(1, state.trim + dir*step));
+  }
+  if (e.shiftKey && (e.code==='Comma' || e.code==='Period')){
+    // Altimeter (Kollsman) setting nudge. Shift+, = -0.01 inHg, Shift+. =
+    // +0.01 inHg. Bind requires Shift so unmodified Comma keeps opening the
+    // settings panel. Skip while the intro modal is up (no plane yet) and
+    // during photo/replay/pause (frozen frames shouldn't accept knob inputs).
+    // Clamp to a realistic Kollsman range; setting persists across resets.
+    if (state.introOpen || state.photoMode || state.replayActive || state.paused || state.crashed) return;
+    e.preventDefault();
+    const dir = (e.code === 'Comma') ? -1 : 1;
+    const next = Math.max(28.00, Math.min(31.00, state.baroInHg + dir * 0.01));
+    // Round to 2 dp so floating-point drift doesn't accumulate.
+    state.baroInHg = Math.round(next * 100) / 100;
+    showStatus('BARO ' + state.baroInHg.toFixed(2), 'altimeter setting', 'good');
   }
   if (e.code==='KeyP'){
     // Shift+P punches the pilot out of the airframe when bailout-armed (heavy
@@ -8714,6 +8738,14 @@ function triggerAtis(){
   // ~6s on-screen pill (matches the typical spoken duration of the line).
   showStatus('📻 ATIS · ' + ap.id + ' ' + info, windStr.toUpperCase() + ' · RWY ' + rwy + ' · ' + altStr, 'good');
   state.atisCooldownUntil = now + 4500;
+  // One-shot Kollsman nudge: if the pilot's baro setting is still off the
+  // actual field pressure by more than 0.05 inHg after hearing the ATIS,
+  // tower drops a short `SET BARO XX.XX` reminder. Latched per session so a
+  // pilot who deliberately keeps a wrong setting only gets pinged once.
+  if (!state.baroSetMsgFired && Math.abs(state.baroInHg - _atisAltimeterInHg) > 0.05){
+    state.baroSetMsgFired = true;
+    pushATC('SET BARO ' + _atisAltimeterInHg.toFixed(2), { tag:'TWR' });
+  }
 }
 function atcIdleLines(){
   // Pool of filler lines, biased toward current state. Each entry is just a
@@ -12169,6 +12201,12 @@ function step(dt){
   const indicatedKmh = speedKmh * Math.max(0, 1 - state.pitotIce);
   const altM = Math.max(0, plane.position.y - GEAR_H);
   if (altM >= 1000 && !state.onGround) unlockAchievement('highFlyer');
+  // Kollsman bias: the displayed altimeter reads higher when the dialed setting
+  // is higher than the actual field pressure (Hi-to-Hi). 1 inHg ≈ 1000 ft
+  // ≈ 304.8 m. Internal physics keeps using the true `altM`; only the
+  // pilot-facing readouts (HUD #alt, cockpit altimeter dial) bias.
+  const baroBiasM = (state.baroInHg - _atisAltimeterInHg) * 1000 * 0.3048;
+  const altMDisp  = Math.max(0, altM + baroBiasM);
   let hdg = Math.atan2(fwd.x, -fwd.z) * 180/Math.PI;
   if (hdg < 0) hdg += 360;
   const vs = state.vel.y;
@@ -12178,7 +12216,7 @@ function step(dt){
   $('#tod').textContent = String(todH).padStart(2,'0') + ':' + String(todM).padStart(2,'0');
 
   $('#spd').textContent  = Math.round(indicatedKmh);
-  $('#alt').textContent  = Math.round(altM);
+  $('#alt').textContent  = Math.round(altMDisp);
   // RWY distance pill: straight-line distance to the nearest runway threshold
   // (either end of any runway, including the carrier deck since it lives in
   // runwayInfos). Reuses the same per-frame plumbing as the glideslope
@@ -12886,7 +12924,7 @@ function step(dt){
   drawChecklist(indicatedKmh);
   drawMinimap(hdg);
   drawWeatherRadar();
-  drawCockpitPanel(indicatedKmh, altM, hdg, dt, speedKmh);
+  drawCockpitPanel(indicatedKmh, altMDisp, hdg, dt, speedKmh);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -15078,6 +15116,12 @@ function drawCockpitAlt(altM){
   ctx.fillStyle = '#7ee787';
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText(Math.round(a) + 'm', cx, cy + R*0.55);
+  // Kollsman setting on the bezel (mimics the small barometric window real
+  // 3-pointer altimeters carry). Sits just under the digital readout so it's
+  // out of the way of the needles but still visible at a glance.
+  ctx.fillStyle = '#9fb';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('BARO ' + (state.baroInHg).toFixed(2), cx, cy + R*0.78);
 }
 function drawCockpitRpm(speedKmh){
   if (!cpRpmCtx) return;
@@ -17141,6 +17185,10 @@ addEventListener('keydown', e => {
     if (e.repeat) return;
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     if (e.code === 'Comma'){
+      // Plain `,` toggles the settings panel. With Shift, `,` is the Kollsman
+      // altimeter knob (handled by the main keydown handler), so don't also
+      // pop settings on the same press.
+      if (e.shiftKey) return;
       if (state.introOpen) return;
       e.preventDefault();
       if (panel.classList.contains('show')) closePanel(); else openPanel();
