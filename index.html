@@ -1130,6 +1130,11 @@
       <div class="hint">Ribbon (<kbd>Y</kbd>) and airshow smoke (<kbd>~</kbd>) color. LIVERY follows your paint scheme.</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">SMOKE LENGTH</span><span class="val" id="setSmokeLenV">5</span></div>
+      <input type="range" id="setSmokeLen" min="1" max="10" step="1" value="5">
+      <div class="hint">How long the ribbon (<kbd>Y</kbd>) and airshow smoke (<kbd>~</kbd>) trail hangs in the air. 1 = tight puff, 10 = fat air-show plume.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">TUTORIAL</span><span class="val" id="setTutV">SEEN</span></div>
       <button id="setTutBtn" type="button" style="width:100%">SHOW TUTORIAL NEXT LAUNCH</button>
       <div class="hint">Re-arm the welcome card so it pops above the menu on your next page load.</div>
@@ -1488,7 +1493,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh' };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1585,6 +1590,7 @@ try {
     if (settings.snow && settings.snow !== 'off' && settings.rain) settings.rain = false;
     if (typeof saved.fog === 'string' && FOG_LEVEL_IDS.indexOf(saved.fog) !== -1) settings.fog = saved.fog;
     if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
+    if (typeof saved.smokeLength === 'number' && isFinite(saved.smokeLength)) settings.smokeLength = Math.max(1, Math.min(10, Math.round(saved.smokeLength)));
     if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
     if (typeof saved.twinEngine === 'boolean') settings.twinEngine = saved.twinEngine;
     if (typeof saved.landingLight === 'boolean') settings.landingLight = saved.landingLight;
@@ -8167,6 +8173,36 @@ function getTrailColor(){
   return _trailColorTmp;
 }
 
+// ====== SMOKE LENGTH SCALING ======
+// Settings panel exposes a 1–10 SMOKE LENGTH slider (default 5 = legacy
+// behavior). Both the aerobatic ribbon and the airshow plume pull these
+// scales live each frame / spawn so dragging the slider mid-flight stretches
+// the trail without rebuilding any pool or shader. Anchored at length 5 so
+// existing flights look identical until the player opts in.
+//
+//   length  lifeScale  emitScale
+//      1      ~0.52      ~0.80
+//      5       1.00       1.00
+//     10      ~1.60       1.25
+//
+// Life scales harder than emit so the plume gets visibly longer without
+// over-saturating the fixed airshow sprite pool (peak puffs-alive at
+// length 10 ≈ 22 * 1.25 * 8 * 1.6 ≈ 352, which is why AIRSHOW_MAX got
+// bumped to 384 below).
+function smokeLenSetting(){
+  const n = +settings.smokeLength;
+  if (!isFinite(n)) return 5;
+  return Math.max(1, Math.min(10, Math.round(n)));
+}
+function smokeLifeScale(){
+  const t = (smokeLenSetting() - 5) / 5; // -0.8..1.0
+  return Math.max(0.3, 1 + t * 0.6);     // ~0.52..1.60
+}
+function smokeEmitScale(){
+  const t = (smokeLenSetting() - 5) / 5;
+  return Math.max(0.5, 1 + t * 0.25);    // ~0.80..1.25
+}
+
 // ====== AEROBATIC RIBBON TRAIL ======
 // Toggleable colored smoke trail off the tail (Y key). Off by default so it
 // doesn't clutter normal flights. Stores ~5s of world-space tail positions
@@ -8244,7 +8280,11 @@ function updateRibbon(dt, nowMs){
   _ribbonTmpTail.copy(RIBBON_TAIL_OFFSET).applyQuaternion(plane.quaternion).add(plane.position);
   _ribbonTmpRight.set(1,0,0).applyQuaternion(plane.quaternion);
   // Sample at most ~40 Hz so a fast loop doesn't burn through the buffer.
-  const sampleGapMs = (RIBBON_LIFE_SEC * 1000) / RIBBON_SEGS;
+  // Life scales with the SMOKE LENGTH slider so longer settings stretch the
+  // same RIBBON_SEGS buffer over more seconds (sample gap grows, ribbon
+  // visibly hangs further behind the plane).
+  const lifeSec = RIBBON_LIFE_SEC * smokeLifeScale();
+  const sampleGapMs = (lifeSec * 1000) / RIBBON_SEGS;
   if (ribbonHistoryCount === 0 || (nowMs - ribbonLastSampleT) >= sampleGapMs){
     // Shift history: index 0 = newest, last = oldest.
     for (let i = RIBBON_SEGS - 1; i > 0; i--){
@@ -8284,7 +8324,7 @@ function updateRibbon(dt, nowMs){
     let alpha = 0;
     if (i < ribbonHistoryCount){
       const ageSec = (nowMs - s.t) / 1000;
-      const ageNorm = Math.min(1, ageSec / RIBBON_LIFE_SEC);
+      const ageNorm = Math.min(1, ageSec / lifeSec);
       // Skip the very first sample so the ribbon starts just behind the tail.
       const headFade = Math.min(1, i / 1.5);
       alpha = headFade * (1 - ageNorm) * 0.9;
@@ -8308,8 +8348,8 @@ function updateRibbon(dt, nowMs){
 // the same fixed-size sprite pool pattern as the contrails so we never
 // allocate at runtime. Hidden anywhere a live trail wouldn't make sense
 // (paused, replay, photo mode, on the ground, crashed, intro open).
-const AIRSHOW_MAX = 160;              // pool size (~8s of trail at peak emit)
-const AIRSHOW_LIFE = 8.0;             // seconds before a puff fully fades out
+const AIRSHOW_MAX = 384;              // pool size — sized so a length-10 SMOKE LENGTH (≈1.6× life, ≈1.25× emit) still fits the steady-state population without clobbering puffs in their visible fade-out window
+const AIRSHOW_LIFE = 8.0;             // seconds before a puff fully fades out (scaled live by smokeLifeScale())
 const AIRSHOW_START_R = 0.5;          // initial puff radius (m)
 const AIRSHOW_GROW = 2.2;             // additional radius growth over lifetime (m)
 const AIRSHOW_EMIT_PER_SEC = 22;      // puffs per second while active
@@ -8354,6 +8394,9 @@ function spawnAirshowPuff(world){
   // fixed pick from the settings panel) so swapping mid-flight updates the
   // plume going forward without recoloring already-aged smoke.
   p.mat.color.copy(getTrailColor());
+  // Latch life at spawn time using the live SMOKE LENGTH scale so puffs
+  // already in the air keep their original lifespan when the slider moves.
+  p.life = AIRSHOW_LIFE * smokeLifeScale();
   p.age = 0;
   p.spr.visible = true;
 }
@@ -8497,7 +8540,7 @@ function updateAirshowSmoke(dt){
   const allowEmit = state.airshowSmoke && !state.paused && !state.replayActive
     && !state.photoMode && !state.onGround && !state.crashed && !state.introOpen;
   if (allowEmit){
-    airshowAccum += AIRSHOW_EMIT_PER_SEC * dt;
+    airshowAccum += AIRSHOW_EMIT_PER_SEC * smokeEmitScale() * dt;
     while (airshowAccum >= 1){
       airshowAccum -= 1;
       _asTmpWorld.copy(_asTmpOff.copy(AIRSHOW_TAIL_OFFSET))
@@ -27506,6 +27549,8 @@ addEventListener('keydown', e => {
   const cowlV = document.getElementById('setCowlV');
   const trailSel = document.getElementById('setTrail');
   const trailV = document.getElementById('setTrailV');
+  const smokeLenInp = document.getElementById('setSmokeLen');
+  const smokeLenV = document.getElementById('setSmokeLenV');
   const wiperSel = document.getElementById('setWiper');
   const wiperV = document.getElementById('setWiperV');
   const voiceSel = document.getElementById('setVoice');
@@ -27658,6 +27703,8 @@ addEventListener('keydown', e => {
       const tc = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
       trailV.textContent = tc.name;
     }
+    if (smokeLenInp) smokeLenInp.value = String(smokeLenSetting());
+    if (smokeLenV) smokeLenV.textContent = String(smokeLenSetting());
     if (wiperSel) wiperSel.value = settings.wipers;
     if (wiperV){
       const wm = WIPER_MODES.find(w => w.id === settings.wipers) || WIPER_MODES[0];
@@ -27807,6 +27854,14 @@ addEventListener('keydown', e => {
       if (TRAIL_COLOR_IDS.indexOf(v) === -1) return;
       settings.trailColor = v;
       syncInputs();
+      saveSettings();
+    });
+  }
+  if (smokeLenInp){
+    smokeLenInp.addEventListener('input', () => {
+      const n = Math.max(1, Math.min(10, Math.round(+smokeLenInp.value)));
+      settings.smokeLength = n;
+      if (smokeLenV) smokeLenV.textContent = String(n);
       saveSettings();
     });
   }
