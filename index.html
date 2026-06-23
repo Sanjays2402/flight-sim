@@ -1059,6 +1059,7 @@
     <div class="hint">Each completed flight (takeoff to full-stop or crash) writes a row. Saved locally to this browser.</div>
     <div class="actions">
       <button id="logReset" class="danger" type="button">CLEAR</button>
+      <button id="logCopy" type="button">📋 COPY</button>
       <button id="logClose" class="primary" type="button">CLOSE</button>
     </div>
   </div>
@@ -21637,6 +21638,7 @@ addEventListener('keydown', e => {
   const btnOpen = document.getElementById('introLog');
   const btnClose = document.getElementById('logClose');
   const btnReset = document.getElementById('logReset');
+  const btnCopy = document.getElementById('logCopy');
   const listEl = document.getElementById('logList');
   if (!panel || !btnOpen || !listEl) return;
   function escapeHtml(s){
@@ -21687,6 +21689,79 @@ addEventListener('keydown', e => {
     pilotLog.length = 0;
     savePilotLog();
     refresh();
+  });
+  // Serialize the full log to a clipboard-friendly plain-text table. Tries the
+  // modern async clipboard API first, falls back to a hidden textarea +
+  // execCommand('copy') so the button still works on older browsers / non-
+  // secure contexts (the GitHub Pages deploy is HTTPS so the async path
+  // covers it). Empty log gets a soft warning instead of an empty copy.
+  function buildLogText(){
+    const lines = [];
+    lines.push('Flight Sim — Logbook (' + pilotLog.length + ' flights)');
+    lines.push('');
+    lines.push('Date           Mission  Route               Dur     MaxAlt    Score  Verdict');
+    for (const e of pilotLog){
+      const dt = fmtLogDate(e.ts || 0);
+      const mission = (MISSION_LABELS[e.mission] || (e.mission || 'FREE').toString().toUpperCase());
+      const route = (e.origin || '—') + ' → ' + (e.dest || '—');
+      const dur = fmtFlightTime(e.durSec || 0);
+      const altM = Math.round(e.maxAlt || 0);
+      const altStr = (altM >= 1000 ? (altM/1000).toFixed(1) + 'k m' : altM + ' m');
+      const score = (e.outcome === 'landed' && e.score > 0) ? ('+' + e.score) : '—';
+      const verdict = (e.verdict || '—');
+      lines.push(
+        dt.padEnd(14) + ' ' +
+        mission.padEnd(8) + ' ' +
+        route.padEnd(19).slice(0, 19) + ' ' +
+        dur.padEnd(7) + ' ' +
+        altStr.padEnd(9) + ' ' +
+        score.padEnd(6) + ' ' +
+        verdict
+      );
+    }
+    return lines.join('\n');
+  }
+  function copyFallback(text){
+    // Hidden textarea + execCommand path for non-secure contexts / old
+    // browsers. Off-screen positioning keeps the page from scrolling.
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.left = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch(_e){ ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    } catch(_e){ return false; }
+  }
+  function announceCopy(ok, n){
+    if (typeof showStatus !== 'function') return;
+    if (ok) showStatus('LOGBOOK COPIED', n + ' flight' + (n === 1 ? '' : 's'), 'good');
+    else    showStatus('LOGBOOK COPY FAILED', 'clipboard unavailable', 'hard');
+  }
+  btnCopy.addEventListener('click', e => {
+    e.stopPropagation();
+    if (!pilotLog || pilotLog.length === 0){
+      if (typeof showStatus === 'function') showStatus('LOGBOOK EMPTY', 'no flights to copy yet', 'hard');
+      return;
+    }
+    const text = buildLogText();
+    const n = pilotLog.length;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+      navigator.clipboard.writeText(text).then(
+        () => announceCopy(true, n),
+        () => announceCopy(copyFallback(text), n)
+      );
+    } else {
+      announceCopy(copyFallback(text), n);
+    }
   });
   addEventListener('keydown', e => {
     if (e.repeat) return;
