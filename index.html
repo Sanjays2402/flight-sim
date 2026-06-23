@@ -5585,6 +5585,14 @@ const state = {
   // resetPlane() / takeoff so a fresh sortie starts clean.
   approachLastAGL: 9999,
   approachArmed: true,
+  // Go-around detector: when the player slams throttle past 95% below 300m AGL
+  // within 2 km of a runway with positive vertical speed and gear still down,
+  // we fire a one-shot "GO-AROUND" toast + ATC call. `goAroundArmed` re-arms
+  // above 200m AGL (mirrors the approachArmed pattern) so the very next missed
+  // approach gets a fresh call. `goAroundFired` blocks re-fire within the same
+  // window so a held-down throttle doesn't toast every frame.
+  goAroundArmed: true,
+  goAroundFired: false,
   // Crosswind-takeoff aileron-into-the-wind coaching. One-shot ATC call +
   // visible magenta arrow appear once the player starts a takeoff roll on a
   // runway with a crosswind component > XW_TAKEOFF_MIN_MS. `xwTakeoffArmed`
@@ -6663,6 +6671,10 @@ function resetPlane(){
   // the last-AGL latch so the first descent through 500ft fires cleanly.
   state.approachLastAGL = 9999;
   state.approachArmed = true;
+  // Go-around latch — fresh sortie clears it so the first missed approach of
+  // the new flight can still fire its toast + ATC call.
+  state.goAroundArmed = true;
+  state.goAroundFired = false;
   // Crosswind-takeoff coach: fresh sortie re-arms the one-shot ATC call and
   // the visible arrow so a hot reset on the apron gets the cue again.
   state.xwTakeoffArmed = true;
@@ -8970,6 +8982,24 @@ function step(dt){
             playCalloutChime();
             break; // one call per frame is plenty
           }
+        }
+      }
+      // Go-around / missed approach: throttle slammed past 95% below 300m AGL
+      // within 2 km of a runway, gear still down, and we're climbing again.
+      // Fire a one-shot toast + ATC call; re-arm above 200m so the next
+      // missed approach in the same flight gets a fresh call. Gated to
+      // free-flight + touch-and-go so scored missions (hop / ring / carrier
+      // / wing) don't pop a toast on every botched final.
+      const gaModeOk = (state.mode === 'free' || state.mode === 'tng');
+      if (aglApp > 200) { state.goAroundArmed = true; state.goAroundFired = false; }
+      if (gaModeOk && state.goAroundArmed && !state.goAroundFired
+          && horiz < 2000 && aglApp > 0 && aglApp < 300
+          && state.throttle > 0.95 && state.vel.y > 0.5){
+        state.goAroundFired = true;
+        state.goAroundArmed = false;
+        showToast('\u{1F6EC}', 'GO-AROUND', 'Missed approach \u2014 climb out, reset the pattern.');
+        if (typeof pushATC === 'function'){
+          pushATC('Going around, traffic acknowledged.', { tag: 'PILOT', now: true });
         }
       }
       state.approachLastAGL = aglApp;
