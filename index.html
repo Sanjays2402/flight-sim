@@ -25075,17 +25075,65 @@ function drawCockpitAsi(speedKmh){
       ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
     }
   }
+  // V-speed arcs painted onto the ASI face. Values are in km/h IAS and get
+  // mapped through the active speed-unit factor so they line up with the dial
+  // labels regardless of display units. Inner white flap arc sits a touch
+  // closer to the centre so it doesn't fight the outer green normal-ops arc.
+  const _arcA = (vKmh) => startA + Math.max(0, Math.min(SPEED_MAX, vKmh * unitFactor)) / SPEED_MAX * sweep;
   // Red stall arc near the bottom of the dial (0..60 km/h equivalent).
   ctx.strokeStyle = '#ff5252';
   ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.arc(cx, cy, R - 28, startA, startA + ((60 * unitFactor) / SPEED_MAX) * sweep);
+  ctx.arc(cx, cy, R - 28, startA, _arcA(60));
   ctx.stroke();
-  // Green normal-ops band 80..220 km/h equivalent.
-  ctx.strokeStyle = '#7ee787';
+  // White flap-operating arc 60..140 km/h equivalent (inner ring so it sits
+  // alongside the green band without overpainting it).
+  ctx.strokeStyle = '#f0f4ff';
+  ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.arc(cx, cy, R - 28, startA + ((80 * unitFactor) / SPEED_MAX) * sweep, startA + ((220 * unitFactor) / SPEED_MAX) * sweep);
+  ctx.arc(cx, cy, R - 36, _arcA(60), _arcA(140));
   ctx.stroke();
+  // Green normal-operating arc 90..280 km/h equivalent.
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, _arcA(90), _arcA(280));
+  ctx.stroke();
+  // Amber caution arc 280..340 km/h equivalent.
+  ctx.strokeStyle = '#ffb84d';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, _arcA(280), _arcA(340));
+  ctx.stroke();
+  // Red Vne radial line at 360 km/h equivalent — short tick from outer rim
+  // inward so it reads as a hard never-exceed mark.
+  {
+    const aVne = _arcA(360);
+    ctx.strokeStyle = '#ff3838';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(aVne) * (R - 6), cy + Math.sin(aVne) * (R - 6));
+    ctx.lineTo(cx + Math.cos(aVne) * (R - 28), cy + Math.sin(aVne) * (R - 28));
+    ctx.stroke();
+  }
+  // Vr (rotation speed) tick at ~115 km/h equivalent — short white radial
+  // pointing inward so the pilot can spot the rotate moment during the
+  // takeoff roll without counting numbers.
+  {
+    const aVr = _arcA(115);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(aVr) * (R - 6), cy + Math.sin(aVr) * (R - 6));
+    ctx.lineTo(cx + Math.cos(aVr) * (R - 24), cy + Math.sin(aVr) * (R - 24));
+    ctx.stroke();
+    // Tiny "Vr" label just inboard of the tick so the mark is identifiable.
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.fillText('Vr', cx + Math.cos(aVr) * (R - 44), cy + Math.sin(aVr) * (R - 44));
+    ctx.restore();
+  }
   // Needle.
   const sDisp = Math.max(0, Math.min(SPEED_MAX, speedKmh * unitFactor));
   // Needle is drawn with rotate(angle) where 0 points up; map dial angle a (in
