@@ -1711,6 +1711,57 @@ function makeAirport(a){
       grp.add(s);
     }
   }
+  // Runway designator numbers painted at both thresholds. Real-world runways
+  // show the magnetic heading (rounded to the nearest 10°, /10) so pilots can
+  // read their landing direction from final. Uses the same runwayDesignator()
+  // helper that drives the ATC callouts, so the painted numbers always match
+  // what the radio says ("09"/"27" at KLAK, "02"/"20" at KHIL, "36"/"18" at
+  // KSEA). Carrier deck has its own "01" lettering and isn't built here.
+  // Drawn on a canvas texture (cheap, sharp at any zoom) and laid flat just
+  // above the runway surface, inboard of the threshold piano-keys so the
+  // numbers sit where real markings would. Each end is rotated to face the
+  // pilot approaching that threshold (+z end reads upright from the south,
+  // -z end is yawed 180° so it reads upright from the north).
+  (function paintRunwayNumbers(){
+    const inset = 30;   // metres inboard from the threshold (real-world spacing is similar)
+    const sizeX = 14;   // width of the painted block (across the runway)
+    const sizeZ = 18;   // height of the painted block (along the runway)
+    const ends = [
+      // +z end gets the designator a plane lands on when flying THIS heading
+      // (it's the threshold they cross first when approaching from outside +z).
+      { sign:  1, label: runwayDesignator(a.hdg)            },
+      // -z end gets the opposite heading's designator (landing the other way).
+      { sign: -1, label: runwayDesignator(a.hdg + Math.PI)  }
+    ];
+    for (const e of ends){
+      const cv = document.createElement('canvas');
+      cv.width = 128; cv.height = 192;
+      const cx = cv.getContext('2d');
+      cx.clearRect(0, 0, cv.width, cv.height);
+      cx.fillStyle = '#ffffff';
+      // Big block-style digits, monospace so both characters share width.
+      cx.font = 'bold 150px ui-monospace, "SF Mono", Menlo, monospace';
+      cx.textAlign = 'center';
+      cx.textBaseline = 'middle';
+      cx.fillText(e.label, cv.width/2, cv.height/2);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 4;
+      const numMat = new THREE.MeshBasicMaterial({
+        map: tex, transparent: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -1
+      });
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(sizeX, sizeZ), numMat);
+      m.rotation.x = -Math.PI/2;
+      // -z end needs to read upright for a pilot approaching from outside -z,
+      // so flip the painted glyph 180° around the runway-up axis.
+      if (e.sign < 0) m.rotation.z = Math.PI;
+      // Sit just above the centerline dashes (0.04) so we don't z-fight
+      // either the runway or the dashes themselves.
+      m.position.set(0, 0.045, e.sign * (a.len/2 - inset));
+      grp.add(m);
+    }
+  })();
   const edgeGeo = new THREE.PlaneGeometry(0.5, a.len);
   for (const side of [-1, 1]){
     const e = new THREE.Mesh(edgeGeo, wMat);
