@@ -4536,6 +4536,38 @@ const BIRD_SPLAT_DURATION_MS = 4000;        // smear fades fully over 4 s
 let lastBirdStrikeMs = -Infinity;
 let birdSplatT = 0;                         // 1.0 right after a strike, decays to 0
 const birdSplats = [];                      // active smears: {x, y, r, a, rot}
+// Windshield cracks from high-speed bird strikes (>180 km/h). Unlike the
+// blood splatter, these persist for the rest of the sortie and only clear
+// in resetPlane(). Each entry is an impact point plus 2-3 jagged branching
+// polylines (forks) precomputed at strike time so the crack shape is
+// stable; updateBirdSplat just renders them every frame with a tiny
+// parallax offset driven by the cockpit head-bob.
+const BIRD_CRACK_SPEED_KMH = 180;           // minimum speed at strike for a crack to spawn
+const windshieldCracks = [];                // {x, y, forks:[[{x,y}, ...], ...]}
+function makeWindshieldCrack(cx, cy){
+  // Two random branching forks off the impact point. Each fork is a jagged
+  // polyline of 5-7 segments, each segment ~12-28 px, with a slight bend so
+  // the crack reads as glass damage instead of a tidy line. Forks fan out
+  // away from each other so the shape is asymmetric.
+  const forks = [];
+  const nForks = 2 + (Math.random() < 0.4 ? 1 : 0);   // 2 or 3 forks
+  for (let f = 0; f < nForks; f++){
+    const segs = 5 + Math.floor(Math.random() * 3);
+    const baseAngle = (f / nForks) * Math.PI * 2 + Math.random() * 0.9 - 0.45;
+    const pts = [{ x: cx, y: cy }];
+    let ang = baseAngle;
+    let px = cx, py = cy;
+    for (let i = 0; i < segs; i++){
+      const len = 12 + Math.random() * 16;
+      ang += (Math.random() - 0.5) * 0.9;            // slight bend per segment
+      px += Math.cos(ang) * len;
+      py += Math.sin(ang) * len;
+      pts.push({ x: px, y: py });
+    }
+    forks.push(pts);
+  }
+  return { x: cx, y: cy, forks };
+}
 function birdStrikeAllowed(){
   if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
   if (state.crashed || state.onGround) return false;
@@ -4570,6 +4602,18 @@ function triggerBirdStrike(){
     });
   }
   birdSplatT = 1.0;
+  // High-speed strike (>180 km/h)? Layer a permanent windshield crack on the
+  // overlay too. Centered roughly under the splatter cluster so the crack
+  // visibly radiates out of the same impact point.
+  const strikeKmh = Math.hypot(state.vel.x, state.vel.y, state.vel.z) * 3.6;
+  if (strikeKmh > BIRD_CRACK_SPEED_KMH){
+    // Pick an impact point biased toward upper-center, mirroring the splat
+    // distribution so the crack lines up with the blood instead of floating
+    // off in a corner.
+    const cx = w * (0.42 + Math.random() * 0.16);
+    const cy = h * (0.24 + Math.random() * 0.22);
+    windshieldCracks.push(makeWindshieldCrack(cx, cy));
+  }
 }
 // Wet-thud SFX: low sine thump layered with a short low-passed noise burst.
 // Re-uses the WebAudio context built by initStallAudio so we don't pile up
@@ -4630,9 +4674,12 @@ sizeBirdSplatCanvas();
 function updateBirdSplat(dt){
   if (!birdSplatCanvas || !birdSplatCtx) return;
   // Visible only in cockpit cam, never in photo mode (those are the rules
-  // every other windshield overlay follows).
+  // every other windshield overlay follows). Cracks count too — a sortie
+  // with persistent cracks but a faded splatter still needs the canvas on.
   const cockpit = state.cam === 1 && !state.photoMode;
-  if (!cockpit || birdSplatT <= 0 || birdSplats.length === 0){
+  const hasCracks = windshieldCracks.length > 0;
+  const hasSplat = birdSplatT > 0 && birdSplats.length > 0;
+  if (!cockpit || (!hasCracks && !hasSplat)){
     birdSplatCanvas.classList.remove('show');
     if (birdSplatT > 0 && (state.paused || state.replayActive)){
       // Hold the fade timer during pause/replay so it doesn't all drain in 1 frame on resume.
@@ -4645,11 +4692,17 @@ function updateBirdSplat(dt){
     return;
   }
   birdSplatCanvas.classList.add('show');
-  // Tick the fade.
-  birdSplatT = Math.max(0, birdSplatT - (dt * 1000) / BIRD_SPLAT_DURATION_MS);
-  if (birdSplatT <= 0){ birdSplats.length = 0; birdSplatCanvas.classList.remove('show'); birdSplatCtx.clearRect(0, 0, innerWidth, innerHeight); return; }
+  // Tick the splatter fade only when splatter is actually live; cracks
+  // don't fade so they're decoupled from this clock.
+  if (hasSplat) birdSplatT = Math.max(0, birdSplatT - (dt * 1000) / BIRD_SPLAT_DURATION_MS);
+  if (birdSplatT <= 0) birdSplats.length = 0;
   const w = innerWidth, h = innerHeight;
   birdSplatCtx.clearRect(0, 0, w, h);
+  // Draw persistent windshield cracks underneath the blood splatter so the
+  // wet smear reads as sitting on top of the cracked glass. Subtle parallax
+  // off the existing head-bob clock sells the crack as a 3D surface that
+  // moves slightly with the camera shimmy.
+  drawWindshieldCracks();
   // Each smear: irregular blob built from a handful of overlapping radial
   // gradients, with a couple of streak drips trailing downward to sell the
   // "wet impact then slides down the glass" look.
@@ -4684,6 +4737,55 @@ function updateBirdSplat(dt){
     }
     birdSplatCtx.restore();
   }
+}
+// Persistent windshield cracks from high-speed bird strikes. Drawn every
+// frame the splatter overlay is visible (and also separately while the
+// splatter has faded but cracks remain — handled below). Two-pass stroke:
+// a thicker dark line for the crack core, then a thin near-white line on
+// top so the crack catches "light" the way real shattered glass does.
+function drawWindshieldCracks(){
+  if (!birdSplatCtx || windshieldCracks.length === 0) return;
+  // Subtle parallax: drift each crack a couple of px with the head-bob
+  // clock so the damage feels attached to the windshield instead of
+  // painted onto the camera lens.
+  const t = state.headBobT || 0;
+  const px = Math.sin(t * 0.73) * 1.4;
+  const py = Math.sin(t * 0.51 + 0.7) * 1.1;
+  birdSplatCtx.save();
+  birdSplatCtx.translate(px, py);
+  for (const c of windshieldCracks){
+    // Dark stroke first — the actual crack channel.
+    birdSplatCtx.strokeStyle = 'rgba(20, 24, 32, 0.78)';
+    birdSplatCtx.lineWidth = 1.8;
+    birdSplatCtx.lineCap = 'round';
+    birdSplatCtx.lineJoin = 'round';
+    for (const fork of c.forks){
+      birdSplatCtx.beginPath();
+      birdSplatCtx.moveTo(fork[0].x, fork[0].y);
+      for (let i = 1; i < fork.length; i++) birdSplatCtx.lineTo(fork[i].x, fork[i].y);
+      birdSplatCtx.stroke();
+    }
+    // Light highlight stroke on top — sells the "glass catching the sun".
+    birdSplatCtx.strokeStyle = 'rgba(230, 238, 248, 0.55)';
+    birdSplatCtx.lineWidth = 0.7;
+    for (const fork of c.forks){
+      birdSplatCtx.beginPath();
+      birdSplatCtx.moveTo(fork[0].x, fork[0].y);
+      for (let i = 1; i < fork.length; i++) birdSplatCtx.lineTo(fork[i].x, fork[i].y);
+      birdSplatCtx.stroke();
+    }
+    // Small impact "chip" disc at the strike point so the radiating forks
+    // visibly originate from a damaged spot, not just a bare line junction.
+    const grad = birdSplatCtx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 6);
+    grad.addColorStop(0,   'rgba(240, 244, 252, 0.85)');
+    grad.addColorStop(0.6, 'rgba(120, 130, 145, 0.55)');
+    grad.addColorStop(1,   'rgba(40, 48, 60, 0)');
+    birdSplatCtx.fillStyle = grad;
+    birdSplatCtx.beginPath();
+    birdSplatCtx.arc(c.x, c.y, 6, 0, Math.PI * 2);
+    birdSplatCtx.fill();
+  }
+  birdSplatCtx.restore();
 }
 
 // ====== HOT-AIR BALLOONS ======
@@ -8350,6 +8452,13 @@ function resetPlane(){
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
+  // Windshield cracks from high-speed bird strikes persist across the whole
+  // sortie — a fresh sortie clears them so the next flight starts with a
+  // clean windshield. Blood splatter also clears here so a quick-restart
+  // mid-fade doesn't inherit a bloody panel.
+  windshieldCracks.length = 0;
+  birdSplats.length = 0;
+  birdSplatT = 0;
   state.crashReport = null;
   hideCrashCard();
   state.landReport = null;
