@@ -1560,6 +1560,7 @@ function lerpKey(h){
 }
 const skyUniforms = { top:null, mid:null, bot:null, sunDir:null, sunColor:null };
 const runwayEdgeLights = []; // populated by makeAirport; emissive material + base color, toggled at dusk
+const runwayTdzLights = []; // populated by makeAirport; small white-glow heads above the touchdown-zone bars, dusk-gated like edge lights
 // Per-airport touchdown flare amount (0..1). When the wheels kiss the runway
 // we set the matching airport's flareT to 1 and decay it over ~600ms so the
 // runway lights briefly pulse bright yellow — a tiny visual reward that makes
@@ -1614,6 +1615,15 @@ function applyTimeOfDay(h){
     const g = Math.min(1.4, 0.78 * k + 1.0 * f);
     const b = Math.min(1.4, 0.32 * k + 0.25 * f);
     e.mat.emissive.setRGB(r, g, b);
+  }
+  // Touchdown-zone (TDZ) light glow heads — pure white, dusk-gated on the
+  // same nightT ramp as the edge lights so they punch through at night and
+  // sit subtle in daylight. Unlike the edge lights, TDZ never tints yellow
+  // (real-world TDZ bars are white) and never flares on touchdown.
+  for (const t of runwayTdzLights){
+    const k = nightT;
+    const v = Math.min(1.3, 0.95 * k);
+    t.mat.emissive.setRGB(v, v, v);
   }
   return { dir, k, nightT };
 }
@@ -2098,6 +2108,58 @@ function makeAirport(a){
       // either the runway or the dashes themselves.
       m.position.set(0, 0.045, e.sign * (a.len/2 - inset));
       grp.add(m);
+    }
+  })();
+  // Touchdown zone (TDZ) markings — paired rows of white inset bars on either
+  // side of the centerline at each runway threshold. ICAO-style touchdown
+  // aim point: 12 pairs per threshold, 30 m spacing, ~3 m bar length, ~1.5 m
+  // off centerline, starting 30 m inboard from the piano-keys. Pairs with
+  // the painted runway numbers + PAPI bars so the runway reads like a real
+  // airfield on final. Each bar also gets a tiny emissive glow head that
+  // dusk-gates on the same nightT ramp as the runway edge lights, so the
+  // pattern punches through at night the way TDZ lights do in the real world.
+  // Carrier deck isn't built via this path (it's a synthetic runway, no TDZ).
+  (function paintTdzBars(){
+    const PAIRS = 12;          // 12 bar-pairs per threshold = ICAO standard
+    const SPACING = 30;        // 30 m apart along the runway
+    const START_INBOARD = 30;  // first pair sits 30 m inboard of the threshold (clear of the piano keys)
+    const BAR_LEN = 3;         // metres along the runway
+    const BAR_W = 0.5;         // metres across the runway
+    const OFFSET = 1.5;        // metres off centerline (each side)
+    // Skip on runways too short to fit the full pattern with breathing room.
+    if (a.len < 2 * (START_INBOARD + PAIRS * SPACING) - 60) return;
+    const barGeo = new THREE.PlaneGeometry(BAR_W, BAR_LEN);
+    const headGeo = new THREE.SphereGeometry(0.35, 6, 5);
+    // One shared painted-bar material — the bars themselves are pure white
+    // and never animate, so a single MeshBasicMaterial keeps things cheap.
+    const tdzPaintMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.95,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1
+    });
+    for (const end of [-1, 1]){
+      for (let i = 0; i < PAIRS; i++){
+        // Step inboard from the threshold (end > 0 means +z threshold).
+        const z = end * (a.len/2 - START_INBOARD - i * SPACING);
+        for (const side of [-1, 1]){
+          const x = side * OFFSET;
+          // Painted bar on the runway surface.
+          const bar = new THREE.Mesh(barGeo, tdzPaintMat);
+          bar.rotation.x = -Math.PI/2;
+          bar.position.set(x, 0.045, z);
+          grp.add(bar);
+          // Small emissive glow head sitting just above the bar so the row
+          // reads at night without floating into the air. Own material per
+          // head so we can drive emissive via the runwayTdzLights loop in
+          // applyTimeOfDay() — same dusk gate as the edge lights.
+          const headMat = new THREE.MeshLambertMaterial({
+            color: 0xdddddd, emissive: 0x000000
+          });
+          const head = new THREE.Mesh(headGeo, headMat);
+          head.position.set(x, 0.35, z);
+          grp.add(head);
+          runwayTdzLights.push({ mat: headMat });
+        }
+      }
     }
   })();
   const edgeGeo = new THREE.PlaneGeometry(0.5, a.len);
