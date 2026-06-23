@@ -8606,7 +8606,7 @@ const state = {
   // the existing airport list — no new physics, no new audio. resetPlane()
   // keeps the OBS so a series of practice flights doesn't keep clobbering
   // the pilot's setting; it does re-pick the station via the per-frame draw.
-  vor: { obs: 0, station: null },
+  vor: { obs: 0, station: null, lastRangeM: -1 },
   // In-air deadstick restart ritual. Parallel to coldStart for ground starts:
   // when the player presses X with engineOut while airborne, we check that
   // throttle is low (<30%) and airspeed is high enough to windmill the prop
@@ -21346,6 +21346,80 @@ function drawCockpitVor(){
   ctx.font = 'bold 16px ui-monospace, monospace';
   const obsShown = ((Math.round(obs) % 360) + 360) % 360;
   ctx.fillText('OBS ' + String(obsShown).padStart(3, '0') + '°', cx + R * 0.05, cy + R * 0.62);
+  // DME readout: classic three-line slant-range / groundspeed / ETA block
+  // painted as a small dark window on the upper-left side of the gauge so it
+  // doesn't fight the OBS / TO-FROM stack at the bottom. Anchored to the same
+  // station the OBS is reading, so a right-click that snaps the OBS to the
+  // current FROM radial also implicitly re-anchors the DME — no separate
+  // frequency picker, keeps the UI quiet. Range is straight-line distance in
+  // the world plane (ignores altitude — DME slant range is close enough at
+  // sim-scale altitudes that nm conversion drives the readout, not the trig).
+  if (station){
+    const dx = plane.position.x - station.x;
+    const dz = plane.position.z - station.z;
+    const rangeM = Math.hypot(dx, dz);
+    const rangeNm = rangeM * 0.000539957;            // m → nautical miles
+    const gsMs = Math.hypot(state.vel.x, state.vel.z);
+    const gsKt = gsMs * 1.94384;                     // m/s → knots
+    // Range trend: green when closing (range falling vs last frame), amber
+    // when opening. First-frame sentinel (-1) draws neutral so the color
+    // doesn't snap on station change.
+    const lastM = (state.vor && typeof state.vor.lastRangeM === 'number') ? state.vor.lastRangeM : -1;
+    let dmeColor = '#dfe';
+    if (lastM > 0){
+      const dM = rangeM - lastM;
+      // Small deadband (1 m/frame) so a perfect 90° crossing doesn't flicker.
+      if (dM < -1) dmeColor = '#7ee787';
+      else if (dM > 1) dmeColor = '#ffb020';
+    }
+    if (state.vor) state.vor.lastRangeM = rangeM;
+    // ETA: range / groundspeed in seconds, clamped to 99:59 so the readout
+    // doesn't overflow. Below 30 kt the ETA flickers wildly on taxi so we
+    // blank it out — matches real DME receivers that drop the GS/ETA fields
+    // when groundspeed isn't well-defined.
+    let etaStr = '--:--';
+    if (gsKt >= 30){
+      const etaSec = Math.min(5999, Math.max(0, (rangeM / Math.max(gsMs, 0.1))));
+      const m = Math.floor(etaSec / 60);
+      const s = Math.floor(etaSec % 60);
+      etaStr = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+    // Small dark window upper-left so it reads as a separate digital display
+    // pinned next to the analog dial — same convention as KX-155-class radios.
+    // Sits in the upper-left quadrant clear of the horizontal CDI dot scale
+    // (which runs across y=cy), the vertical OBS course line (which runs
+    // along x=cx), and the centered station id label up top (which sits
+    // around y=cy-R*0.45, x=cx). Window stays left of the station label.
+    const winW = R * 0.62, winH = R * 0.38;
+    const winX = cx - winW - R * 0.16;
+    const winY = cy - winH - R * 0.06;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(winX, winY, winW, winH);
+    ctx.strokeStyle = '#1e3548';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(winX + 0.5, winY + 0.5, winW - 1, winH - 1);
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    // DME range — headline number, color-coded by closing/opening.
+    ctx.fillStyle = dmeColor;
+    ctx.font = 'bold 12px ui-monospace, monospace';
+    const rangeStr = rangeNm < 99.95 ? rangeNm.toFixed(1) : '99.9';
+    ctx.fillText('DME ' + rangeStr + ' nm', winX + winW - 4, winY + winH * 0.22);
+    // Groundspeed — secondary line, neutral white.
+    ctx.fillStyle = '#dfe';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    const gsStr = String(Math.min(999, Math.round(gsKt))).padStart(3, ' ');
+    ctx.fillText('GS ' + gsStr + ' kt', winX + winW - 4, winY + winH * 0.55);
+    // ETA — dim tertiary line, blanks at taxi speed.
+    ctx.fillStyle = '#6aa';
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.fillText('ETA ' + etaStr, winX + winW - 4, winY + winH * 0.85);
+    ctx.textAlign = 'center';
+  } else {
+    // No station: clear the trend latch so the next valid station starts
+    // fresh instead of comparing across a teleport / map edit.
+    if (state.vor) state.vor.lastRangeM = -1;
+  }
   // VOR / CDI label up top — matches the unit hint on the other gauges so
   // the panel reads as a matched set.
   ctx.fillStyle = '#6aa';
