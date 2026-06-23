@@ -612,6 +612,7 @@
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
   <div class="row"><span id="engfire" class="warn-red" style="display:none">🔥 ENG FIRE — CUT THROTTLE</span></div>
   <div class="row"><span id="engtemp" class="warn" style="display:none">⚠ ENG TEMP</span></div>
+  <div class="row"><span id="trafficWarn" class="warn-amber" style="display:none">⚠ TRAFFIC <span id="trafficArrow" style="display:inline-block;margin-left:4px;transform-origin:50% 50%">↑</span> <span id="trafficDist" style="margin-left:4px;font-weight:600">—</span></span></div>
   <div class="row"><span id="canopyPill" style="display:none;color:#ffd166;font-weight:700">🔓 CANOPY</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
@@ -7526,6 +7527,17 @@ const state = {
   gearHornActive: false,
   gearHornBeepAt: 0,
   gearHornAtcLatch: false,
+  // TCAS-lite (mid-air contact warning vs the AI plane). `tcasPhase` is
+  // 'idle' | 'caution' | 'warning'; rising into 'warning' fires a one-shot
+  // ATC "Traffic, traffic — resolve" via `tcasAtcLatch`. `tcasPingAt`
+  // paces the repeating ping/beep so it doesn't fire every frame, and
+  // `tcasResolvedAt` blocks the same encounter from re-arming until
+  // separation grows past TCAS_REARM_M (so a held formation pass doesn't
+  // re-fire the alert every second).
+  tcasPhase: 'idle',
+  tcasAtcLatch: false,
+  tcasPingAt: 0,
+  tcasResolvedAt: 0,
   // Short-final radalt callouts ("500", "300", "MINIMUMS", "100", "50", "30",
   // "20", "10"). `approachLastAGL` tracks the previous frame's AGL so we can
   // detect downward threshold crossings and fire each call exactly once per
@@ -9430,6 +9442,12 @@ function resetPlane(){
   state.gearHornActive = false;
   state.gearHornBeepAt = 0;
   state.gearHornAtcLatch = false;
+  // TCAS-lite — fresh sortie clears the encounter latches so the first
+  // close pass with the AI plane re-arms cleanly.
+  state.tcasPhase = 'idle';
+  state.tcasAtcLatch = false;
+  state.tcasPingAt = 0;
+  state.tcasResolvedAt = 0;
   // Go-around latch — fresh sortie clears it so the first missed approach of
   // the new flight can still fire its toast + ATC call.
   state.goAroundArmed = true;
@@ -11485,6 +11503,179 @@ function tickGearHorn(){
   }
 }
 
+// ====== TCAS-LITE (MID-AIR CONTACT WARNING) ======
+// When the player and the AI plane close on each other, fire a tiered
+// traffic alert: yellow CAUTION pill + soft repeating ping under ~600m,
+// red WARNING pill + sharp beep + one-shot ATC "Traffic, traffic — resolve"
+// when the geometry actually threatens a collision (within ~250m, or
+// closing fast inside ~450m with little vertical separation). Latches
+// per encounter — once separation grows past TCAS_REARM_M the alert
+// rearms so the *next* close pass fires fresh, but a sustained formation
+// loiter inside the rings doesn't fire-spam.
+const TCAS_CAUTION_M    = 600;   // m — enter CAUTION inside this radius if converging
+// (closure rate threshold) anything > 0 m/s counts as converging
+const TCAS_WARNING_M    = 250;   // m — hard radius for WARNING regardless of closure
+const TCAS_WARN_CLOSE_M = 450;   // m — escalates to WARNING if closing fast inside this
+const TCAS_WARN_CLOSURE = 8;     // m/s — closure rate threshold for the close-converging escalation
+const TCAS_WARN_VERT_M  = 50;    // m — vertical separation under which closure escalates
+const TCAS_REARM_M      = 1000;  // m — clear the encounter latch once separation grows past this
+const TCAS_PING_MS      = 700;   // soft ping cadence (caution)
+const TCAS_BEEP_MS      = 320;   // sharp beep cadence (warning)
+// Soft single-sine "ping" for CAUTION. Lower + quieter than the warning
+// beep so the two phases are audibly distinct.
+function playTcasPing(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.20 * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(720, t0);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.20);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.22);
+}
+// Sharper two-tone square-ish chirp for WARNING. Higher + louder than the
+// ping so the escalation reads instantly, but lower than the GPWS PULL UP
+// chirp so the pilot's ear can still tell terrain vs traffic apart.
+function playTcasBeep(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.30 * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(780, t0);
+  osc.frequency.linearRampToValueAtTime(1020, t0 + 0.14);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+  g.gain.setValueAtTime(vol, t0 + 0.13);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.20);
+}
+function tickTcas(){
+  const el  = document.getElementById('trafficWarn');
+  const arr = document.getElementById('trafficArrow');
+  const dst = document.getElementById('trafficDist');
+  // Bail to idle under any non-flight condition. Cull cleanly if the AI
+  // plane isn't visible (past the 12 km AI draw distance) since there's
+  // nothing real to warn about.
+  if (state.onGround || state.crashed || state.replayActive || state.photoMode
+      || state.introOpen || state.paused || !aiPlane.visible){
+    if (state.tcasPhase !== 'idle'){
+      state.tcasPhase = 'idle';
+      state.tcasAtcLatch = false;
+    }
+    if (el) el.style.display = 'none';
+    return;
+  }
+  const dx = aiPlane.position.x - plane.position.x;
+  const dy = aiPlane.position.y - plane.position.y;
+  const dz = aiPlane.position.z - plane.position.z;
+  const dist3 = Math.hypot(dx, dy, dz);
+  // Clear the encounter latch once separation grows past the rearm ring so
+  // a future close pass fires fresh. While inside the rearm ring + idle,
+  // we still allow new encounters to climb into CAUTION below.
+  if (dist3 > TCAS_REARM_M){
+    if (state.tcasPhase !== 'idle'){
+      state.tcasPhase = 'idle';
+      state.tcasAtcLatch = false;
+    }
+    if (el) el.style.display = 'none';
+    return;
+  }
+  // Closure rate: derivative of separation distance using current velocity
+  // vectors. Positive = converging, negative = opening. Player has full 3D
+  // velocity in state.vel; AI plane flies horizontally at AI_SPEED along
+  // its current heading (no vertical velocity in the circuit pattern).
+  const aiVx = Math.sin(aiState.heading) * AI_SPEED;
+  const aiVz = -Math.cos(aiState.heading) * AI_SPEED;
+  const rvx = state.vel.x - aiVx;
+  const rvy = state.vel.y;       // AI vy assumed ~0
+  const rvz = state.vel.z - aiVz;
+  // Closure = -d(dist)/dt; if relative velocity projects toward the AI
+  // (away from the player→AI vector), closure is positive.
+  const closure = dist3 > 0.1
+    ? -((dx * (-rvx) + dy * (-rvy) + dz * (-rvz)) / dist3)
+    : 0;
+  // Phase machine. Caution requires converging + inside caution ring.
+  // Warning either hits the hard radius or matches a tight "closing fast
+  // with low vertical separation" geometry inside the caution ring.
+  const vertSep = Math.abs(dy);
+  let nextPhase = state.tcasPhase;
+  if (dist3 < TCAS_WARNING_M ||
+      (dist3 < TCAS_WARN_CLOSE_M && closure > TCAS_WARN_CLOSURE && vertSep < TCAS_WARN_VERT_M)){
+    nextPhase = 'warning';
+  } else if (dist3 < TCAS_CAUTION_M && closure > 0){
+    // Don't drop back from warning to caution within the same encounter —
+    // a warning sticks until the geometry resolves past the rearm ring.
+    nextPhase = (state.tcasPhase === 'warning') ? 'warning' : 'caution';
+  } else if (state.tcasPhase === 'caution' && (dist3 > TCAS_CAUTION_M * 1.1 || closure <= 0)){
+    // Soft exit from caution: opening up or drifted outside the ring by a
+    // small hysteresis margin clears the alert without waiting for the full
+    // rearm distance. Warning still needs the rearm ring to clear so a near
+    // miss with collision geometry doesn't silently downgrade mid-pass.
+    nextPhase = 'idle';
+    state.tcasAtcLatch = false;
+  }
+  state.tcasPhase = nextPhase;
+  if (nextPhase === 'idle'){
+    if (el) el.style.display = 'none';
+    return;
+  }
+  // Bearing to AI plane in plane-local frame so the arrow rotates relative
+  // to the player's nose (up = dead ahead). Matches the bearing-arrow
+  // convention the RWY readout + EMR row already use.
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+  const playerHdg = Math.atan2(fwd.x, -fwd.z);
+  const targHdg = Math.atan2(dx, -dz);
+  let rel = targHdg - playerHdg;
+  while (rel >  Math.PI) rel -= 2 * Math.PI;
+  while (rel < -Math.PI) rel += 2 * Math.PI;
+  const relDeg = rel * 180 / Math.PI;
+  // Paint pill: amber for caution, red for warning. Reuse the existing
+  // warn-amber / warn-red classes so the blink cadence matches the rest
+  // of the warning column.
+  if (el){
+    el.style.display = 'block';
+    el.className = (nextPhase === 'warning') ? 'warn-red' : 'warn-amber';
+  }
+  if (arr){
+    arr.style.transform = 'rotate(' + relDeg.toFixed(0) + 'deg)';
+  }
+  if (dst){
+    const distStr = dist3 < 1000 ? Math.round(dist3) + ' m' : (dist3 / 1000).toFixed(1) + ' km';
+    dst.textContent = distStr;
+  }
+  const nowMs = performance.now();
+  if (nextPhase === 'warning'){
+    if (nowMs - state.tcasPingAt > TCAS_BEEP_MS){
+      playTcasBeep();
+      state.tcasPingAt = nowMs;
+    }
+    if (!state.tcasAtcLatch){
+      state.tcasAtcLatch = true;
+      if (typeof pushATC === 'function'){
+        pushATC('Traffic, traffic — resolve.', { tag: 'TWR', now: true });
+      }
+    }
+  } else {
+    if (nowMs - state.tcasPingAt > TCAS_PING_MS){
+      playTcasPing();
+      state.tcasPingAt = nowMs;
+    }
+  }
+}
+
 function landingProj(px, pz){
   let best = null, bestS = 1e9;
   for (const ri of runwayInfos){
@@ -12993,6 +13184,10 @@ function step(dt){
   tickWindShear();
   // Landing-gear warning horn: low + slow + descending with gear up = nag.
   tickGearHorn();
+  // TCAS-lite mid-air contact warning vs the AI plane: yellow ping +
+  // bearing arrow as we close, red beep + ATC "Traffic, traffic — resolve"
+  // if the geometry threatens a real collision.
+  tickTcas();
   const windEase = 1 - Math.exp(-0.25 * dt);
   state.wind.x += (state.windTarget.x - state.wind.x) * windEase;
   state.wind.z += (state.windTarget.z - state.wind.z) * windEase;
