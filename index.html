@@ -23695,6 +23695,60 @@ function drawMinimap(hdgDeg){
     if (typeof minimapCtx.setLineDash === 'function') minimapCtx.setLineDash([]);
     minimapCtx.restore();
   }
+  // Crosswind crab trail — short dashed line trailing 600 m behind the player
+  // showing ground track (heading-over-ground from velocity) vs. the magenta
+  // forward arrow's nose heading. When wind pushes the plane sideways on
+  // cruise, the dashed track visibly diverges from the nose direction, giving
+  // an at-a-glance read of how much crab the pilot is holding. Length scales
+  // with ground speed (capped at 1 km), color fades cyan→amber→red as the
+  // angle between nose and track grows. Hidden under 30 km/h ground speed so
+  // taxi / parked stays clean, and gated against intro / replay / photo /
+  // pause / crashed via the same checklist the rest of the minimap follows.
+  // Drawn before the plane triangle so the yellow nose arrow stays on top.
+  if (!state.introOpen && !state.replayActive && !state.photoMode && !state.paused && !state.crashed){
+    const _vx = state.vel.x, _vz = state.vel.z;
+    const _gsCrab = Math.hypot(_vx, _vz);
+    if (_gsCrab * 3.6 >= 30){
+      // Trail length scales with ground speed (~6s of straight-line travel)
+      // and caps at 1 km so a fast cruise doesn't blow off the minimap face.
+      const _trailM = Math.min(1000, _gsCrab * 6);
+      // World-frame unit vector along the ground track. Screen mapping:
+      // +x world = +x screen (east), +z world = +y screen (south).
+      const _ux = _vx / _gsCrab;
+      const _uz = _vz / _gsCrab;
+      // Crab angle = signed angle between nose forward and ground-track.
+      // Nose forward in world: heading 0° = -z (north), so forward =
+      // (sin(hdgRad), -cos(hdgRad)). Same convention drawMinimap uses for the
+      // yellow nose triangle that points to (0, -22) after rotate(hdgRad).
+      const _hdgRadCrab = hdgDeg * Math.PI/180;
+      const _fx = Math.sin(_hdgRadCrab);
+      const _fz = -Math.cos(_hdgRadCrab);
+      const _dot = Math.max(-1, Math.min(1, _ux * _fx + _uz * _fz));
+      const _crabDeg = Math.acos(_dot) * 180 / Math.PI;
+      // Color: cyan low drift, amber moderate, red severe (> 20°).
+      let _crabColor;
+      if (_crabDeg >= 20)      _crabColor = 'rgba(255,82,82,0.85)';   // red
+      else if (_crabDeg >= 8)  _crabColor = 'rgba(255,209,102,0.85)'; // amber
+      else                     _crabColor = 'rgba(80,220,235,0.75)';  // cyan
+      // Trail extends BACKWARDS along the ground track (the plane is where
+      // it is now, the trail is where it's been the last few seconds).
+      const _trailPx = _trailM * scale;
+      const _ex = cx - _ux * _trailPx;
+      const _ey = cy - _uz * _trailPx;
+      minimapCtx.save();
+      minimapCtx.strokeStyle = _crabColor;
+      minimapCtx.lineWidth = 1.3;
+      if (typeof minimapCtx.setLineDash === 'function'){
+        minimapCtx.setLineDash([4, 3]);
+      }
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(cx, cy);
+      minimapCtx.lineTo(_ex, _ey);
+      minimapCtx.stroke();
+      if (typeof minimapCtx.setLineDash === 'function') minimapCtx.setLineDash([]);
+      minimapCtx.restore();
+    }
+  }
   // Plane (centre): yellow triangle pointing along current heading. Forward
   // heading 0° = north (up on screen, -z), 90° = east (+x).
   const hdgRad = hdgDeg * Math.PI/180;
