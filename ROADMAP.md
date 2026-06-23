@@ -147,10 +147,11 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Pilot rank progression — lifetime rank derived from existing counters (CADET → STUDENT → PRIVATE → COMMERCIAL → ATP → INSTRUCTOR → ACE), each tier gated by ALL of: total flights, total landings, perfect-landing count (new counter, bumped when score ≥300), and Ring Chase best-time threshold so it isn't just a flight-spam meter. Main menu shows a `RANK <id> · NEXT <id> · <gaps>` pill under PILOT STATS/LOGBOOK; tapping it no longer launches the flight. Stats panel adds RANK + PERFECT LANDINGS rows, RESET also clears the rank latch so a fresh pilot bootstraps as CADET. A one-shot 🎖️ PROMOTION! toast fires the first time each rank threshold is crossed (latched in localStorage so reloads don't re-fire), checked on every takeoff / landing / ring best.
 
+- [x] Cabin chime on level-off — the first frame autopilot altitude-hold captures within ±10 m of the locked target with vertical speed below 0.6 m/s, fire the iconic two-note seatbelt ding (1046 Hz → 784 Hz sine pair, 0.36s apart), pop a faint top-center `✈ CRUISING` ribbon for 2s, and queue an ATC "Cabin crew, prepare for cruise" line (PILOT tag). Latched so it only fires once per altitude lock; the latch clears on AP disengage, AP re-engage, resetPlane, and after the plane wanders >50 m vertically off lock (climb to a fresh altitude re-arms the chime). Suppressed in photo/replay/pause/intro and on the ground, and hidden via PHOTO_HIDE_IDS so saved PNGs stay clean. Reuses the existing sfxReady() context so no new nodes are allocated.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Cabin chime on level-off — when autopilot altitude-hold captures within ±10 m of target for the first time, play the iconic two-note seatbelt ding (high → low sine pair), drop a faint top-bar `✈ CRUISING` ribbon for 2s, and fire an ATC "Cabin crew, prepare for cruise" line. Cheap audio reward, makes the AP feel like a real airline button. Suppressed in photo/replay/pause and on the ground.
 - [ ] Ground vehicles at airports — one slow tug + one fuel truck per airport drifting in a tiny ~120m loop around the apron, low-poly boxes with a flashing amber rotating beacon on top. Purely scenery, no collision, gated to ground-or-low altitude visibility like the existing taxi chevrons so air views stay clean. Pairs with the existing AI plane + windsock + beacon tower so each field finally feels populated instead of abandoned.
 
 ## How the ship loop works

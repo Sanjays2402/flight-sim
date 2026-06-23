@@ -131,6 +131,13 @@
   #missionDone { position:fixed; top:34%; left:50%; transform:translate(-50%,-50%); padding:22px 44px; border-radius:14px; font-size:38px; font-weight:900; letter-spacing:3px; display:none; border:3px solid #ffd166; background:rgba(20,30,10,.92); color:#ffd166; text-align:center; text-shadow:0 0 14px rgba(255,209,102,.6); box-shadow:0 0 40px rgba(255,209,102,.4), 0 6px 30px rgba(0,0,0,.6); z-index:14; animation:missionPop .35s ease-out; }
   #missionDone small { display:block; font-size:15px; font-weight:600; letter-spacing:1px; margin-top:8px; opacity:0.9; color:#fff5cc; }
   @keyframes missionPop { 0%{transform:translate(-50%,-50%) scale(.7); opacity:0;} 100%{transform:translate(-50%,-50%) scale(1); opacity:1;} }
+  /* Cruise ribbon: faint top-center pill that fades in for ~2s the first time
+     the autopilot captures the target altitude (within ±10 m of state.ap.alt
+     with vertical speed near zero). Paired with the two-note cabin chime in
+     playCabinChime() and an ATC "prepare for cruise" line. Slim and centered
+     so it never fights the ATC strip below. Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #cruise { position:fixed; top:46px; left:50%; transform:translate(-50%,0); padding:6px 18px; border-radius:14px; font-size:13px; font-weight:800; letter-spacing:3px; display:none; border:1px solid rgba(126,231,135,.55); background:rgba(8,22,14,.86); color:#7ee787; text-shadow:0 0 8px rgba(126,231,135,.45); box-shadow:0 4px 14px rgba(0,0,0,.45); z-index:12; animation:cruiseFade 2s ease-out forwards; pointer-events:none; }
+  @keyframes cruiseFade { 0%{opacity:0; transform:translate(-50%,-6px);} 14%{opacity:1; transform:translate(-50%,0);} 80%{opacity:1;} 100%{opacity:0;} }
   /* Achievement toasts: small popups in the top-left below the HUD panel that
      fire once when the pilot unlocks a milestone (first landing, 10 landings,
      perfect score, ring chase under 60s, etc.). Unlocked ids are persisted to
@@ -559,6 +566,7 @@
 </div>
 <div id="status"></div>
 <div id="missionDone"></div>
+<div id="cruise">✈ CRUISING</div>
 <div id="pause">
   <div class="card">
     <h2>PAUSED</h2>
@@ -5325,7 +5333,7 @@ const state = {
   // `hdgBug` is the magenta tick on the compass strip; nudged with [ and ]
   // (Shift = 1° fine, plain = 5° coarse). Heading hold tracks the bug, not
   // the heading captured at engage, so the pilot can re-aim mid-flight.
-  ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0, wpFollow:false },
+  ap: { on:false, alt:0, hdgRad:0, hdgBug:0, disengageMsgT:0, wpFollow:false, cruiseLatch:false },
   // Mini-map waypoint: optional magenta pin the pilot can drop anywhere on the
   // mini-map (click on desktop, long-press on mobile). Stored in world coords;
   // null when no pin. The HUD shows bearing+distance to it, and pressing M
@@ -5636,6 +5644,7 @@ addEventListener('keydown', e=>{
     if (state.ap.on){
       state.ap.on = false;
       state.ap.wpFollow = false;
+      state.ap.cruiseLatch = false;
       showStatus('AUTOPILOT OFF', null, 'hard');
       pushATC('Autopilot disengaged, hand-flying.', { tag:'PILOT' });
     } else if (!state.crashed && !state.onGround){
@@ -5645,6 +5654,7 @@ addEventListener('keydown', e=>{
       const hdgDeg = ((state.ap.hdgRad * 180/Math.PI) % 360 + 360) % 360;
       state.ap.hdgBug = Math.round(hdgDeg);
       state.ap.on = true;
+      state.ap.cruiseLatch = false;
       showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(Math.round(hdgDeg)).padStart(3,'0'), 'good');
       pushATC('Autopilot engaged, holding ' + Math.round(state.ap.alt - GEAR_H) + 'm.', { tag:'PILOT' });
     }
@@ -6290,6 +6300,7 @@ function resetPlane(){
   hideLandCard();
   state.ap.on = false;
   state.ap.wpFollow = false;
+  state.ap.cruiseLatch = false;
   // Mini-map waypoint is a per-flight target — reset clears the pin so the
   // next sortie starts with a clean map (matches trim, which also resets).
   state.waypoint = null;
@@ -6658,6 +6669,48 @@ function playMissionFanfare(){
     osc2.start(tNote);
     osc2.stop(tNote + noteDur + 0.02);
   });
+}
+// Cabin chime: the iconic two-note seatbelt ding (high → low sine pair) that
+// fires once when the autopilot captures the target altitude in cruise. Uses
+// the same WebAudio context as the stall horn / mission fanfare so we don't
+// pile up hardware nodes. Volume scales with the master audio slider.
+function playCabinChime(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.28 * settings.volume;
+  if (vol <= 0) return;
+  // High note first, low note ~0.36s later — same cadence as a real cabin ding.
+  const notes = [{ f: 1046.50, t: 0.00 }, { f: 783.99, t: 0.36 }];
+  const noteDur = 0.55;
+  notes.forEach(({ f, t }) => {
+    const tNote = t0 + t;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f, tNote);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, tNote);
+    g.gain.linearRampToValueAtTime(vol, tNote + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, tNote + noteDur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(tNote);
+    osc.stop(tNote + noteDur + 0.02);
+  });
+}
+// Cruise ribbon: faint top-center "✈ CRUISING" pill that pops for ~2s the
+// first time autopilot altitude-hold captures the target. Pairs with
+// playCabinChime() + an ATC "prepare for cruise" line. Restarts its CSS
+// animation on re-fire so stacked level-offs still feel punchy.
+let cruiseRibbonTimer = 0;
+function showCruiseRibbon(){
+  const el = document.getElementById('cruise');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = '';
+  if (cruiseRibbonTimer) clearTimeout(cruiseRibbonTimer);
+  cruiseRibbonTimer = setTimeout(() => { el.style.display = 'none'; }, 2000);
 }
 // Ceremonial "MISSION COMPLETE" banner: bigger, brighter, and longer-lived
 // than the normal #status pill. Pairs with playMissionFanfare() so the
@@ -7320,6 +7373,7 @@ function step(dt){
     if (manualStick || state.crashed || state.onGround){
       state.ap.on = false;
       state.ap.wpFollow = false;
+      state.ap.cruiseLatch = false;
       // Suppress noisy re-trigger if we just disengaged this frame.
       if (performance.now() - state.ap.disengageMsgT > 500){
         state.ap.disengageMsgT = performance.now();
@@ -7367,6 +7421,25 @@ function step(dt){
       // Pitch command: nose-up when we want to climb. Pitch input sign in this
       // sim is inverted (pIn<0 = pull back), so negate.
       pIn = -Math.max(-1, Math.min(1, vsErr * 0.35));
+
+      // ---- Cruise capture: first time we're within ±10 m of the locked
+      // altitude AND vertical speed is settled (<0.6 m/s), fire the iconic
+      // two-note cabin chime + a faint top ribbon + an ATC "prepare for
+      // cruise" line. Latched so it only fires once per altitude lock; if the
+      // pilot wanders off >50 m vertically (manual pitch nudge from a
+      // different control, severe turbulence) the latch clears so the next
+      // re-capture chimes again. Suppressed in photo/replay/pause/intro so
+      // those modes stay silent.
+      if (!state.photoMode && !state.replayActive && !state.paused && !state.introOpen){
+        if (!state.ap.cruiseLatch && Math.abs(altErr) <= 10 && Math.abs(state.vel.y) <= 0.6){
+          state.ap.cruiseLatch = true;
+          playCabinChime();
+          showCruiseRibbon();
+          pushATC('Cabin crew, prepare for cruise.', { tag:'PILOT' });
+        } else if (state.ap.cruiseLatch && Math.abs(altErr) > 50){
+          state.ap.cruiseLatch = false;
+        }
+      }
     }
   }
 
@@ -11162,7 +11235,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -11812,6 +11885,7 @@ updateCamModeUi();
     hideLandCard();
     state.ap.on = false;
     state.ap.wpFollow = false;
+    state.ap.cruiseLatch = false;
     state.waypoint = null;
     state.msgT = 0;
     state.refueling = false;
