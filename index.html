@@ -1093,7 +1093,7 @@
       <span>Camera cycle</span><span><kbd>C</kbd></span>
       <span>Kill engine (deadstick)</span><span><kbd>X</kbd></span>
       <span>Ignition crank (cold start / restart)</span><span><kbd>I</kbd></span>
-      <span>Time skip (+1h)</span><span><kbd>T</kbd></span>
+      <span>Time skip (+1h)</span><span><kbd>T</kbd> · <kbd>Shift</kbd>+<kbd>T</kbd> = -1h</span>
       <span>Pause menu</span><span><kbd>Esc</kbd></span>
       <span>Quick-jump airport</span><span><kbd>J</kbd>, <kbd>1</kbd>–<kbd>9</kbd> · <kbd>Shift</kbd>+digit = other end</span>
       <span>Reset</span><span><kbd>R</kbd></span>
@@ -9253,6 +9253,34 @@ addEventListener('keydown', e=>{
   // sunrise/sunset toasts on a fresh ground-bound mission.
   if (e.code==='KeyT' && e.shiftKey){
     e.preventDefault();
+    // Reverse time-of-day step: mirror plain T's +1 hour with a -1 hour
+    // step BEFORE the existing warn-test / keypad routing fires, so a pilot
+    // who overshot their target sunset can rewind without cycling 23 more
+    // presses through plain T. Silently ignored if the warning chime
+    // self-test is currently running (Shift+T is the abort/hold-to-run
+    // key for that flow and shouldn't double-fire as a clock rewind
+    // mid-test) or if the time-of-day quick-set keypad is open (the
+    // keypad's own preset buttons already cover snap-to-time). Reverses
+    // the sunrise/sunset toast crossings so a rewind past 18 announces
+    // sunset and a rewind past 6 announces sunrise, mirroring the
+    // forward-direction toasts in applyTimeOfDay's per-frame check.
+    if (!state.warnTest && !state.timekeypadOpen){
+      const _prevTodRev = state.todHours;
+      state.todHours = ((state.todHours - 1) % 24 + 24) % 24;
+      if (!state.paused && !state.replayActive && !state.photoMode && !state.introOpen){
+        const _crossedRev = function(threshold){
+          if (_prevTodRev === state.todHours) return false;
+          if (state.todHours <= _prevTodRev){
+            return _prevTodRev > threshold && state.todHours <= threshold;
+          }
+          // Wrapped past midnight backwards this frame (e.g. 0.5 -> 23.5).
+          return _prevTodRev > threshold || state.todHours <= threshold;
+        };
+        if (_crossedRev(18)) showToast('\u{1F307}', 'Sunset',  'Golden hour \u2014 enjoy the view.');
+        if (_crossedRev(6))  showToast('\u{1F305}', 'Sunrise', 'The world wakes up.');
+      }
+      try { if (typeof applyTimeOfDay === 'function') applyTimeOfDay(state.todHours); } catch(e){}
+    }
     if (state.onGround){ startWarnTest(); return; }
     if (typeof window.openTimeKeypad === 'function') window.openTimeKeypad();
     return;
