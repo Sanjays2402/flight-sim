@@ -7377,6 +7377,21 @@ const state = {
   // toggle is honored mid-flight (off-by-toggle clears any pending ritual).
   coldStart: false,
   ignitionT: -1,
+  // Engine prime / mixture cycle. Layered on top of the cold-start ritual:
+  // pressing I the first time during cold-start runs a short two-pump primer
+  // (primeT counts up to PRIME_DURATION_S with a soft chug-chug SFX + cockpit
+  // primer-knob pulse) before the starter spools. primed=true means the engine
+  // got its fuel/air charge; engine catches clean. primed=false means the
+  // player tapped I a second time mid-prime to force-start without finishing
+  // priming — engine still catches but immediately runs rough for ROUGH_IDLE_S
+  // (visible RPM judder + uneven exhaust note + small thrust dip) before
+  // smoothing. coldMorning latches at crank time when TOD < 7 so the spool
+  // adds COLD_MORNING_EXTRA_S — the engine takes a hair longer to catch on a
+  // cold morning. All three reset in resetPlane() and on finishIgnition().
+  primed: false,
+  primeT: -1,
+  roughIdleT: -1,
+  coldMorning: false,
   // Engine instrument startup self-test. Triggered only on ground cold-start
   // crank (not in-air restart) when settings.coldStart is on; -1 = idle,
   // >=0 = seconds elapsed since ignition. drawCockpitPanel() reads this to
@@ -9556,6 +9571,13 @@ function resetPlane(){
   state.airRestart = false;
   state.ignitionT = -1;
   state.selfTestT = -1;
+  // Prime / mixture cycle: every fresh sortie starts unprimed so the next
+  // crank runs the full primer cycle. roughIdleT clears so a previous skipped
+  // primer doesn't leak into the new flight.
+  state.primeT = -1;
+  state.primed = false;
+  state.roughIdleT = -1;
+  state.coldMorning = false;
   armColdStart();
 }
 resetPlane();
@@ -10483,12 +10505,19 @@ function cycleFlaps(){
 // then the engine catches and control returns. Skippable for impatient pilots
 // via the settings toggle.
 const COLD_START_SPOOL_S = 1.6;     // seconds from crank-tap to engine-online
+const PRIME_DURATION_S   = 0.5;     // two-pump primer cycle that precedes the starter spool
+const ROUGH_IDLE_S       = 3.0;     // post-catch roughness when the player skipped the primer
+const COLD_MORNING_EXTRA_S = 0.4;   // extra spool time on a cold morning (TOD < 7)
 function armColdStart(){
   if (!settings.coldStart) return;
   state.coldStart = true;
   state.ignitionT = -1;
+  state.primeT = -1;
+  state.primed = false;
+  state.roughIdleT = -1;
+  state.coldMorning = false;
   state.throttle = 0;
-  showStatus('COLD START', 'press I to ignite', 'hard');
+  showStatus('COLD START', 'press I to prime + ignite', 'hard');
 }
 function beginIgnition(){
   // Crank gate: only valid while either ignition sequence is armed (ground
@@ -10513,6 +10542,32 @@ function beginIgnition(){
   if (state.fuel <= 0){
     showStatus('NO FUEL', state.onGround ? 'taxi onto the apron to refuel' : 'glide her in', 'hard');
     return;
+  }
+  // Engine prime / mixture cycle. Ground cold-start only — in-air deadstick
+  // restart skips the primer (no time and no need; the engine just needs spark
+  // back). First tap of I during cold-start arms the primer; the step() loop
+  // ticks primeT and auto-rolls into the starter spool once PRIME_DURATION_S
+  // elapses. Tapping I a second time during the prime forces an immediate
+  // spool with primed=false, so the engine catches but immediately runs rough
+  // (see step() / drawCockpitRpm() / updateExhaustFlame()).
+  if (state.coldStart && state.primeT < 0 && !state.primed){
+    state.primeT = 0;
+    state.primed = false;
+    // Cold morning: TOD < 7 (pre-7am) adds a hair of extra crank time, mirroring
+    // the real-world thicker-oil cranking experience. Latched here so the spool
+    // length is locked in at the moment of priming, not re-checked mid-crank.
+    state.coldMorning = (state.todHours < 7);
+    pushATC('Priming engine.', { tag:'PILOT', now:true });
+    showStatus('PRIME', 'mixture rich, two pumps...', 'good');
+    playEnginePrime();
+    return;
+  }
+  // Mid-prime force-start: player tapped I a second time before the primer
+  // finished. Engine still catches but enters roughIdleT once the spool ends.
+  if (state.coldStart && state.primeT >= 0 && !state.primed){
+    state.primeT = -1;
+    state.primed = false;
+    // roughIdleT will arm in finishIgnition() based on this primed=false flag.
   }
   state.ignitionT = 0;
   // Pilot is in command; tower hears the crank confirmation either way.
@@ -10552,9 +10607,28 @@ function showChecklistToast(){
   setTimeout(function(){ if (el && el.parentNode) el.parentNode.removeChild(el); }, 2600);
 }
 function finishIgnition(){
+  // Skipping the primer = engine catches but runs rough for ROUGH_IDLE_S.
+  // Only applies to the ground cold-start path; in-air deadstick restart
+  // never runs the primer so it's exempt (else every emergency restart would
+  // judder). state.primed is left untouched here so the rough flag survives
+  // for the gauge / exhaust judder reads below.
+  const wasColdStart = state.coldStart;
+  const skippedPrime = wasColdStart && !state.primed;
   state.coldStart = false;
   state.airRestart = false;
   state.ignitionT = -1;
+  state.primeT = -1;
+  state.coldMorning = false;
+  if (skippedPrime){
+    state.roughIdleT = ROUGH_IDLE_S;
+    pushATC('Engine running rough — needed a proper prime.', { tag:'PILOT' });
+  } else {
+    state.roughIdleT = -1;
+    pushATC('Engine running, all gauges green.', { tag:'PILOT' });
+  }
+  // Mark primed for the rest of this session so a quick X-restart on the
+  // apron doesn't demand another primer cycle (the fuel system is wet now).
+  state.primed = true;
   // If the engine was killed (X) AND we're going through cold-start to bring
   // it back, also clear the engine-out so thrust returns when the player
   // pushes the throttle. Pure mission-start path already has engineOut=false.
@@ -10562,8 +10636,7 @@ function finishIgnition(){
   // Flare the exhaust flame for ~0.45s as the engine catches — classic
   // puff-out-the-stack moment. Decayed in updateExhaustFlame() each frame.
   state.exhaustCatchT = 0.45;
-  showStatus('ENGINE ONLINE', state.onGround ? 'cleared to taxi' : 'power restored', 'good');
-  pushATC('Engine running, all gauges green.', { tag:'PILOT' });
+  showStatus('ENGINE ONLINE', state.onGround ? 'cleared to taxi' : 'power restored', skippedPrime ? 'hard' : 'good');
 }
 
 // Per-frame flame intensity update. Reads throttle + engine-live + cold-start
@@ -10597,6 +10670,14 @@ function updateExhaustFlame(dt){
   // Cold-start catch puff — bright orange flash that decays linearly.
   if (!suppress && state.exhaustCatchT > 0){
     base = Math.max(base, state.exhaustCatchT / 0.45 * 0.95);
+  }
+  // Rough-idle stack judder after a skipped-primer start: layer a fast random
+  // puff on top of whatever base the throttle ramp computed, fading linearly
+  // with roughIdleT so the exhaust visibly stutters for ~3s and then smooths.
+  // Gated to engineLive so a deadstick / cold-start still reads off.
+  if (!suppress && engineLive && state.roughIdleT > 0){
+    const k = state.roughIdleT / ROUGH_IDLE_S;
+    base = Math.max(base, 0.45 * k * (0.4 + 0.6 * Math.random()));
   }
   if (suppress) base = 0;
   // Write to every flame child under the active exhaust group. Cheap loop —
@@ -10638,6 +10719,52 @@ function playInstrumentSelfTestClicks(){
     o.connect(g).connect(ctx.destination);
     o.start(t);
     o.stop(t + 0.04);
+  }
+}
+// Engine primer pump: two soft "chug-chug" pumps spaced ~0.25s apart, each a
+// quick low-pass-filtered noise burst layered with a tiny sub-sine thump so it
+// reads as a mechanical primer being worked twice. Tuned to fit cleanly inside
+// PRIME_DURATION_S (0.5s) so the SFX finishes just as the starter spool kicks
+// in. Volume scales with master like the other crank SFX.
+function playEnginePrime(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.24 * settings.volume;
+  if (vol <= 0) return;
+  for (let i = 0; i < 2; i++){
+    const tp = t0 + i * 0.25;
+    // Noise burst — short, low-passed, decays in ~120ms so each pump is a tight
+    // "chug" instead of a long whoosh.
+    const dur = 0.13;
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let k = 0; k < data.length; k++) data[k] = (Math.random()*2 - 1) * (1 - k/data.length);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 340;
+    lp.Q.value = 0.7;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0, tp);
+    ng.gain.linearRampToValueAtTime(vol * 0.85, tp + 0.01);
+    ng.gain.exponentialRampToValueAtTime(0.0001, tp + dur);
+    src.connect(lp).connect(ng).connect(ctx.destination);
+    src.start(tp);
+    src.stop(tp + dur + 0.02);
+    // Sub-thump — short sine that sags from 95 → 60 Hz so the pump has chest.
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(95, tp);
+    osc.frequency.exponentialRampToValueAtTime(60, tp + 0.1);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0, tp);
+    og.gain.linearRampToValueAtTime(vol * 0.55, tp + 0.008);
+    og.gain.exponentialRampToValueAtTime(0.0001, tp + 0.13);
+    osc.connect(og).connect(ctx.destination);
+    osc.start(tp);
+    osc.stop(tp + 0.15);
   }
 }
 // Starter-motor whir + a quick catch thump. Cheap WebAudio nodes; mirrors
@@ -12134,12 +12261,42 @@ function _aeroBoxFinish(reason){
 }
 
 function step(dt){
+  // Engine prime cycle: advance the primer clock first. When it completes,
+  // mark primed and auto-roll into the starter spool (so the player only has
+  // to tap I once for the full ritual). Skipped silently when not armed.
+  if (state.primeT >= 0){
+    state.primeT += dt;
+    if (state.primeT >= PRIME_DURATION_S){
+      state.primeT = -1;
+      state.primed = true;
+      // Now spool the starter via the same path the second-tap fallback hits.
+      state.ignitionT = 0;
+      pushATC('Cranking — stand by.', { tag:'PILOT', now:true });
+      showStatus('IGNITION', 'spooling up...', 'good');
+      // Cold-start only flavor (preflight checklist + self-test) — mirrors
+      // the original beginIgnition() side-effects so the SFX/UX is unchanged.
+      if (state.coldStart && !state.photoMode && !state.replayActive && !state.paused){
+        showChecklistToast();
+        state.selfTestT = 0;
+        playInstrumentSelfTestClicks();
+      }
+      playIgnitionCrank();
+    }
+  }
   // Cold-start ritual: tick the ignition timer here so the legacy throttle
   // path stays untouched. Throttle pinning lives inside the throttle branch
   // below; this just advances the spool clock when the player has cranked.
   if ((state.coldStart || state.airRestart) && state.ignitionT >= 0){
     state.ignitionT += dt;
-    if (state.ignitionT >= COLD_START_SPOOL_S) finishIgnition();
+    // Cold morning adds COLD_MORNING_EXTRA_S to the spool so the engine takes
+    // a hair longer to catch on a chilly start — ground cold-start only.
+    const spoolTarget = COLD_START_SPOOL_S + ((state.coldStart && state.coldMorning) ? COLD_MORNING_EXTRA_S : 0);
+    if (state.ignitionT >= spoolTarget) finishIgnition();
+  }
+  // Rough-idle decay after a skipped-primer start. Just a countdown so the
+  // gauge / exhaust / thrust judder reads can gate off it without per-frame math.
+  if (state.roughIdleT > 0){
+    state.roughIdleT = Math.max(0, state.roughIdleT - dt);
   }
   // Engine instrument startup self-test: advance the gauge-sweep clock and
   // clear it once the full-scale sweep completes so the panel snaps back to
@@ -12513,7 +12670,12 @@ function step(dt){
   // carb heat costs a small flat CARB_HEAT_THRUST_COST penalty from the warmer,
   // less-dense intake — the systems trade-off the pilot is making.
   const carbMul = Math.max(0, 1 - (state.carbIce || 0) * CARB_ICE_THRUST_BLEED - (state.carbHeatOn ? CARB_HEAT_THRUST_COST : 0));
-  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul : 0;
+  // Rough-idle thrust bleed after a skipped-primer start: up to ~6% off the
+  // top, fading linearly with roughIdleT so the engine smooths out over ~3s.
+  // Tiny but enough that the pilot feels the engine isn't quite breathing
+  // right yet — pairs with the gauge judder above.
+  const roughMul = (state.roughIdleT > 0) ? (1 - 0.06 * (state.roughIdleT / ROUGH_IDLE_S)) : 1;
+  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
@@ -16269,6 +16431,14 @@ function drawCockpitRpm(speedKmh, rpmOverride){
     rpm = state.ignitionT >= 0 ? Math.min(300, state.ignitionT / COLD_START_SPOOL_S * 320) : 0;
   } else if (engineLive){
     rpm = 600 + state.throttle * 2200;
+    // Rough-idle judder after a skipped-primer start: layer a fast random
+    // wobble on top of the base RPM that fades linearly with roughIdleT so
+    // the needle visibly jitters for ~3s before smoothing out. Pure visual
+    // — the thrust dip is applied separately in the physics path.
+    if (state.roughIdleT > 0){
+      const k = state.roughIdleT / ROUGH_IDLE_S;
+      rpm += (Math.random() * 2 - 1) * 180 * k;
+    }
   } else {
     // Windmilling deadstick — use airspeed as a proxy for prop RPM.
     rpm = Math.min(900, speedKmh * 4);
