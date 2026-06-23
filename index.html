@@ -910,7 +910,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -19996,6 +19996,33 @@ function step(dt){
   // stay clean.
   const cowlPillEl = document.getElementById('cowlPill');
   if (cowlPillEl) cowlPillEl.style.display = (state.cowlFlapsOpen && !state.photoMode) ? 'inline' : 'none';
+  // Density altitude pill (WIND row) — always-on readout of the live DA in
+  // metres so the player learns the hot-and-high concept without us bolting
+  // on a whole new gauge. state.densityAltFt is recomputed every frame in
+  // updateDensityAltitude(); convert to metres (DA is conventionally feet),
+  // compare against the plane's true MSL altitude, and color-code by the
+  // performance margin. Green under +500 m of true alt is a normal cool day,
+  // amber +500–1500 m is the classic hot-and-high warning (takeoff roll
+  // starts to stretch), red past +1500 m is real density-altitude territory
+  // where short-field performance falls off a cliff. Hidden in photo mode
+  // and on the intro screen so saved PNGs / menus stay clean.
+  const daPillEl = document.getElementById('daPill');
+  const daPillTEl = document.getElementById('daPillT');
+  if (daPillEl && daPillTEl){
+    if (state.photoMode || state.introOpen){
+      daPillEl.style.display = 'none';
+    } else {
+      daPillEl.style.display = 'inline';
+      const _daM = (state.densityAltFt || 0) / 3.28084;
+      const _trueAltM = plane.position.y;
+      const _excessM = _daM - _trueAltM;
+      daPillTEl.textContent = Math.round(_daM) + 'm';
+      let _daColor = '#7ee787';
+      if (_excessM > 1500)      _daColor = '#ff5577';
+      else if (_excessM > 500)  _daColor = '#ffd166';
+      daPillEl.style.color = _daColor;
+    }
+  }
   // Pre-prime pill (WIND row) — green ✓ PRIMED <Ns> while a Shift+I prime
   // is fresh and the engine still hasn't caught (post-catch primed=true is
   // permanent for the session and not interesting on the HUD). Color biases
