@@ -10434,6 +10434,19 @@ if (bailCardEl){
 
 // ====== STATE ======
 const GEAR_H = 1.25;
+// Crosswind kick-off animation tuning. KICK_OFF_DURATION is the total
+// time the visible airframe takes to ease from peak crab back to neutral
+// after touchdown; KICK_OFF_MAX_RAD caps the peak yaw so a brutal
+// crosswind (45 deg crab) still only kicks ~25 deg of visible nose-swing.
+// KICK_OFF_TRIGGER_RAD is the touchdown crab threshold (~6 deg) below
+// which the wheels are close enough to centerline that no visible kick
+// is warranted. KICK_OFF_LIFTOFF_KMH is the ground speed required after
+// touchdown to re-arm the kickOffFired latch so a subsequent landing on
+// the same sortie gets its own animation.
+const KICK_OFF_DURATION    = 0.35;
+const KICK_OFF_MAX_RAD     = 25 * Math.PI / 180;
+const KICK_OFF_TRIGGER_RAD = 6 * Math.PI / 180;
+const KICK_OFF_LIFTOFF_KMH = 50;
 const state = {
   throttle: 0,
   flaps: 0,
@@ -10683,6 +10696,22 @@ const state = {
   // photo mode and on pause/replay so saved PNGs stay clean.
   headBobT: 0,
   touchdownJoltT: 0,
+  // Crosswind landing kick-off animation: the visible airframe yaws back
+  // toward the runway centerline over KICK_OFF_DURATION seconds when the
+  // wheels touch in a crab (angle between unit nose-forward and unit
+  // ground-track > 6 deg). kickOffT counts UP from 0 to KICK_OFF_DURATION
+  // and is -1 when idle so we can early-out cheaply. kickOffMag is the
+  // signed peak yaw in radians (capped at 25 deg, negative of the crab so
+  // the nose swings TOWARD the runway centerline). kickOffFired latches
+  // per landing so a long bumpy rollout doesn't multi-fire, and re-arms
+  // on liftoff (gs > 50 km/h while airborne) in the same place the
+  // touch-and-go streak re-arms. Pure cosmetic — applied to the visible
+  // airframe pose right before renderer.render() and unwound on the next
+  // frame so the physics quaternion is never modified.
+  kickOffT: -1,
+  kickOffMag: 0,
+  kickOffFired: false,
+  kickOffYawApplied: 0,
   flyByPos: new THREE.Vector3(),
   flyByActive: false,
   flyByT: 0,
@@ -13629,6 +13658,14 @@ function resetPlane(){
   // Reset head-bob accumulators so a fresh sortie doesn't start mid-jolt.
   state.headBobT = 0;
   state.touchdownJoltT = 0;
+  // Crosswind kick-off animation: clear any in-flight kick + re-arm the
+  // latch so the first touchdown of the fresh sortie can fire its own
+  // animation. Also zero the carried yaw offset so we don't unwind into
+  // a fresh hot reset.
+  state.kickOffT = -1;
+  state.kickOffMag = 0;
+  state.kickOffFired = false;
+  state.kickOffYawApplied = 0;
   // Windshield cracks from high-speed bird strikes persist across the whole
   // sortie — a fresh sortie clears them so the next flight starts with a
   // clean windshield. Blood splatter also clears here so a quick-restart
@@ -19221,6 +19258,48 @@ function step(dt){
       const pitchDeg = THREE.MathUtils.radToDeg(tmpE.x);
       const rollDeg  = THREE.MathUtils.radToDeg(tmpE.z);
       const fwdKmh = Math.max(0, vFwd) * 3.6;
+      // Crosswind kick-off arming. Compute the signed angle between the
+      // unit nose-forward (XZ plane only) and the unit ground-track
+      // direction the wheels are about to bite. When the crab exceeds
+      // KICK_OFF_TRIGGER_RAD and the touchdown is sane (wheels down, on a
+      // runway, gear actually deployed) the visible airframe yaws back
+      // toward the runway centerline over KICK_OFF_DURATION seconds.
+      // Skipped on the carrier deck — angled-deck carriers do their own
+      // alignment trick that doesn't read as a rudder kick. Pure cosmetic;
+      // the underlying physics velocity/heading stays untouched so the
+      // rollout still tracks whichever way the wheels are actually pointing.
+      if (!state.kickOffFired && state.gearDown && onRunway
+          && !(land && land.ri && land.ri.ap && land.ri.ap.id === 'CV01')){
+        const _kfx = -Math.sin(tmpE.y), _kfz = -Math.cos(tmpE.y);
+        const _kvx = state.vel.x, _kvz = state.vel.z;
+        const _kvLen = Math.hypot(_kvx, _kvz);
+        // Need a real ground-track to read a crab against. <3 m/s is
+        // basically a touch-and-stop — nothing to kick into.
+        if (_kvLen > 3){
+          const _kvxN = _kvx / _kvLen, _kvzN = _kvz / _kvLen;
+          // Signed angle: positive _kCrab means the ground-track is to the
+          // RIGHT of the nose in world XZ (cross convention here is
+          // fx*vz - fz*vx, which has opposite sign to the standard 3D
+          // cross y-component since we want "counterclockwise positive"
+          // in screen-space, not world-space). To kick the nose TOWARD
+          // the ground-track we need to yaw the opposite way —
+          // plane.rotateY(positive) rotates the nose LEFT in Three.js'
+          // YXZ convention, so the kick magnitude is the NEGATIVE of the
+          // crab angle.
+          const _kdot = THREE.MathUtils.clamp(_kfx*_kvxN + _kfz*_kvzN, -1, 1);
+          const _kcross = _kfx*_kvzN - _kfz*_kvxN;
+          const _kCrab = Math.atan2(_kcross, _kdot);
+          if (Math.abs(_kCrab) > KICK_OFF_TRIGGER_RAD){
+            const _kSign = _kCrab >= 0 ? -1 : 1;
+            const _kMag = Math.min(Math.abs(_kCrab), KICK_OFF_MAX_RAD);
+            // Kick magnitude scales with the (clamped) crab so a 7° wisp
+            // gets a barely-visible nudge and a 30° crab pegs the cap.
+            state.kickOffMag = _kSign * _kMag;
+            state.kickOffT = 0;
+            state.kickOffFired = true;
+          }
+        }
+      }
       let ok = true, reason = '';
       if (!state.gearDown) { ok=false; reason='Gear up'; }
       else if (!onRunway)  { ok=false; reason='Off runway'; }
@@ -19767,6 +19846,14 @@ function step(dt){
     // arms the chain for its next increment. Idempotent — the touchdown
     // branch flips it back to false on the next wheels-down.
     if (state.tngChain > 0 && !state.tngAirborneAfterTd) state.tngAirborneAfterTd = true;
+    // Crosswind kick-off re-arm: once we're airborne again past
+    // KICK_OFF_LIFTOFF_KMH ground speed the latch clears so the next
+    // touchdown earns its own animation. The speed gate keeps a brief
+    // bounce or runway hop from re-arming mid-rollout.
+    if (state.kickOffFired){
+      const _kGsKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+      if (_kGsKmh > KICK_OFF_LIFTOFF_KMH) state.kickOffFired = false;
+    }
   }
 
   // Wingtip vortex trails — fade in under high-G or near stall.
@@ -27972,10 +28059,62 @@ function updateBinoculars(dt){
   }
 }
 
+// Crosswind kick-off animation — split into unapply / apply halves so the
+// cosmetic yaw is always unwound BEFORE the next step() reads
+// plane.quaternion back. Sequence per frame:
+//   1. unapplyKickOffYaw()   — strip last frame's cosmetic yaw so physics
+//                              reads a clean (un-kicked) quaternion.
+//   2. step(dt)              — runs the physics tick (also updates the
+//                              camera using the un-kicked pose so cockpit
+//                              cam doesn't pick up the visible kick).
+//   3. applyKickOffYaw(dt)   — advances the timer and lays the new
+//                              cosmetic yaw on the visible airframe.
+//   4. renderer.render()     — draws the frame with the kick in place.
+// Hidden in photo / pause / replay / intro / crash via the standard live
+// gate (matches the kick spec) so saved PNGs and frozen frames stay still
+// and a crash doesn't keep yawing the wreck.
+function unapplyKickOffYaw(){
+  if (state.kickOffYawApplied !== 0){
+    plane.rotateY(-state.kickOffYawApplied);
+    state.kickOffYawApplied = 0;
+  }
+}
+function applyKickOffYaw(dt){
+  if (state.kickOffT < 0) return;
+  const live = !state.paused && !state.replayActive && !state.photoMode
+    && !state.introOpen && !state.crashed;
+  if (!live){
+    // Bail without advancing the timer or applying the yaw — the kick
+    // freezes through a pause/photo and resumes when the gate clears.
+    return;
+  }
+  state.kickOffT += dt;
+  if (state.kickOffT >= KICK_OFF_DURATION){
+    // Animation complete: clear so the unwind above stops running.
+    state.kickOffT = -1;
+    state.kickOffMag = 0;
+    return;
+  }
+  // Smooth ease-out (cubic): full magnitude at t=0, zero at t=duration.
+  // f(u) = 1 - u^3 where u = t / duration.
+  const u = state.kickOffT / KICK_OFF_DURATION;
+  const eased = 1 - u * u * u;
+  const yaw = state.kickOffMag * eased;
+  plane.rotateY(yaw);
+  state.kickOffYawApplied = yaw;
+}
+
 function loop(now){
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - lastT)/1000);
   lastT = now;
+  // Strip any cosmetic crosswind kick-off yaw from the previous frame's
+  // render. Done unconditionally at the top of loop so step() (which only
+  // runs in the live branch) always reads a clean plane.quaternion, and
+  // so a transition into pause / photo / replay between frames doesn't
+  // leave a kicked yaw frozen on the visible airframe. Re-applied below,
+  // right before renderer.render().
+  unapplyKickOffYaw();
   if (!state.introOpen){
     if (state.photoMode){
       // Photo mode: physics frozen, free-orbit camera around the plane.
@@ -28087,6 +28226,14 @@ function loop(now){
   // gates on the active flag so a clean cruise pays almost nothing, and
   // hides everything in photo mode so saved PNGs stay clean.
   updateCrashDebris(dt);
+  // Crosswind kick-off animation: cosmetic yaw applied to the visible
+  // airframe just before render and unwound at the top of the next call.
+  // Lives outside step() so the camera update inside step() (~line 21702)
+  // sees the pre-kick quaternion — chase / orbit cams hold steady while
+  // the airframe visibly swings, which is exactly the kick effect we want.
+  // Cockpit cam already hides the airframe, so the kick is invisible there
+  // (matches reality: the pilot's POV is what's doing the kicking).
+  applyKickOffYaw(dt);
   renderer.render(scene, camera);
 }
 
