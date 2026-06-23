@@ -352,6 +352,15 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Engine-out best-glide HUD coach — when the engine is dead (fuel-out, kill switch, or fire-burnout) and the plane is above ~50m AGL, show a small cyan `BEST GLIDE` pill on the HUD with the target indicated airspeed for max L/D (single fixed number tuned to current model, e.g. `BEST GLIDE 105 km/h`), and color-code current IAS green within ±5, amber within ±15, red outside that. Adds a one-shot ATC "Establish best glide" call the first frame the engine quits airborne. Turns the existing engine-out / engine-fire scenarios from "oh no" into an actual skill check — pilots learn the real-world memory item without any new physics.
+
+- [ ] Nearest-airport diversion arrow — when fuel is below 20% or the engine is dead/on-fire, draw a thick yellow chevron at the top of the HUD pointing toward the nearest runway threshold (any airport, picks closest by great-circle), with `→ <id> 4.2 km` next to it. Hides automatically once you're inside a 1 km airport zone (mini-map takes over). Pairs with the existing low-fuel ATC call and the engine-out coach; gives panicked pilots a single glance answer to "which way home?" without making them squint at the mini-map.
+
+- [ ] Touch-and-go streak counter — track consecutive successful landings (any mode) without a crash; HUD shows a tiny `🔥 STREAK x4` pill under the score row that grows from white → amber → magenta as the streak climbs. Crashing resets to 0 with a quick `STREAK BROKEN` toast; best streak persists to localStorage and shows on the pilot stats screen. Gamifies the existing landing-card pipeline for free flight without inventing a new mission, and gives Touch & Go mode a reason to keep going past the timer.
+
+- [ ] Cockpit yoke/stick visible in cockpit cam — draw a small dark joystick column rising from the bottom of the cockpit view that tilts left/right with aileron and forward/back with elevator input (matches the player's actual control deflection in real time). Pure cosmetic — no physics — but immediately makes cockpit cam feel piloted instead of static. Hidden in chase/orbit/flyby cams and in photo mode so screenshots stay clean.
+
+- [ ] Magnetic variation realism on the compass — apply a small fixed magnetic-variation offset (e.g. +15° east for the world's lat/long) so the magnetic heading the compass card + heading bug show is meaningfully different from true heading. HUD's top compass strip stays in magnetic (matches what pilots actually fly), but adds a tiny `MAG VAR +15°E` tooltip on the settings panel's HUD section so the discrepancy is documented. Tiny LOC, but turns the existing wet compass + heading-bug + ILS stack into something a real pilot would recognize as "yeah, that's how it works."
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
