@@ -126,6 +126,19 @@
      on approach. Hidden by default — drawILSNeedles() flips display:block. */
   #ils { position:fixed; top:476px; right:162px; width:96px; height:96px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
   #ils canvas { display:block; width:100%; height:100%; }
+  /* Approach-slope deviation tape: a slim vertical tape pinned to the right
+     edge of the HUD (just left of the angular meatball) that reports the
+     altitude error in METRES vs. the 3° glideslope to the nearest runway.
+     Scaled to ±200 m: center line = on slope, top = +200 m high, bottom
+     = −200 m low. Companion to the meatball — the meatball reads in
+     degrees and is angle-focused, this tape reads in actual metres so
+     pilots can call out "on slope, 30 m high" without scanning the
+     altimeter. Only renders when within 5 km of a runway, gear down OR
+     landing-light on, aligned within ±60° of the runway heading. Hidden
+     by default; drawSlopeDevTape() flips display:block when active.
+     Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #aslope { position:fixed; top:308px; right:218px; width:38px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
+  #aslope canvas { display:block; width:100%; height:100%; }
   /* Crosswind crab indicator: short horizontal bar pinned just below the ATC
      strip. Green tick = runway centerline heading (always at bar center),
      magenta arrow = current ground track. Visual gap between them is the crab
@@ -667,6 +680,7 @@
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
 <div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
+<div id="aslope"><canvas id="aslopeCv" width="76" height="320"></canvas></div>
 <div id="crab"><canvas id="crabCv" width="480" height="68"></canvas></div>
 <div id="xwhint"><canvas id="xwhintCv" width="360" height="128"></canvas></div>
 <div id="checklist">
@@ -14879,6 +14893,7 @@ function step(dt){
   drawVSI(vs);
   drawGlideslope(hdg);
   drawILSNeedles(hdg);
+  drawSlopeDevTape(hdg);
   drawCrabIndicator(hdg);
   drawXwTakeoffHint();
   maybeFireTakeoffClearance();
@@ -15485,6 +15500,166 @@ function drawILSNeedles(hdgDeg){
   ilsCtx.fillText('L', 4, H - 4);
   ilsCtx.textAlign = 'right';
   ilsCtx.fillText('R', W - 4, H - 4);
+}
+
+// ====== Approach-slope deviation tape ======
+// Slim vertical strip that reads altitude error in METRES vs. the 3° glideslope
+// to the nearest runway, scaled to ±200 m. Center line = on slope, top = +200 m
+// high, bottom = −200 m low. Companion to the angular meatball (drawGlideslope)
+// — the meatball reads in degrees, this tape reads in actual metres so pilots
+// can call out "on slope, 30 m high" without scanning the altimeter. Persistently
+// visible from short final through threshold so a quick glance reads slope health.
+// Activation rules match the spec: within 5 km of a runway, gear down OR landing
+// light on, aligned within ±60° of runway heading. Reuses the same runwayInfos
+// + lateral / along-runway math as drawGlideslope so the picked runway stays
+// consistent with the meatball when both are active. Hidden in photo mode via
+// PHOTO_HIDE_IDS.
+const aslopeEl  = document.getElementById('aslope');
+const aslopeCv  = document.getElementById('aslopeCv');
+const aslopeCtx = aslopeCv.getContext('2d');
+const ASLOPE_TARGET_DEG = 3.0;     // standard 3° glideslope
+const ASLOPE_RANGE_M    = 200;     // full-scale deflection (±200 m around target alt)
+const ASLOPE_MAX_DIST   = 5000;    // metres from threshold
+const ASLOPE_ALIGN_LAT  = 1000;    // metres laterally off the centerline
+const ASLOPE_ALIGN_HDG  = 60;      // degrees of heading off runway course
+function drawSlopeDevTape(hdgDeg){
+  // Gate on the spec rules: gear down OR landing light on, otherwise hide.
+  const gated = !!(state.gearDown || state.landingLight);
+  if (!gated){
+    if (aslopeEl.style.display !== 'none') aslopeEl.style.display = 'none';
+    return;
+  }
+  // Pick the best-aligned runway end. Mirrors drawGlideslope's runway pick but
+  // with the wider 60° heading cone the spec calls for, and reports the result
+  // as a metric altitude error vs. the 3° slope at the player's current range.
+  let best = null, bestScore = 1e9;
+  for (const ri of runwayInfos){
+    const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
+    const dx = plane.position.x - ri.ap.x;
+    const dz = plane.position.z - ri.ap.z;
+    const lx = dx*cs - dz*sn;
+    const lz = dx*sn + dz*cs;
+    const beyondSouth = lz > ri.ap.len/2 - 50;
+    if (!beyondSouth) continue;
+    const dxA = plane.position.x - ri.aimX;
+    const dzA = plane.position.z - ri.aimZ;
+    const horiz = Math.hypot(dxA, dzA);
+    if (horiz < 1 || horiz > ASLOPE_MAX_DIST) continue;
+    if (Math.abs(lx) > ASLOPE_ALIGN_LAT) continue;
+    const rwyHdg = ((ri.ap.hdg * 180/Math.PI) % 360 + 360) % 360;
+    let dh = ((hdgDeg - rwyHdg) + 540) % 360 - 180;
+    if (Math.abs(dh) > ASLOPE_ALIGN_HDG) continue;
+    if (plane.position.y < ri.ap.elev + 5) continue;
+    // Same score as the meatball so both indicators agree on the active runway.
+    const score = horiz + Math.abs(lx)*1.5 + Math.abs(dh)*40;
+    if (score < bestScore){
+      bestScore = score;
+      // Target altitude on the 3° slope at this horizontal range from the aim.
+      const slopeRise = horiz * Math.tan(ASLOPE_TARGET_DEG * Math.PI/180);
+      const targetAlt = ri.ap.elev + slopeRise;
+      const errM = plane.position.y - targetAlt; // +ve = above slope (high)
+      best = { ri, horiz, errM };
+    }
+  }
+  if (!best){
+    if (aslopeEl.style.display !== 'none') aslopeEl.style.display = 'none';
+    return;
+  }
+  if (aslopeEl.style.display !== 'block') aslopeEl.style.display = 'block';
+
+  const W = aslopeCv.width, H = aslopeCv.height;
+  const cx = W/2, cy = H/2;
+  aslopeCtx.clearRect(0,0,W,H);
+
+  // Tape background, matching the meatball / VSI styling for visual consistency.
+  aslopeCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  aslopeCtx.fillRect(cx - 12, 8, 24, H - 16);
+  aslopeCtx.strokeStyle = '#1e3548';
+  aslopeCtx.lineWidth = 1;
+  aslopeCtx.strokeRect(cx - 12, 8, 24, H - 16);
+
+  // Center reference line = on slope.
+  aslopeCtx.strokeStyle = '#7ee787';
+  aslopeCtx.lineWidth = 2;
+  aslopeCtx.beginPath();
+  aslopeCtx.moveTo(cx - 18, cy);
+  aslopeCtx.lineTo(cx + 18, cy);
+  aslopeCtx.stroke();
+
+  // Quarter / half deflection ticks at ±50 m and ±100 m so a glance reads
+  // how far off slope without doing the arithmetic.
+  aslopeCtx.strokeStyle = '#6aa';
+  aslopeCtx.lineWidth = 1;
+  for (const m of [-100, -50, 50, 100]){
+    const y = cy - (m / ASLOPE_RANGE_M) * (H/2 - 14);
+    aslopeCtx.beginPath();
+    aslopeCtx.moveTo(cx - 8, y);
+    aslopeCtx.lineTo(cx + 8, y);
+    aslopeCtx.stroke();
+  }
+
+  // Tip labels so the orientation reads at a glance: HIGH up top, LOW at bottom.
+  aslopeCtx.fillStyle = '#fff';
+  aslopeCtx.font = '9px ui-monospace, monospace';
+  aslopeCtx.textAlign = 'center';
+  aslopeCtx.textBaseline = 'middle';
+  aslopeCtx.fillText('HI', cx, 4);
+  aslopeCtx.fillStyle = '#ff5252';
+  aslopeCtx.fillText('LO', cx, H - 4);
+
+  // Convert metric error to tape position. +ve err = above slope, so the
+  // marker rides toward the top (HI label) and the y-axis growing downward
+  // means we subtract.
+  const clamped = Math.max(-ASLOPE_RANGE_M, Math.min(ASLOPE_RANGE_M, best.errM));
+  const dotY = cy - (clamped / ASLOPE_RANGE_M) * (H/2 - 14);
+
+  // Marker color matches the meatball thresholds so the two indicators read
+  // consistently: green near slope, amber moderate, red low / white high.
+  let pipColor;
+  const aerr = Math.abs(best.errM);
+  if (aerr < 25)       pipColor = '#7ee787';
+  else if (aerr < 75)  pipColor = '#ffd166';
+  else                 pipColor = (best.errM < 0) ? '#ff5252' : '#ffffff';
+
+  // Sliding bug — a stubby horizontal bar with a centered notch — distinct
+  // from the meatball's diamond pip so the two indicators are at-a-glance
+  // different even though they live in the same column.
+  aslopeCtx.fillStyle = pipColor;
+  aslopeCtx.fillRect(cx - 14, dotY - 3, 28, 6);
+  aslopeCtx.strokeStyle = '#0b1320';
+  aslopeCtx.lineWidth = 1;
+  aslopeCtx.strokeRect(cx - 14, dotY - 3, 28, 6);
+  aslopeCtx.fillStyle = '#0b1320';
+  aslopeCtx.fillRect(cx - 1, dotY - 2, 2, 4);
+
+  // Off-scale chevrons when the error is past ±200 m — mirrors the meatball
+  // / heading-bug pattern so off-scale handling feels native to the HUD.
+  if (best.errM > ASLOPE_RANGE_M){
+    aslopeCtx.fillStyle = '#fff';
+    aslopeCtx.beginPath();
+    aslopeCtx.moveTo(cx,     14);
+    aslopeCtx.lineTo(cx - 6, 22);
+    aslopeCtx.lineTo(cx + 6, 22);
+    aslopeCtx.closePath();
+    aslopeCtx.fill();
+  } else if (best.errM < -ASLOPE_RANGE_M){
+    aslopeCtx.fillStyle = '#ff5252';
+    aslopeCtx.beginPath();
+    aslopeCtx.moveTo(cx,     H - 14);
+    aslopeCtx.lineTo(cx - 6, H - 22);
+    aslopeCtx.lineTo(cx + 6, H - 22);
+    aslopeCtx.closePath();
+    aslopeCtx.fill();
+  }
+
+  // Bottom readout: signed metric error so pilots can call the exact number
+  // ("+18 m" / "−5 m"). Color tracks the marker.
+  aslopeCtx.fillStyle = pipColor;
+  aslopeCtx.font = 'bold 10px ui-monospace, monospace';
+  aslopeCtx.textAlign = 'center';
+  aslopeCtx.textBaseline = 'bottom';
+  const sign = best.errM >= 0 ? '+' : '−';
+  aslopeCtx.fillText(sign + Math.round(Math.abs(best.errM)) + 'm', cx, H - 14);
 }
 
 // ====== Crosswind crab indicator ======
@@ -18934,7 +19109,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
