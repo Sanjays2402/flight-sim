@@ -1905,6 +1905,32 @@ function buildCloudTexture(){
   return tex;
 }
 const cloudTex = buildCloudTexture();
+// Soft round dark decal used for every cloud-shadow ellipse on the ground.
+// One CanvasTexture shared across all puffs so memory + draw-cost stay flat
+// regardless of cloud count.
+function buildCloudShadowTexture(){
+  const s = 128;
+  const cv = document.createElement('canvas');
+  cv.width = s; cv.height = s;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createRadialGradient(s/2, s/2, 4, s/2, s/2, s/2);
+  g.addColorStop(0,    'rgba(0,0,0,0.55)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.30)');
+  g.addColorStop(0.85, 'rgba(0,0,0,0.08)');
+  g.addColorStop(1,    'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,s,s);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const cloudShadowTex = buildCloudShadowTexture();
+// Shadows live in their own group on the scene root (not parented under the
+// puff, since sprite-children inherit billboard space). We update each
+// shadow's x/z + terrain-tracked y in the existing cloud-drift loop so the
+// shadow drifts with its puff for free.
+const cloudShadowGroup = new THREE.Group();
+scene.add(cloudShadowGroup);
 const cloudPuffs = [];
 {
   const NUM_CLOUDS = 38;
@@ -1916,10 +1942,11 @@ const cloudPuffs = [];
     const clusterSize = 5 + Math.floor(Math.random()*5);
     const isHigh = altitude > 1500;
     for (let p=0;p<clusterSize;p++){
+      const baseOpacity = isHigh ? (0.45 + Math.random()*0.25) : (0.7 + Math.random()*0.25);
       const mat = new THREE.SpriteMaterial({
         map: cloudTex,
         color: 0xffffff,
-        opacity: isHigh ? (0.45 + Math.random()*0.25) : (0.7 + Math.random()*0.25),
+        opacity: baseOpacity,
         transparent: true,
         depthWrite: false,
         fog: true
@@ -1934,7 +1961,30 @@ const cloudPuffs = [];
         baseZ + (Math.random()-0.5)*420
       );
       cloudGroup.add(spr);
-      cloudPuffs.push({ spr });
+      // Ground shadow ellipse — radius roughly matches the cloud sprite's
+      // visual footprint (sx is the full width, so 0.42 reads as "shadow
+      // smaller than the puff that cast it"). Rotated flat to lay on the
+      // terrain; polygonOffset keeps it from z-fighting hillsides.
+      const shadowR = sx * 0.42;
+      const sg = new THREE.Mesh(
+        new THREE.CircleGeometry(shadowR, 20),
+        new THREE.MeshBasicMaterial({
+          map: cloudShadowTex,
+          color: 0x000000,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -2,
+          fog: true
+        })
+      );
+      sg.rotation.x = -Math.PI / 2;
+      sg.position.set(spr.position.x, 0, spr.position.z);
+      sg.frustumCulled = true;
+      cloudShadowGroup.add(sg);
+      cloudPuffs.push({ spr, shadow: sg, baseOpacity });
     }
   }
 }
@@ -12602,11 +12652,35 @@ function step(dt){
   }
 
   // Cloud drift
+  // Compute a single per-frame multiplier for ground shadows so we don't pay
+  // for sunDirFor / fog / rain checks once per puff. Shadows fade out as the
+  // sun drops toward the horizon (zero contribution at night), and dim further
+  // when rain or fog flattens the lighting so the overcast doesn't paint
+  // crisp dark blobs on the terrain.
+  const _sd = sunDirFor(state.todHours);
+  const _sunUp = Math.max(0, _sd.y); // 0 below horizon, 1 overhead
+  const _rainK = settings.rain ? 0.25 : 1.0;
+  const _fogK  = (settings.fog === 'heavy') ? 0.20 : (settings.fog === 'light' ? 0.55 : 1.0);
+  const _shadowK = _sunUp * _rainK * _fogK;
   for (const p of cloudPuffs){
     p.spr.position.x += state.wind.x * 0.6 * dt;
     p.spr.position.z += state.wind.z * 0.6 * dt;
     if (p.spr.position.x > WORLD/2) p.spr.position.x -= WORLD;
     if (p.spr.position.z > WORLD/2) p.spr.position.z -= WORLD;
+    if (p.shadow){
+      // Snap the shadow x/z to the puff (wraps come along for free) and let
+      // terrainHeight pick up hill elevation so the decal lays on the slope.
+      const sx = p.spr.position.x, sz = p.spr.position.z;
+      p.shadow.position.x = sx;
+      p.shadow.position.z = sz;
+      let gy = 0;
+      try { gy = terrainHeight(sx, sz) || 0; } catch(_){ gy = 0; }
+      p.shadow.position.y = gy + 0.05;
+      // Fade by cloud density (baseOpacity) * sky/weather multiplier.
+      // Cap at 0.55 so even high-noon thick clouds don't paint pure black.
+      p.shadow.material.opacity = Math.min(0.55, p.baseOpacity * 0.65 * _shadowK);
+      p.shadow.visible = p.shadow.material.opacity > 0.005;
+    }
   }
   if (waterUniList.length){
     const tm = performance.now() * 0.001;
