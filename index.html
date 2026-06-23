@@ -605,7 +605,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -6763,6 +6763,11 @@ const state = {
   // ground speed without holding B. Auto-releases above ~5 km/h so a
   // forgotten parking brake can't kill a takeoff roll.
   parkingBrake: false,
+  // Cockpit warning-chime self-test (Shift+T on the ground with the parking
+  // brake set). Cycles stall horn / gear horn / GPWS / fire chirp / oil
+  // pressure low so the pilot can verify audio settings before takeoff.
+  // null when idle; otherwise { idx, segT, segDur } stepped by tickWarnTest().
+  warnTest: null,
   // Reverse thrust (Z key, runway only). reverser = held-input intent for
   // this frame; reverserActive = post-gate (on ground + on runway + ground
   // speed above the cutoff so we can't shove the plane backwards). reverserT
@@ -7354,7 +7359,15 @@ addEventListener('keydown', e=>{
   if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote','Backslash'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
-addEventListener('keyup', e=>{ keys[e.code]=false; });
+addEventListener('keyup', e=>{
+  keys[e.code]=false;
+  // Shift+T warning-chime test is hold-to-run — releasing either key
+  // aborts immediately so a stray tap doesn't cycle through every chime
+  // when the player just wanted a quick sample.
+  if ((e.code==='KeyT' || e.code==='ShiftLeft' || e.code==='ShiftRight') && state.warnTest){
+    stopWarnTest();
+  }
+});
 addEventListener('keydown', e=>{
   if (e.repeat) return;
   if (e.code==='KeyG') toggleGear();
@@ -7379,7 +7392,13 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='KeyC' && !e.shiftKey) { state.cam = (state.cam + 1) % 4; updateCamModeUi(); }
-  if (e.code==='KeyT') state.todHours = (state.todHours + 1) % 24;
+  // Shift+T runs the cockpit warning-chime self-test (stall horn / gear /
+  // GPWS / fire / oil pressure) so the pilot can verify audio settings
+  // before takeoff. Plain T still bumps the time-of-day by an hour. Gating
+  // (on the ground + parking brake set + safe state) lives inside
+  // startWarnTest() so the keyup handler can mirror the same checks.
+  if (e.code==='KeyT' && e.shiftKey){ startWarnTest(); return; }
+  if (e.code==='KeyT' && !e.shiftKey) state.todHours = (state.todHours + 1) % 24;
   if (e.code==='KeyI'){
     // Cold-start ignition. Fires when either the ground cold-start sequence
     // is armed (state.coldStart) or the in-air deadstick restart is armed
@@ -8775,6 +8794,117 @@ function playMissionFanfare(){
     osc2.start(tNote);
     osc2.stop(tNote + noteDur + 0.02);
   });
+}
+// ====== Engine warning chime self-test (Shift+T on the ground) ======
+// Cycles through every cockpit warning sound so the pilot can verify audio
+// settings (and master volume) before takeoff. Hold Shift+T with the parking
+// brake set to play through stall horn -> gear horn -> GPWS pull-up -> fire
+// chirp -> oil pressure low, each with a small `TESTING: <name>` toast.
+// Releasing either Shift or T aborts the cycle, and any unsafe state
+// (paused, intro, replay, photo, crash, modal open, airborne, no parking
+// brake) refuses to start. Reuses every existing WebAudio node; the stall
+// burst rolls its own short pulse so it doesn't fight the per-frame
+// setStallAudio() call in updateHud().
+const WARN_TEST_SEQ = [
+  { id:'stall',   name:'STALL HORN',     dur:1.20, play(){ playStallTestBurst(); } },
+  { id:'gear',    name:'GEAR HORN',      dur:1.10, play(){ playGearHornBeep(); } },
+  { id:'gpws',    name:'TERRAIN PULL UP',dur:1.20, play(){ playTerrainBeep(); setTimeout(playTerrainBeep, 320); setTimeout(playTerrainBeep, 640); } },
+  { id:'fire',    name:'ENGINE FIRE',    dur:1.10, play(){ playFireWarnChirp(); } },
+  { id:'oil',     name:'OIL PRESSURE LOW', dur:1.20, play(){ playOilPressureLowBeep(); } },
+];
+// Short pulsed stall-horn burst that the test can fire without grabbing
+// the persistent stallAudio node (which updateHud() rewrites every frame).
+// One-shot: ~0.55s of two 880Hz square pulses, same flavor as the live horn.
+function playStallTestBurst(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.10 * settings.volume;
+  if (vol <= 0) return;
+  for (let i = 0; i < 3; i++){
+    const ts = t0 + i * 0.17;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, ts);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, ts);
+    g.gain.linearRampToValueAtTime(vol, ts + 0.012);
+    g.gain.setValueAtTime(vol, ts + 0.085);
+    g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.12);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(ts);
+    osc.stop(ts + 0.14);
+  }
+}
+// Oil-pressure low warble — the cockpit currently signals low PSI through an
+// ATC line only, so the self-test gets a dedicated sample: a slow ~280Hz
+// triangle that wobbles down to ~220Hz over ~0.6s, repeated twice. Warm and
+// nagging rather than urgent so it doesn't sound like the fire chirp.
+function playOilPressureLowBeep(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.22 * settings.volume;
+  if (vol <= 0) return;
+  for (let i = 0; i < 2; i++){
+    const ts = t0 + i * 0.42;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(290, ts);
+    osc.frequency.linearRampToValueAtTime(225, ts + 0.32);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, ts);
+    g.gain.linearRampToValueAtTime(vol, ts + 0.02);
+    g.gain.setValueAtTime(vol, ts + 0.26);
+    g.gain.exponentialRampToValueAtTime(0.0001, ts + 0.34);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(ts);
+    osc.stop(ts + 0.36);
+  }
+}
+function startWarnTest(){
+  // Gate the test to a true "sitting on the ramp" state — brake set, wheels
+  // down, nothing scary on screen — so the pilot isn't running the test
+  // mid-final or mid-pause.
+  if (state.warnTest) return;
+  if (state.introOpen || state.paused || state.replayActive || state.photoMode) return;
+  if (state.crashed || (state.bailout && state.bailout.phase !== 'idle')) return;
+  if (state.jumpOpen || state.sqkeypadOpen) return;
+  if (!state.onGround) return;
+  if (!state.parkingBrake){
+    showStatus('WARNING TEST', 'set parking brake first', 'hard');
+    return;
+  }
+  state.warnTest = { idx: 0, segT: 0 };
+  fireWarnTestSegment();
+}
+function fireWarnTestSegment(){
+  const wt = state.warnTest;
+  if (!wt) return;
+  const seg = WARN_TEST_SEQ[wt.idx];
+  if (!seg){ stopWarnTest(); return; }
+  wt.segT = seg.dur;
+  try { seg.play(); } catch(e){ /* audio not available */ }
+  showStatus('TESTING: ' + seg.name, (wt.idx + 1) + '/' + WARN_TEST_SEQ.length, 'good');
+}
+function tickWarnTest(dt){
+  const wt = state.warnTest;
+  if (!wt) return;
+  wt.segT -= dt;
+  if (wt.segT > 0) return;
+  wt.idx++;
+  if (wt.idx >= WARN_TEST_SEQ.length){
+    state.warnTest = null;
+    showStatus('WARNING TEST', 'all chimes verified', 'good');
+    return;
+  }
+  fireWarnTestSegment();
+}
+function stopWarnTest(){
+  if (!state.warnTest) return;
+  state.warnTest = null;
+  // No "aborted" toast — a quick early release on the last chime shouldn't
+  // nag, and showStatus() auto-clears the existing TESTING: line on its own.
 }
 // Cabin chime: the iconic two-note seatbelt ding (high → low sine pair) that
 // fires once when the autopilot captures the target altitude in cruise. Uses
@@ -15151,6 +15281,10 @@ function loop(now){
       updateReplay(dt);
     } else {
       step(dt);
+      // Engine warning chime self-test (Shift+T on the ground) advances
+      // through stall / gear / GPWS / fire / oil pressure if armed. Idle
+      // when state.warnTest is null so non-test frames pay nothing.
+      tickWarnTest(dt);
       // Record after the physics step so the buffered frame matches what was just rendered.
       recordReplayFrame(now);
       // Ring-chase ghost: sample the live run after physics, then place the
