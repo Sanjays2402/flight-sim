@@ -15586,6 +15586,31 @@ function maybeFireTakeoffClearance(){
          + 'wind ' + dir + ' at ' + kt + '.';
   }
   pushATC(line, { tag:'TWR', now:true });
+
+  // Crosswind coach piggyback: if the live crosswind component across the
+  // runway exceeds XW_TAKEOFF_MIN_MS, tower tacks on a one-shot PILOT line
+  // naming the side ("Crosswind from the <left|right>, into-wind aileron.")
+  // right after the clearance call. Same latch as the clearance so a
+  // touch-and-go full-stop re-arms both calls together; calm-wind departures
+  // silently skip the piggyback. Wind projection mirrors drawXwTakeoffHint():
+  // positive cross = wind blowing from pilot's left, negative = from the right.
+  try {
+    const _f = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+    const len2d = Math.hypot(_f.x, _f.z);
+    if (len2d > 1e-4 && typeof XW_TAKEOFF_MIN_MS !== 'undefined'){
+      const fx = _f.x / len2d;
+      const fz = _f.z / len2d;
+      // Pilot's right (x east, z south): (-fz, fx).
+      const rx = -fz;
+      const rz = fx;
+      const crossMs = state.wind.x * rx + state.wind.z * rz;
+      if (Math.abs(crossMs) >= XW_TAKEOFF_MIN_MS){
+        const fromLeft = crossMs > 0;
+        const side = fromLeft ? 'left' : 'right';
+        pushATC('Crosswind from the ' + side + ', into-wind aileron.', { tag:'PILOT' });
+      }
+    }
+  } catch(e){}
 }
 
 // ====== Runway hold-short ATC call ======
