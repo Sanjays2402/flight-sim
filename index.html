@@ -782,7 +782,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -947,6 +947,11 @@
       <div class="top"><span class="name">RAIN</span><span class="val" id="setRainV">OFF</span></div>
       <button id="setRainBtn" type="button" style="width:100%">TOGGLE RAIN</button>
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">SNOW</span><span class="val" id="setSnowV">OFF</span></div>
+      <select id="setSnow"></select>
+      <div class="hint">Falling flakes, snow-glazed runways, and a brutal friction penalty for braking. Mutually exclusive with RAIN.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">FOG</span><span class="val" id="setFogV">OFF</span></div>
@@ -1285,7 +1290,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1298,6 +1303,17 @@ const FOG_LEVELS = [
   { id: 'heavy', name: 'HEAVY', near: 200,  far: 1000 },
 ];
 const FOG_LEVEL_IDS = FOG_LEVELS.map(f => f.id);
+// Snow weather levels — mutually exclusive with rain (toggling one clears the
+// other so the world never renders snow falling through rain streaks). Same
+// runtime shape as FOG_LEVELS so the settings UI builds the same way. The
+// flake count + drift speed scale per level; LIGHT is a calm dusting,
+// HEAVY is a real blizzard that hammers the friction model.
+const SNOW_LEVELS = [
+  { id: 'off',   name: 'OFF',   count: 0,   spdMul: 0,    swayMul: 0,    sizeMul: 0   },
+  { id: 'light', name: 'LIGHT', count: 140, spdMul: 0.30, swayMul: 0.55, sizeMul: 1.0 },
+  { id: 'heavy', name: 'HEAVY', count: 280, spdMul: 0.45, swayMul: 0.85, sizeMul: 1.4 },
+];
+const SNOW_LEVEL_IDS = SNOW_LEVELS.map(s => s.id);
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -1344,6 +1360,11 @@ try {
     if (typeof saved.volume === 'number') settings.volume = Math.max(0, Math.min(1, saved.volume));
     if (Number.isInteger(saved.livery) && saved.livery >= 0 && saved.livery < LIVERIES.length) settings.livery = saved.livery;
     if (typeof saved.rain === 'boolean') settings.rain = saved.rain;
+    if (typeof saved.snow === 'string' && SNOW_LEVEL_IDS.indexOf(saved.snow) !== -1) settings.snow = saved.snow;
+    // Defensive mutual exclusivity — if a stale localStorage somehow has both
+    // rain and snow set, snow wins (it's the newer toggle) so we never render
+    // both layers at once.
+    if (settings.snow && settings.snow !== 'off' && settings.rain) settings.rain = false;
     if (typeof saved.fog === 'string' && FOG_LEVEL_IDS.indexOf(saved.fog) !== -1) settings.fog = saved.fog;
     if (typeof saved.trailColor === 'string' && TRAIL_COLOR_IDS.indexOf(saved.trailColor) !== -1) settings.trailColor = saved.trailColor;
     if (typeof saved.coldStart === 'boolean') settings.coldStart = saved.coldStart;
@@ -16322,8 +16343,18 @@ function step(dt){
       // grass in the rain stays unchanged. Carrier deck stays dry-tuned
       // (steel + arrestor wires don't care about a shower).
       const wetRwy = onRunway && !onCarrier && settings.rain;
+      // Snowy pavement — same idea but worse: ~30% braking penalty on top of
+      // the dry baseline (vs rain's ~45%) is reframed here as a brake mul of
+      // ~0.30 (held) and ~0.50 (free-rolling), so braking is much less
+      // effective and the plane will slide farther. Carrier deck stays exempt.
+      const snowRwy = onRunway && !onCarrier && settings.snow && settings.snow !== 'off';
       const brakeFricRaw = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
-      let brakeFric = wetRwy ? brakeFricRaw * (state.brakes ? 0.55 : 0.7) : brakeFricRaw;
+      let brakeFric = brakeFricRaw;
+      if (snowRwy){
+        brakeFric = brakeFricRaw * (state.brakes ? 0.30 : 0.50);
+      } else if (wetRwy){
+        brakeFric = brakeFricRaw * (state.brakes ? 0.55 : 0.7);
+      }
       // Brake fade: redline-latched discs grip the wheels ~50% weaker for the
       // next BRAKE_FADE_SECS so dragging brakes down a long rollout has a real
       // consequence. Only applies to the brake-applied component (not
@@ -17172,6 +17203,12 @@ function step(dt){
   // lives in the on-ground physics block.
   const wetEl = document.getElementById('rwyWet');
   if (wetEl) wetEl.style.display = settings.rain ? 'inline' : 'none';
+  // RWY SNOW pill — same idea as RWY WET but for the snow toggle. Heavier
+  // friction penalty (~30% braking vs rain's ~45%) is reflected in the
+  // physics block; this pill just gives the pilot the visual cue to expect
+  // a long, slippery rollout before they're on the strip.
+  const snowEl = document.getElementById('rwySnow');
+  if (snowEl) snowEl.style.display = (settings.snow && settings.snow !== 'off') ? 'inline' : 'none';
   // FOG pill — blue indicator whenever the fog weather toggle is on light or
   // heavy. Hidden in photo mode so saved PNGs stay clean (the fog itself is
   // still rendered, the pill just clears so the HUD doesn't show in the shot).
@@ -22311,18 +22348,30 @@ sizeRainCanvas();
 seedRainDrops();
 function applyRainVisible(){
   if (!rainCanvas) return;
-  rainCanvas.classList.toggle('show', !!settings.rain);
+  // Snow piggybacks the rain canvas — it shows whenever either weather mode is
+  // active so the painter can swap shapes per-frame. Renderer code below reads
+  // settings.snow / settings.rain directly to decide which layer to draw.
+  const showCanvas = !!settings.rain || (settings.snow && settings.snow !== 'off');
+  rainCanvas.classList.toggle('show', !!showCanvas);
   if (settings.rain && !rainDrops.length) seedRainDrops();
+  if (settings.snow && settings.snow !== 'off') seedSnowFlakes();
   applyRunwayWetness();
 }
 // Re-tint every registered runway / apron / deck material toward a darker wet
-// shade when rain is on, or snap back to the dry base color when it's off.
-// Cheap LERP between two pre-built colors per material — runs once per toggle
-// (and once on boot), not per frame.
+// shade when rain is on, a cold blue-white shade when snow is on, or snap
+// back to the dry base color when both are off. Cheap LERP between two
+// pre-built colors per material — runs once per toggle (and once on boot),
+// not per frame.
+const SNOW_TINT = new THREE.Color(0xdfe7f0);
 function applyRunwayWetness(){
   const wet = !!settings.rain;
+  const snow = settings.snow && settings.snow !== 'off';
   for (const r of runwayMats){
-    if (wet){
+    if (snow){
+      // Snow overlay is heavier than rain — push the lerp a touch farther so
+      // the strip reads as actually accumulating, not just damp.
+      r.mat.color.copy(r.baseColor).lerp(SNOW_TINT, Math.min(1, r.wetK + 0.25));
+    } else if (wet){
       r.mat.color.copy(r.baseColor).lerp(r.wetTint, r.wetK);
     } else {
       r.mat.color.copy(r.baseColor);
@@ -22361,6 +22410,11 @@ function applyNightPanelVisible(){
 }
 applyNightPanelVisible();
 function updateRainOverlay(dt){
+  // Snow + rain share #rainOverlay. If snow is on, hand off to the snow
+  // painter (rain and snow are mutually exclusive, enforced at toggle time).
+  if (settings.snow && settings.snow !== 'off'){
+    return updateSnowOverlay(dt);
+  }
   if (!settings.rain || !rainCtx || state.photoMode) return;
   const w = innerWidth, h = innerHeight;
   // Tilt with the wind so streaks line up with the prevailing breeze on the
@@ -22388,6 +22442,77 @@ function updateRainOverlay(dt){
     rainCtx.moveTo(d.x, d.y);
     rainCtx.lineTo(d.x - tiltX * 0.012, d.y - d.len);
     rainCtx.stroke();
+  }
+  rainCtx.globalAlpha = 1.0;
+}
+
+// ====== SNOW OVERLAY ======
+// Slower, larger white flakes drifting near-vertically with a gentle sin()
+// sway. Paints on the same #rainOverlay canvas as rain (mutually exclusive),
+// so toggling SNOW on from settings reuses the existing show/hide plumbing
+// and PHOTO_HIDE_IDS entry without any new DOM. Each flake gets a size,
+// vertical speed, sway phase, and alpha so the field has visual depth.
+const snowFlakes = [];
+let snowSeededFor = null;       // last SNOW_LEVELS id we seeded for, so a level change re-seeds
+const SNOW_BASE_SPD = 70;       // base px/sec at LIGHT.spdMul=1.0 — then scaled per level
+const SNOW_BASE_SWAY = 22;      // base px sway amplitude
+const SNOW_BASE_SIZE = 2.2;     // base flake radius in px
+function seedSnowFlakes(){
+  const lvl = SNOW_LEVELS.find(s => s.id === settings.snow) || SNOW_LEVELS[0];
+  if (lvl.id === 'off' || !lvl.count){
+    snowFlakes.length = 0;
+    snowSeededFor = lvl.id;
+    return;
+  }
+  if (snowSeededFor === lvl.id && snowFlakes.length === lvl.count) return;
+  snowFlakes.length = 0;
+  for (let i = 0; i < lvl.count; i++){
+    snowFlakes.push({
+      x: Math.random() * innerWidth,
+      y: Math.random() * innerHeight,
+      r: (SNOW_BASE_SIZE + Math.random() * 1.6) * lvl.sizeMul,
+      // Slow vertical drift; spdMul scales with snow severity. Adds tiny
+      // per-flake jitter so the field doesn't fall in perfect formation.
+      vy: SNOW_BASE_SPD * (0.6 + Math.random() * 0.8),
+      a: 0.55 + Math.random() * 0.4,
+      phase: Math.random() * Math.PI * 2,
+      swaySpd: 0.5 + Math.random() * 0.7
+    });
+  }
+  snowSeededFor = lvl.id;
+}
+let _snowT = 0;
+function updateSnowOverlay(dt){
+  if (!rainCtx || state.photoMode) return;
+  const lvl = SNOW_LEVELS.find(s => s.id === settings.snow) || SNOW_LEVELS[0];
+  if (lvl.id === 'off') return;
+  if (snowSeededFor !== lvl.id || snowFlakes.length !== lvl.count) seedSnowFlakes();
+  _snowT += dt;
+  const w = innerWidth, h = innerHeight;
+  // Wind nudges flakes sideways; airspeed rakes them faster in the cockpit so
+  // a plane punching through a flurry feels right. Capped so cruise speeds
+  // don't turn the screen into horizontal lines.
+  let tiltX = state.wind.x * 0.4;
+  if (!state.onGround) tiltX += state.vel.x * 0.025;
+  tiltX = Math.max(-180, Math.min(180, tiltX));
+  const sway = SNOW_BASE_SWAY * lvl.swayMul;
+  const spdMul = lvl.spdMul;
+  rainCtx.clearRect(0, 0, w, h);
+  rainCtx.fillStyle = 'rgba(245, 250, 255, 0.95)';
+  for (const f of snowFlakes){
+    // Vertical drift scaled by per-level spdMul, plus a small breeze-driven
+    // x-drift and a per-flake sine sway so the field has organic motion.
+    f.y += f.vy * spdMul * dt;
+    const swayX = Math.sin(_snowT * f.swaySpd + f.phase) * sway * dt;
+    f.x += tiltX * dt + swayX;
+    if (f.y > h + 10 || f.x < -20 || f.x > w + 20){
+      f.x = Math.random() * w;
+      f.y = -10 - Math.random() * 40;
+    }
+    rainCtx.globalAlpha = f.a;
+    rainCtx.beginPath();
+    rainCtx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+    rainCtx.fill();
   }
   rainCtx.globalAlpha = 1.0;
 }
@@ -23583,6 +23708,8 @@ addEventListener('keydown', e => {
   const livV = document.getElementById('setLivV');
   const rainBtn = document.getElementById('setRainBtn');
   const rainV = document.getElementById('setRainV');
+  const snowSel = document.getElementById('setSnow');
+  const snowV = document.getElementById('setSnowV');
   const fogSel = document.getElementById('setFog');
   const fogV = document.getElementById('setFogV');
   const coldBtn = document.getElementById('setColdBtn');
@@ -23671,6 +23798,17 @@ addEventListener('keydown', e => {
     }
   }
   buildFogOptions();
+  function buildSnowOptions(){
+    if (!snowSel) return;
+    snowSel.innerHTML = '';
+    for (const opt of SNOW_LEVELS){
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.name;
+      snowSel.appendChild(o);
+    }
+  }
+  buildSnowOptions();
   function syncInputs(){
     sens.value = Math.round(settings.sensitivity * 100);
     fov.value = Math.round(settings.fov);
@@ -23729,6 +23867,11 @@ addEventListener('keydown', e => {
       const fl = FOG_LEVELS.find(f => f.id === settings.fog) || FOG_LEVELS[0];
       fogV.textContent = fl.name;
     }
+    if (snowSel) snowSel.value = settings.snow;
+    if (snowV){
+      const sl = SNOW_LEVELS.find(s => s.id === settings.snow) || SNOW_LEVELS[0];
+      snowV.textContent = sl.name;
+    }
   }
   function applyFov(){
     camera.fov = settings.fov;
@@ -23759,6 +23902,27 @@ addEventListener('keydown', e => {
     rainBtn.addEventListener('click', e => {
       e.stopPropagation();
       settings.rain = !settings.rain;
+      // Mutual exclusivity — turning rain on clears snow so the world isn't
+      // trying to render snow falling through rain streaks at the same time.
+      if (settings.rain && settings.snow && settings.snow !== 'off'){
+        settings.snow = 'off';
+      }
+      applyRainVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (snowSel){
+    snowSel.addEventListener('change', () => {
+      const v = snowSel.value;
+      if (SNOW_LEVEL_IDS.indexOf(v) === -1) return;
+      settings.snow = v;
+      // Mutual exclusivity — turning snow on (any level) clears rain so the
+      // overlay never tries to paint both layers at once. LIGHT/HEAVY both
+      // count; OFF is a no-op for rain.
+      if (settings.snow !== 'off' && settings.rain){
+        settings.rain = false;
+      }
       applyRainVisible();
       syncInputs();
       saveSettings();
