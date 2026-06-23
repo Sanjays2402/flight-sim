@@ -2673,6 +2673,84 @@ function makeTaxiArrows(a){
 }
 for (const a of AIRPORTS) makeTaxiArrows(a);
 
+// ====== RUNWAY HOLDING-POSITION MARKINGS ======
+// ICAO holding-point paint at every ground airport: two parallel solid +
+// two parallel dashed yellow lines across the taxi strip, ~15 m back from
+// the runway threshold along the taxi direction. Solid lines sit on the
+// apron (hold-side) and dashed lines sit on the runway-side, matching the
+// real-world convention (you must stop at the solid, then cross both onto
+// the runway when cleared). One cluster per threshold per airport, painted
+// onto the +x taxi strip exactly where the chevron row leads into the
+// runway entry — pairs with the existing taxiway-sign cluster ("<DD>-<DD>"
+// red mandatory panel) so the corner reads as a proper holding point.
+// Carrier deck has no taxiway, so the loop skips it (CARRIER isn't in
+// AIRPORTS). Pure visual paint — the hold-short ATC callout in
+// tickHoldShort() consumes the same geometry conceptually but doesn't
+// raycast against these meshes (it just trips on the player's airport-local
+// position crossing the same hold-line zone).
+function makeHoldShortLines(a){
+  const grp = new THREE.Group();
+  // Sit a hair above the chevron group (a.elev + 0.04) so the yellow paint
+  // wins z-fights without floating visibly off the asphalt. polygonOffset on
+  // the materials adds belt + braces.
+  grp.position.set(a.x, a.elev + 0.046, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  const stripX = a.w/2 + 9;        // matches the chevron row mid-strip
+  const LINE_W = 12;               // metres across the strip (slightly wider than the ~10 m chevron span)
+  const SOLID_T = 0.35;            // metres along z — line thickness
+  const DASH_LEN = 0.8;            // metres along x per dash segment
+  const DASH_GAP = 0.5;            // metres along x between dash segments
+  const LINE_SPACING = 0.32;       // metres between the paired solid lines / paired dashed lines
+  const PAIR_GAP = 0.55;           // metres between the solid pair and the dashed pair
+  // Shared yellow paint — same hex as the chevrons so the corner reads as
+  // one signage system. transparent + depthWrite off so the paint never
+  // z-fights the asphalt or the chevrons underneath.
+  const paintMat = new THREE.MeshBasicMaterial({
+    color: 0xffd166, transparent: true, opacity: 0.95,
+    depthWrite: false, polygonOffset: true,
+    polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    side: THREE.DoubleSide
+  });
+  // Two thresholds. sign = +1 → +z (rollout/apron-side at this end), sign = -1 → -z.
+  // For each threshold the apron side is OUTSIDE the runway (|z| larger than
+  // a.len/2) and the runway side is INSIDE. Position the cluster 15 m back
+  // from the threshold along the taxi-toward-runway direction:
+  //   - sign=+1 (player taxis -z toward this threshold to depart north): bz = +a.len/2 - 15
+  //   - sign=-1 (player taxis +z toward this threshold to depart south): bz = -a.len/2 + 15
+  // Solid lines sit on the APRON side of bz (i.e. away from the runway center),
+  // dashed lines sit on the RUNWAY side (toward the runway center). The
+  // "toRunway" direction for sign=+1 is -z; for sign=-1 is +z.
+  for (const sign of [+1, -1]){
+    const bz = sign * (a.len/2 - 15);
+    const toRunway = -sign;                       // unit-z direction pointing toward the runway center
+    // Solid pair: two thin continuous strips spanning the full strip width.
+    const solidGeo = new THREE.PlaneGeometry(LINE_W, SOLID_T);
+    for (let i = 0; i < 2; i++){
+      const z = bz - toRunway * (PAIR_GAP/2 + i * LINE_SPACING);
+      const m = new THREE.Mesh(solidGeo, paintMat);
+      m.rotation.x = -Math.PI/2;
+      m.position.set(stripX, 0, z);
+      grp.add(m);
+    }
+    // Dashed pair: each line is a row of short segments along x.
+    const dashGeo = new THREE.PlaneGeometry(DASH_LEN, SOLID_T);
+    const segCount = Math.max(2, Math.floor(LINE_W / (DASH_LEN + DASH_GAP)));
+    const segSpan = segCount * DASH_LEN + (segCount - 1) * DASH_GAP;
+    const x0 = stripX - segSpan/2 + DASH_LEN/2;
+    for (let i = 0; i < 2; i++){
+      const z = bz + toRunway * (PAIR_GAP/2 + i * LINE_SPACING);
+      for (let s = 0; s < segCount; s++){
+        const m = new THREE.Mesh(dashGeo, paintMat);
+        m.rotation.x = -Math.PI/2;
+        m.position.set(x0 + s * (DASH_LEN + DASH_GAP), 0, z);
+        grp.add(m);
+      }
+    }
+  }
+}
+for (const a of AIRPORTS) makeHoldShortLines(a);
+
 // ====== TAXIWAY SIGNS ======
 // Static airport signs at the two taxiway/runway intersections at each ground
 // airport — one cluster at each runway threshold on the +x taxi-strip side.
@@ -7609,6 +7687,14 @@ const state = {
   // long static run-up at full throttle doesn't spam the strip.
   takeoffClearArmed: true,
   takeoffClearFired: false,
+  // Hold-short callout. Tower fires "<id>, hold short of runway <DD>."
+  // (or "...line up and wait..." if brakes are set) the first time the
+  // player crosses the painted hold-short line at a runway threshold per
+  // departure. `holdShortArmed` is true at mission start and re-arms after a
+  // full stop on the ground so back-taxi-and-go (or touch-and-go full stop)
+  // gets a fresh hold-short call; `holdShortFired` latches the one-shot.
+  holdShortArmed: true,
+  holdShortFired: false,
   // Tower light-gun signals (no-radio comms). When the player sits stationary
   // on a runway with the engine running for ~6 seconds (i.e. "holding short
   // with a dead radio"), the nearest airport beacon emits one steady 2s
@@ -9519,6 +9605,10 @@ function resetPlane(){
   // first throttle push past 70% with brakes off.
   state.takeoffClearArmed = true;
   state.takeoffClearFired = false;
+  // Hold-short call: fresh sortie re-arms the hold-short detector so the
+  // first taxi out gets the "hold short" / "line up and wait" call.
+  state.holdShortArmed = true;
+  state.holdShortFired = false;
   // Tower light-gun: fresh sortie re-arms the holding-short detector and
   // clears any beacon flash that might have been in flight at reset time.
   state.lightGunArmed = true;
@@ -14292,6 +14382,7 @@ function step(dt){
   drawCrabIndicator(hdg);
   drawXwTakeoffHint();
   maybeFireTakeoffClearance();
+  tickHoldShort();
   maybeFireLightGun(dt);
   drawChecklist(indicatedKmh);
   drawMinimap(hdg);
@@ -15390,6 +15481,97 @@ function maybeFireTakeoffClearance(){
     line = onRwy.ri.ap.id + ', cleared for takeoff ' + rwyPart
          + 'wind ' + dir + ' at ' + kt + '.';
   }
+  pushATC(line, { tag:'TWR', now:true });
+}
+
+// ====== Runway hold-short ATC call ======
+// One-shot tower call the first time the player crosses the painted
+// hold-short line at a runway threshold per departure. The line is at the
+// taxi-strip / runway intersection, 15 m back from the runway along the
+// taxi direction (mirrors makeHoldShortLines() geometry). Fires either
+// "<id>, hold short of runway <DD>." if the player is rolling (>5 km/h) with
+// brakes off, or "<id>, line up and wait runway <DD>." if the player is
+// stopped on the line with brakes set (regular or parking). Latches so a
+// long crawl across the line doesn't spam the strip; re-arms after a full
+// stop on the ground (gs < 0.8 m/s) so back-taxi-and-go / touch-and-go
+// full-stop patterns each get a fresh call. Skipped on the carrier deck
+// (CARRIER isn't in AIRPORTS so the loop never inspects it).
+function tickHoldShort(){
+  const live = !state.crashed && !state.paused && !state.replayActive
+               && !state.photoMode && !state.introOpen;
+  if (!live) return;
+  if (!state.onGround) return;
+  const gs = Math.hypot(state.vel.x, state.vel.z);
+  // Full-stop re-arm: mirrors the takeoff-clearance latch so a back-taxi or
+  // touch-and-go full stop gets a fresh hold-short call on the next move.
+  if (state.holdShortFired && gs < 0.8){
+    state.holdShortFired = false;
+    state.holdShortArmed = true;
+  }
+  if (!state.holdShortArmed || state.holdShortFired) return;
+  // Find nearest ground airport.
+  let near = null, nearD2 = Infinity;
+  for (const a of AIRPORTS){
+    const dx = plane.position.x - a.x, dz = plane.position.z - a.z;
+    const d2 = dx*dx + dz*dz;
+    if (d2 < nearD2){ nearD2 = d2; near = a; }
+  }
+  if (!near) return;
+  // Cheap range gate: nothing fires beyond the airport vicinity.
+  if (nearD2 > 1000*1000) return;
+  // Transform plane position into airport-local frame (matches the marshaller
+  // / chevron math: lx = dx*cos - dz*sin, lz = dx*sin + dz*cos).
+  const dx = plane.position.x - near.x;
+  const dz = plane.position.z - near.z;
+  const cs = Math.cos(near.hdg), sn = Math.sin(near.hdg);
+  const lx = dx * cs - dz * sn;
+  const lz = dx * sn + dz * cs;
+  // Player must be on the +x taxi-strip side (not on the runway itself).
+  // Window straddles the painted hold-line zone (±5 m of the stripX = a.w/2 + 9 strip).
+  if (lx < near.w/2 + 2 || lx > near.w/2 + 20) return;
+  // Hold-line z positions match makeHoldShortLines(): ±(a.len/2 - 15). The
+  // trigger zone wraps the painted line by ±5 m so a normal-paced taxi
+  // crosses it reliably even at low frame rates.
+  const targetPlus  =  near.len/2 - 15;   // +z threshold cluster
+  const targetMinus = -(near.len/2 - 15); // -z threshold cluster
+  const TOL_Z = 5.0;
+  let thresholdHdg = null;
+  if (Math.abs(lz - targetPlus) < TOL_Z){
+    // +z threshold: a plane lining up to depart from this end rolls toward -z,
+    // so its nose points along (a.hdg) — the same heading used for the painted
+    // runway numbers and the +z-threshold designator.
+    thresholdHdg = near.hdg;
+  } else if (Math.abs(lz - targetMinus) < TOL_Z){
+    // -z threshold: nose points along (a.hdg + π).
+    thresholdHdg = near.hdg + Math.PI;
+  } else {
+    return;
+  }
+  // Decide which line to fire. Spec literal: "hold short" requires speed
+  // > 5 km/h AND brakes off (player is rolling onto the line uncommitted);
+  // "line up and wait" fires when brakes ARE set on the line (player has
+  // committed to stopping at the holding point, regardless of how slow they
+  // already are). A slow taxi without brakes is treated as "still crossing,
+  // wait for either a brake-set or for the player to keep rolling past 5 km/h."
+  const brakesSet = !!state.brakes || !!state.parkingBrake;
+  const HOLDSHORT_KMH = 5.0;
+  const moving = (gs * 3.6) > HOLDSHORT_KMH;
+  let line;
+  if (brakesSet){
+    if (typeof runwayDesignator !== 'function' || typeof pushATC !== 'function') return;
+    const rwy = runwayDesignator(thresholdHdg);
+    line = near.id + ', line up and wait runway ' + rwy + '.';
+  } else if (moving){
+    if (typeof runwayDesignator !== 'function' || typeof pushATC !== 'function') return;
+    const rwy = runwayDesignator(thresholdHdg);
+    line = near.id + ', hold short of runway ' + rwy + '.';
+  } else {
+    // Slow + no brakes — don't fire yet; wait for the player to either
+    // commit (brakes) or get rolling past 5 km/h.
+    return;
+  }
+  state.holdShortFired = true;
+  state.holdShortArmed = false;
   pushATC(line, { tag:'TWR', now:true });
 }
 
