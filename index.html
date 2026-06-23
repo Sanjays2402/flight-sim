@@ -201,6 +201,20 @@
   #mission .lbl { color:#6aa; }
   #mission .val { color:#cfe; font-weight:600; }
   #mission .tgt { color:#7ee787; }
+  /* Aerobatic competition box overlay. Pops in when the player enters the
+     1km × 1km × 800m volume centered on MAIN_AP under free-flight rules
+     (gear up, throttle >40%, AGL >100m). Shows a 60s countdown, a live score
+     that ticks up on loops / rolls / half-cubans the existing acro detectors
+     fire, and the session best at the bottom. Hidden in photo mode via
+     PHOTO_HIDE_IDS and inert outside the box / outside free flight. Sits
+     center-top, just under the squawk/crab strip. */
+  #aerobox { position:fixed; top:108px; left:50%; transform:translateX(-50%); width:280px; padding:8px 14px 9px; font-size:12px; color:#cfe; background:rgba(22,8,28,.86); border:2px solid #ff4ad2; border-radius:10px; backdrop-filter:blur(8px); box-shadow:0 0 18px rgba(255,74,210,.35); text-align:center; display:none; z-index:6; pointer-events:none; }
+  #aerobox .ttl { color:#ff8de8; font-weight:800; letter-spacing:2px; font-size:11px; }
+  #aerobox .clock { font-family:ui-monospace, monospace; font-weight:800; font-size:22px; color:#ffd166; letter-spacing:2px; margin:2px 0 1px; text-shadow:0 0 8px rgba(255,209,102,.45); }
+  #aerobox .clock.warn { color:#ff9090; text-shadow:0 0 10px rgba(255,90,90,.55); }
+  #aerobox .score { font-weight:800; font-size:18px; color:#7ee787; letter-spacing:1px; }
+  #aerobox .best  { font-size:10px; color:#9bb; margin-top:2px; letter-spacing:1px; }
+  #aerobox .hint  { font-size:10px; color:#ff8de8; margin-top:3px; letter-spacing:1px; opacity:.85; }
   #minimap { position:fixed; bottom:48px; right:12px; width:160px; height:160px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:4px; }
   #minimap canvas { display:block; width:100%; height:100%; }
   /* Weather radar — small dark panel just left of the minimap. Reads as a
@@ -647,6 +661,13 @@
 </div>
 <div id="status"></div>
 <div id="missionDone"></div>
+<div id="aerobox">
+  <div class="ttl">🎯 AEROBATIC BOX</div>
+  <div class="clock" id="aeroClock">60.0</div>
+  <div class="score" id="aeroScore">SCORE 0</div>
+  <div class="best" id="aeroBest">BEST —</div>
+  <div class="hint" id="aeroHint">LOOPS · ROLLS · HALF-CUBANS</div>
+</div>
 <div id="cruise">✈ CRUISING</div>
 <div id="pause">
   <div class="card">
@@ -824,7 +845,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, aerobaticBest: 0 };
 // Smoke/ribbon trail color options. 'livery' is a special sentinel meaning
 // "track the active livery accent" (legacy behavior, the default). Any other
 // id is a fixed hex applied to both the ribbon shader uniform and per-puff
@@ -865,6 +886,7 @@ try {
     if (typeof saved.landingLight === 'boolean') settings.landingLight = saved.landingLight;
     if (typeof saved.wipers === 'string' && ['off','slow','fast','auto'].indexOf(saved.wipers) !== -1) settings.wipers = saved.wipers;
     if (typeof saved.pitotHeat === 'boolean') settings.pitotHeat = saved.pitotHeat;
+    if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -1124,7 +1146,10 @@ const ACHIEVEMENTS = {
   perfectLanding: { icon:'\u2B50',  title:'Perfect Landing', desc:'Scored 300+ on a single landing.' },
   ringUnder60:    { icon:'\u{1F3C1}', title:'Ring Master',     desc:'Ring chase complete in under 60 seconds.' },
   highFlyer:      { icon:'\u{1F30C}', title:'High Flyer',      desc:'Climbed above 1000m for the first time.' },
-  formationFlight:{ icon:'\u{1F6E9}',  title:'Wingman',         desc:'Held formation with the AI traffic for 5 seconds.' }
+  formationFlight:{ icon:'\u{1F6E9}',  title:'Wingman',         desc:'Held formation with the AI traffic for 5 seconds.' },
+  aerobaticBronze:{ icon:'\u{1F948}', title:'Aerobatic Bronze', desc:'Scored 250 in the aerobatic box.' },
+  aerobaticSilver:{ icon:'\u{1F948}', title:'Aerobatic Silver', desc:'Scored 500 in the aerobatic box.' },
+  aerobaticGold:  { icon:'\u{1F947}', title:'Aerobatic Gold',   desc:'Scored 1000 in the aerobatic box.' }
 };
 const unlockedAch = new Set();
 try {
@@ -8979,6 +9004,12 @@ function updateAcrobat(dt){
     savePilotStats();
     showToast('\u{1F501}', 'LOOP!', 'Full 360\u00b0 pitch loop \u2014 nice.');
     if (typeof pushATC === 'function') pushATC('Loop logged \u2014 lookin\u2019 good up there.', { tag:'TWR' });
+    // Aerobatic-box scoring hook: a clean loop is +100 in the box, and a
+    // loop that lands within 4s of a roll completion counts as the back end
+    // of a half-cuban (Roll → Loop reading is rare but we accept either
+    // order so the player isn’t punished for sequencing). The roll latch is
+    // cleared either way so each pairing only credits once.
+    aeroBoxScoreManeuver('loop');
     acroState.pitchSum = 0;
     acroState.pitchAge = 0;
   }
@@ -9004,6 +9035,9 @@ function updateAcrobat(dt){
     savePilotStats();
     showToast('\u{1F4AB}', 'AILERON ROLL!', 'Full 360\u00b0 roll \u2014 showoff.');
     if (typeof pushATC === 'function') pushATC('Aileron roll noted, hotshot.', { tag:'TWR' });
+    // Aerobatic-box scoring hook. Roll is +75 inside the box. A roll that
+    // immediately follows a loop within 4s pays the half-cuban bonus.
+    aeroBoxScoreManeuver('roll');
     acroState.rollSum = 0;
     acroState.rollAge = 0;
   }
@@ -9117,6 +9151,209 @@ function updateWingWave(dt){
     }
   }
   if (typeof pushATC === 'function') pushATC('Good wave, see you out there.', { tag:'TWR' });
+}
+
+// ====== AEROBATIC COMPETITION BOX ======
+// A 1km × 1km × 800m invisible volume centered on MAIN_AP. When the player
+// enters it in FREE FLIGHT with gear up, throttle >40%, and AGL >100m, an
+// HUD panel pops with a 60s countdown timer and a live score that ticks up
+// every time the existing loop / aileron-roll detectors fire. A loop that
+// completes within 4s of a roll (or vice versa) reads as a half-cuban and
+// pays an extra bonus. Stacking maneuvers without leaving the box pays a
+// small chain bonus on every successive scorer. Best run persists to
+// settings.aerobaticBest; bronze/silver/gold achievements at 250/500/1000.
+// Mini-map draws a magenta dashed outline when within 2 km of the volume
+// so the box is findable from cruise altitude.
+const AERO_BOX_HALF = 500;       // m — box extends ±500 m horizontally
+const AERO_BOX_MIN_AGL = 100;    // m AGL gate
+const AERO_BOX_MAX_AGL = 900;    // box top — 100 m floor + 800 m ceiling
+const AERO_BOX_DURATION = 60;    // seconds per run
+const AERO_BOX_PAIR_WIN = 4.0;   // seconds within which loop+roll counts as half-cuban
+const AERO_BOX_CHAIN_BONUS = 25; // bonus per stacked maneuver while inside
+const AERO_BOX_HALFCUBAN = 50;   // half-cuban completion bonus
+const AERO_BOX_LOOP_PTS = 100;
+const AERO_BOX_ROLL_PTS = 75;
+const AERO_BOX_MAP_RANGE = 2000; // m — mini-map outline visible within this
+const aeroBox = {
+  active: false,        // run in progress (countdown + scoring live)
+  timeLeft: 0,          // seconds remaining in the current run
+  score: 0,             // current-run score
+  bestSession: 0,       // best score seen this page session (fallback if storage write fails)
+  chainCount: 0,        // # maneuvers stacked without leaving the box
+  lastLoopT: -10,       // timestamp (sec since session start) of last loop, for half-cuban pairing
+  lastRollT: -10,       // ditto for last roll
+  sessionT: 0,          // monotonic clock used by the pair timer
+  bronze: false,        // achievement latches so toasts only fire once per run
+  silver: false,
+  gold: false
+};
+const _aeroBoxEl  = (typeof document !== 'undefined') ? document.getElementById('aerobox') : null;
+const _aeroClock  = (typeof document !== 'undefined') ? document.getElementById('aeroClock') : null;
+const _aeroScoreEl= (typeof document !== 'undefined') ? document.getElementById('aeroScore') : null;
+const _aeroBestEl = (typeof document !== 'undefined') ? document.getElementById('aeroBest') : null;
+const _aeroHintEl = (typeof document !== 'undefined') ? document.getElementById('aeroHint') : null;
+// Returns true if the plane meets all the free-flight entry conditions for
+// the aerobatic box (mode, posture, altitude, throttle, gear up, no crash /
+// pause / replay / photo / intro). Used both to ARM a new run on entry and
+// to keep ticking the score after entry — leaving any of these conditions
+// ends the run immediately so the box can’t reward sloppy attempts.
+function _aeroBoxConditionsOK(){
+  if (!plane) return false;
+  if (state.mode !== 'free') return false;
+  if (state.onGround || state.crashed) return false;
+  if (state.paused || state.replayActive || state.photoMode || state.introOpen) return false;
+  if (state.gearDown) return false;
+  if (state.throttle < 0.40) return false;
+  const dx = plane.position.x - MAIN_AP.x;
+  const dz = plane.position.z - MAIN_AP.z;
+  if (Math.abs(dx) > AERO_BOX_HALF || Math.abs(dz) > AERO_BOX_HALF) return false;
+  const groundY = (typeof terrainHeight === 'function') ? terrainHeight(plane.position.x, plane.position.z) : 0;
+  const agl = plane.position.y - groundY;
+  if (agl < AERO_BOX_MIN_AGL || agl > AERO_BOX_MAX_AGL) return false;
+  return true;
+}
+// Lightweight “distance to box surface” used by the mini-map outline gate.
+// Returns 0 when inside, otherwise the closest-point distance to the box
+// footprint (we ignore altitude for this — the outline is a 2D guide so
+// climbing pilots still see the magenta box on the map).
+function _aeroBoxFootprintDist(){
+  if (!plane) return Infinity;
+  const dx = Math.max(0, Math.abs(plane.position.x - MAIN_AP.x) - AERO_BOX_HALF);
+  const dz = Math.max(0, Math.abs(plane.position.z - MAIN_AP.z) - AERO_BOX_HALF);
+  return Math.hypot(dx, dz);
+}
+// Per-frame tick. Cheap when inactive (returns after the gate). When active,
+// rolls the countdown, updates the HUD readouts, and finalizes the run when
+// either the timer expires or the conditions break.
+function updateAeroBox(dt){
+  if (dt > 0) aeroBox.sessionT += dt;
+  const cond = _aeroBoxConditionsOK();
+  if (!aeroBox.active){
+    // Hide the panel when not running.
+    if (_aeroBoxEl) _aeroBoxEl.style.display = 'none';
+    // Arm a fresh run the first frame the player drops cleanly into the
+    // box under the entry rules. One run per entry — you have to leave
+    // and come back to retry.
+    if (cond){
+      aeroBox.active   = true;
+      aeroBox.timeLeft = AERO_BOX_DURATION;
+      aeroBox.score    = 0;
+      aeroBox.chainCount = 0;
+      aeroBox.lastLoopT = -10;
+      aeroBox.lastRollT = -10;
+      aeroBox.bronze = aeroBox.silver = aeroBox.gold = false;
+      showToast('\u{1F3AF}', 'AEROBATIC BOX', 'Run armed \u2014 60 seconds, get creative.');
+      if (typeof pushATC === 'function') pushATC('Box entry, show us something pretty.', { tag:'TWR' });
+    } else {
+      return;
+    }
+  } else if (!cond){
+    // Leaving the box (or dropping any entry condition) ends the run.
+    _aeroBoxFinish('exited');
+    return;
+  }
+  // Active run: tick the clock down. When it hits zero, finalize.
+  if (dt > 0){
+    aeroBox.timeLeft = Math.max(0, aeroBox.timeLeft - dt);
+  }
+  if (aeroBox.timeLeft <= 0){
+    _aeroBoxFinish('time');
+    return;
+  }
+  // Refresh the HUD readouts. Cheap textContent + className updates.
+  if (_aeroBoxEl){
+    _aeroBoxEl.style.display = 'block';
+    if (_aeroClock){
+      _aeroClock.textContent = aeroBox.timeLeft.toFixed(1);
+      _aeroClock.className = (aeroBox.timeLeft <= 10) ? 'clock warn' : 'clock';
+    }
+    if (_aeroScoreEl) _aeroScoreEl.textContent = 'SCORE ' + aeroBox.score;
+    if (_aeroBestEl){
+      const best = Math.max(settings.aerobaticBest|0, aeroBox.bestSession|0);
+      _aeroBestEl.textContent = best > 0 ? ('BEST ' + best) : 'BEST —';
+    }
+    if (_aeroHintEl){
+      _aeroHintEl.textContent = aeroBox.chainCount >= 2
+        ? ('CHAIN ×' + aeroBox.chainCount + ' — keep stacking!')
+        : 'LOOPS · ROLLS · HALF-CUBANS';
+    }
+  }
+}
+// Scoring entry point: called by updateAcrobat the instant a maneuver
+// completes. Only credits when a run is actually active — outside the box
+// loops and rolls still toast normally, they just don’t count for points.
+function aeroBoxScoreManeuver(kind){
+  if (!aeroBox.active) return;
+  const now = aeroBox.sessionT;
+  let base = 0;
+  let pairedHalfCuban = false;
+  if (kind === 'loop'){
+    base = AERO_BOX_LOOP_PTS;
+    // Loop after recent roll (or vice versa) within the pair window reads
+    // as a half-cuban. Either ordering credits so the pilot isn’t punished
+    // for going roll→loop instead of the textbook loop→roll. The roll
+    // latch is consumed either way so back-to-back pairs don’t triple-fire.
+    if ((now - aeroBox.lastRollT) <= AERO_BOX_PAIR_WIN){
+      pairedHalfCuban = true;
+      aeroBox.lastRollT = -10;
+    }
+    aeroBox.lastLoopT = now;
+  } else if (kind === 'roll'){
+    base = AERO_BOX_ROLL_PTS;
+    if ((now - aeroBox.lastLoopT) <= AERO_BOX_PAIR_WIN){
+      pairedHalfCuban = true;
+      aeroBox.lastLoopT = -10;
+    }
+    aeroBox.lastRollT = now;
+  } else {
+    return;
+  }
+  aeroBox.chainCount += 1;
+  let gained = base;
+  if (pairedHalfCuban){
+    gained += AERO_BOX_HALFCUBAN;
+    showToast('\u{1F3AD}', 'HALF-CUBAN!', '+' + AERO_BOX_HALFCUBAN + ' bonus — paired maneuver.');
+  }
+  if (aeroBox.chainCount >= 2){
+    // Chain bonus rewards staying inside and stringing maneuvers together.
+    gained += AERO_BOX_CHAIN_BONUS;
+  }
+  aeroBox.score += gained;
+  // Tier achievements toast once per run as the score crosses each cut-line.
+  if (!aeroBox.bronze && aeroBox.score >= 250){
+    aeroBox.bronze = true;
+    if (typeof unlockAchievement === 'function') unlockAchievement('aerobaticBronze');
+  }
+  if (!aeroBox.silver && aeroBox.score >= 500){
+    aeroBox.silver = true;
+    if (typeof unlockAchievement === 'function') unlockAchievement('aerobaticSilver');
+  }
+  if (!aeroBox.gold && aeroBox.score >= 1000){
+    aeroBox.gold = true;
+    if (typeof unlockAchievement === 'function') unlockAchievement('aerobaticGold');
+  }
+}
+// Wraps up a run — either the timer hit zero or the player left the box.
+// Posts a brief result toast and persists the best to settings, then hides
+// the HUD. Outside the box / on the ground / in any non-flight mode the
+// next entry rearms cleanly.
+function _aeroBoxFinish(reason){
+  if (!aeroBox.active) return;
+  const final = aeroBox.score;
+  aeroBox.active = false;
+  if (final > 0){
+    if (final > aeroBox.bestSession) aeroBox.bestSession = final;
+    if (final > (settings.aerobaticBest|0)){
+      settings.aerobaticBest = final;
+      try { saveSettings(); } catch(e){}
+    }
+    const tag = reason === 'time' ? 'TIME!' : 'OUT OF BOX';
+    showToast('\u{1F3AF}', tag, 'Final score ' + final + (reason === 'exited' ? ' — next entry rearms.' : ''));
+    if (typeof pushATC === 'function') pushATC('Box run complete, score ' + final + '.', { tag:'TWR' });
+  } else if (reason === 'time'){
+    showToast('\u{1F3AF}', 'TIME!', 'No maneuvers logged this run.');
+  }
+  if (_aeroBoxEl) _aeroBoxEl.style.display = 'none';
 }
 
 function step(dt){
@@ -10675,6 +10912,11 @@ function step(dt){
   // finishes even if the player pauses mid-greeting.
   updateWingWave(dt);
 
+  // Aerobatic competition box: arms when the player drops into the home-
+  // field volume under free-flight rules, ticks a 60s countdown, scores
+  // off the existing loop / aileron-roll detectors. Cheap when inactive.
+  updateAeroBox(dt);
+
   drawAttitude(plane.quaternion);
   drawCompass(hdg, state.ap.hdgBug);
   drawVSI(vs);
@@ -12196,6 +12438,28 @@ function drawMinimap(hdgDeg){
         }
       }
     }
+  }
+  // Aerobatic box outline: magenta dashed square centered on MAIN_AP, drawn
+  // when the player is within AERO_BOX_MAP_RANGE (2 km) of the footprint. The
+  // box itself is 1 km on a side, so on a 22 km mini-map it's small but
+  // legible. Brightens slightly when a run is active so the pilot can read
+  // "I'm still inside" at a glance. Visible only in free flight so it doesn't
+  // distract during scored missions or photo mode (which hides the whole
+  // minimap via PHOTO_HIDE_IDS anyway).
+  if (typeof aeroBox !== 'undefined' && state.mode === 'free'
+      && _aeroBoxFootprintDist() < AERO_BOX_MAP_RANGE){
+    const _bx = cx + (MAIN_AP.x - plane.position.x) * scale;
+    const _bz = cy + (MAIN_AP.z - plane.position.z) * scale;
+    const _bh = AERO_BOX_HALF * scale; // half-edge in pixels
+    minimapCtx.save();
+    minimapCtx.strokeStyle = aeroBox.active ? 'rgba(255,140,230,0.95)' : 'rgba(255,74,210,0.65)';
+    minimapCtx.lineWidth = aeroBox.active ? 1.5 : 1.1;
+    if (typeof minimapCtx.setLineDash === 'function'){
+      minimapCtx.setLineDash([3, 3]);
+    }
+    minimapCtx.strokeRect(_bx - _bh, _bz - _bh, _bh * 2, _bh * 2);
+    if (typeof minimapCtx.setLineDash === 'function') minimapCtx.setLineDash([]);
+    minimapCtx.restore();
   }
   // Plane (centre): yellow triangle pointing along current heading. Forward
   // heading 0° = north (up on screen, -z), 90° = east (+x).
@@ -13967,7 +14231,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
