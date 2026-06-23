@@ -503,6 +503,7 @@
   <div class="row"><span class="lbl">Best</span><span class="val" id="scBest">0</span></div>
   <div class="row"><span class="lbl">Total</span><span class="val" id="scTotal">0</span></div>
   <div class="row"><span class="lbl">Landings</span><span class="val" id="scN">0</span></div>
+  <div class="row" id="scTgRow" style="display:none"><span class="lbl">Streak</span><span class="val last" id="scTg">T&amp;G ×0</span></div>
 </div>
 <div id="papi">
   <div class="light" id="p1"></div><div class="light" id="p2"></div>
@@ -668,6 +669,7 @@
     <div class="row"><span class="name">AILERON ROLLS</span><span class="val" id="stRolls">0</span></div>
     <div class="row"><span class="name">FORMATIONS</span><span class="val" id="stFormations">0</span></div>
     <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
+    <div class="row"><span class="name">BEST T&amp;G STREAK</span><span class="val" id="stTg">0</span></div>
     <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
     <div class="row"><span class="name">🎖️ RANK</span><span class="val hi" id="stRank">CADET</span></div>
     <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
@@ -856,6 +858,7 @@ const STATS_DEFAULT = {
   rolls: 0,                // 360° aileron rolls completed (acrobat tracker)
   formations: 0,           // formation-flight sessions with AI traffic (5s+ in close parallel)
   burgers: 0,              // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
+  bestTgStreak: 0,         // longest touch-and-go streak (touchdown+lift-off within 12s, no full-stop)
   perfectLandings: 0       // count of landings scored 300+ (used by rank progression)
 };
 const pilotStats = Object.assign({}, STATS_DEFAULT);
@@ -990,6 +993,12 @@ function onCrash(){
   closeFlightTime();
   pilotStats.crashes += 1;
   savePilotStats();
+  // Crash kills any live touch-and-go streak. pilotStats.bestTgStreak has
+  // already locked in this run's peak via the in-touchdown bump.
+  if (typeof state !== 'undefined'){
+    state.tgStreak = 0;
+    state.tgAirborneAfterTd = false;
+  }
   appendLogEntry({
     outcome: 'crashed',
     score: 0,
@@ -5873,6 +5882,14 @@ const state = {
   scoreBest: 0,
   scoreTotal: 0,
   scoreCount: 0,
+  // Touch-and-go streak: counts consecutive runway touchdowns where the
+  // player lifted off again within 12s of the prior touchdown without ever
+  // coming to a full stop. Reset to 0 on full-stop landing or crash. Pure
+  // scorekeeping — no new physics, no new audio. The HUD pill below the
+  // TOUCH & GO score panel surfaces it once the streak is ≥ 2.
+  tgStreak: 0,
+  tgLastTdMs: 0,           // wall-clock ms of the most recent good touchdown
+  tgAirborneAfterTd: false,// true once we lift off after the last touchdown
   // Quick-jump airport selector overlay: open/closed flag. When true, the
   // #jumpsel modal is visible and number keys 1–9 teleport the plane to the
   // matching airport's runway threshold (free-flight only). Other Esc/keyboard
@@ -6653,6 +6670,11 @@ function updateLandCardRollout(){
   }
   if (gs < 0.8){
     d.rollComplete = true;
+    // Full stop reached — any live touch-and-go streak ends here. Next
+    // takeoff + landing kicks the streak back to 1, and pilotStats.bestTgStreak
+    // has already captured this run's peak via the in-touchdown bump.
+    state.tgStreak = 0;
+    state.tgAirborneAfterTd = false;
     // Arrival callout: tower clears the player to taxi the moment the wheels
     // actually stop on the runway. Latched by rollComplete so it only fires
     // once per rollout. Skip crashes (no clearance for wrecks) and skip stops
@@ -6946,6 +6968,11 @@ function resetPlane(){
   state.landed = false;
   state.damage = 0;
   state.fuel = 1;
+  // Touch-and-go streak is per-run — a full reset wipes it. Lifetime peak
+  // is already preserved in pilotStats.bestTgStreak.
+  state.tgStreak = 0;
+  state.tgAirborneAfterTd = false;
+  state.tgLastTdMs = 0;
   state.engineOut = false;
   state.refueling = false;
   state.repairing = false;
@@ -8493,6 +8520,25 @@ function step(dt){
         state.scoreTotal += score;
         state.scoreCount += 1;
         if (score > state.scoreBest) state.scoreBest = score;
+        // Touch-and-go streak bookkeeping. If we lifted off after the last
+        // touchdown AND this new touchdown happened within 12s of the prior
+        // one, this is a continued T&G — increment. Otherwise (first land of
+        // the session, or we'd stopped/crashed/sat too long), reset to 1.
+        // tgAirborneAfterTd is wiped here so the next touchdown only counts
+        // once we've left the ground again. Best-streak bump persists to
+        // pilotStats so the PILOT STATS panel shows lifetime peak.
+        const _tgNow = performance.now();
+        if (state.tgStreak > 0 && state.tgAirborneAfterTd && (_tgNow - state.tgLastTdMs) <= 12000){
+          state.tgStreak += 1;
+        } else {
+          state.tgStreak = 1;
+        }
+        state.tgLastTdMs = _tgNow;
+        state.tgAirborneAfterTd = false;
+        if (state.tgStreak > (pilotStats.bestTgStreak || 0)){
+          pilotStats.bestTgStreak = state.tgStreak;
+          savePilotStats();
+        }
         let extra = '';
         // Airport-hop progression: only count landings at the current target field.
         if (state.mode === 'hop' && !state.hopDone && land && land.ri){
@@ -8693,6 +8739,11 @@ function step(dt){
     state.reverserActive = false;
     state.reverserPrevActive = false;
     onTakeoff();
+    // Touch-and-go streak: once a streak is live (a recent touchdown set it),
+    // mark that we've now left the ground again so the next touchdown can
+    // count as a continued T&G. Idempotent — cleared in the touchdown block
+    // when the streak ticks over.
+    if (state.tgStreak > 0 && !state.tgAirborneAfterTd) state.tgAirborneAfterTd = true;
   }
 
   // Wingtip vortex trails — fade in under high-G or near stall.
@@ -9171,6 +9222,18 @@ function step(dt){
   document.getElementById('scBest').textContent  = state.scoreBest;
   document.getElementById('scTotal').textContent = state.scoreTotal;
   document.getElementById('scN').textContent     = state.scoreCount;
+  // Touch-and-go streak pill — only visible once you've stacked at least 2
+  // in a row. Stays lit until the streak resets (full-stop, crash, or reset).
+  const _scTgRow = document.getElementById('scTgRow');
+  const _scTg    = document.getElementById('scTg');
+  if (_scTgRow && _scTg){
+    if (state.tgStreak >= 2){
+      _scTg.textContent = 'T&G ×' + state.tgStreak;
+      _scTgRow.style.display = '';
+    } else {
+      _scTgRow.style.display = 'none';
+    }
+  }
   const stallActive = (Math.abs(aoa) > STALL_AOA*0.85) && speed > 10 && !state.onGround;
   // Stall intensity: 0 below warn threshold, 1 at MAX_AOA. Used for buffet shake + audio.
   const stallNorm = (Math.abs(aoa) - STALL_AOA*0.85) / (MAX_AOA - STALL_AOA*0.85);
@@ -12586,6 +12649,7 @@ addEventListener('keydown', e => {
     rolls:    document.getElementById('stRolls'),
     formations: document.getElementById('stFormations'),
     burgers:  document.getElementById('stBurgers'),
+    tgStreak: document.getElementById('stTg'),
     perfect:  document.getElementById('stPerfect'),
     rank:     document.getElementById('stRank')
   };
@@ -12604,6 +12668,7 @@ addEventListener('keydown', e => {
     if (cells.rolls) cells.rolls.textContent = pilotStats.rolls || 0;
     if (cells.formations) cells.formations.textContent = pilotStats.formations || 0;
     if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
+    if (cells.tgStreak) cells.tgStreak.textContent = pilotStats.bestTgStreak || 0;
     if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
     if (cells.rank){
       const cur = currentRank();
@@ -13142,6 +13207,11 @@ updateCamModeUi();
     state.onGround = true;
     state.crashed = false;
     state.landed = false;
+    // J-jump teleport ends any live touch-and-go streak — it's effectively a
+    // fresh sortie at a new field. Lifetime peak stays on pilotStats.
+    state.tgStreak = 0;
+    state.tgAirborneAfterTd = false;
+    state.tgLastTdMs = 0;
     state.stall = 0;
     state.vortex = 0;
     state.peakG = 0;
