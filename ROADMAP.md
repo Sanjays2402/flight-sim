@@ -382,6 +382,16 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Visible runway markings — paint big white touchdown aim-point bars (the two fat rectangles 300 m past the threshold) and a fixed-distance marker pair (150 m past that) on every runway, alongside a real centerline dashed stripe. The painted bars combined with the existing TDZ + edge + REIL lights should finally make the runway read like an actual paved field from base leg, not just a grey rectangle.
+
+- [ ] Wake turbulence behind the AI plane — when the player crosses behind the circuit-pattern AI within ~400 m and roughly co-altitude, lerp a short asymmetric rolling moment + a small pitch bump into the airframe for ~3 s with a one-shot amber `⚠ WAKE TURBULENCE` HUD pill and a PILOT ATC `"Caught his wake — fly through it."` line. Real, surprising, teaches the real-world rule of staying above the lead aircraft's flight path.
+
+- [ ] In-game screenshot gallery (`Shift+G`) — every photo-mode capture also stashes a thumbnail + the full data-URL in a small ring buffer (cap 12, persisted to localStorage) and `Shift+G` opens a grid overlay to browse / re-download / delete past shots without leaving the sim. Pairs with the existing photo mode the same way the logbook pairs with landings — captured runs are no longer one-shot downloads you immediately forget.
+
+- [ ] Carrier landing arresting wire physics — when the tailhook (`H`) is down and the gear touches the carrier deck within the painted wire zone, snap horizontal speed down at ~6 g over ~0.5 s with a one-shot metal-clang SFX, paint which wire was caught (`#1`–`#4`, `#3` = perfect), and bank lifetime carrier-trap stats (best wire, total traps) into `pilotStats`. Right now the deck just acts like a short runway; this makes the cat shot actually feel like a trap.
+
+- [ ] Throttle quadrant friction lock (`Shift+\`) — toggleable detent that freezes the throttle lever in place so cruise power can't drift from a stick wiggle or a held key. While locked, throttle keys + mobile stick are ignored, the cockpit throttle knob picks up a small brass collar ring, the HUD power pill shows a tiny `🔒` glyph, and a one-shot `THROTTLE LOCKED · cruise hold engaged` status banner + PILOT `"Friction lock set."` ATC line confirm the toggle. Persists to localStorage like carb heat / pitot heat.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
