@@ -423,6 +423,36 @@
   #coldstartcard .foot.ready { color:#7ee787; font-weight:700; animation:csReadyPulse 1.4s ease-in-out infinite; }
   #coldstartcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
   @keyframes csReadyPulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+  /* Emergency checklist card (#emergencycard) — left-anchored amber panel
+     that pops up whenever an engine-failure latch (ENG FIRE / sustained
+     OVERHEAT / OIL LOSS) fires. Mirrors the coldstartcard row pattern so
+     the brain wiring is familiar: numbered steps tick green as the player
+     executes the corresponding action (mixture, throttle, ignition, glide
+     posture). Pure HUD, pointer-events:none so it can't steal a click,
+     and the slide-in transform/visibility delay matches the cold-start
+     card so the two cards behave identically on show/hide. Top:480px sits
+     just under the ATIS strip (top:50%) so an open ATIS card and an open
+     emergency card don't overlap. */
+  #emergencycard { position:fixed; left:12px; top:480px; width:220px; padding:9px 11px 10px; font-size:12px; color:#fde; background:rgba(22,10,8,.94); border:1px solid #ff9e3d; border-radius:8px; backdrop-filter:blur(8px); z-index:8; pointer-events:none; box-shadow:0 6px 18px rgba(0,0,0,.55); transform:translateX(-140%); opacity:0; visibility:hidden; transition:transform .32s ease-out, opacity .32s ease-out, visibility 0s linear .32s; }
+  #emergencycard.show { transform:translateX(0); opacity:1; visibility:visible; transition:transform .32s ease-out, opacity .32s ease-out, visibility 0s linear 0s; }
+  #emergencycard.fire { border-color:#ff5252; background:rgba(28,6,8,.94); }
+  #emergencycard.overheat { border-color:#ffd166; background:rgba(28,18,6,.94); }
+  #emergencycard.oilloss { border-color:#ff9e3d; background:rgba(22,12,6,.94); }
+  #emergencycard.allgreen { border-color:#5ee0a0; }
+  #emergencycard .ttl { color:#ff5252; font-weight:800; letter-spacing:2px; font-size:11px; margin-bottom:2px; animation:emergPulse 1.0s ease-in-out infinite; }
+  #emergencycard.overheat .ttl { color:#ffd166; }
+  #emergencycard.oilloss .ttl { color:#ff9e3d; }
+  #emergencycard.allgreen .ttl { color:#5ee0a0; animation:none; }
+  #emergencycard .sub { color:#cba; font-size:10px; letter-spacing:1px; margin-bottom:7px; }
+  #emergencycard .row { display:flex; align-items:center; gap:7px; padding:2px 0; font-family:ui-monospace, monospace; font-size:12px; line-height:1.35; color:#ffb066; transition:color .25s ease; }
+  #emergencycard .row .box { display:inline-block; width:14px; text-align:center; color:#ffb066; font-weight:700; transition:color .25s ease; }
+  #emergencycard .row .num { display:inline-block; width:12px; text-align:right; color:#8a7a78; font-size:10px; font-weight:700; }
+  #emergencycard .row .lbl { flex:1 1 auto; font-size:11px; letter-spacing:.5px; }
+  #emergencycard .row .state { color:#cba; font-size:9px; letter-spacing:1px; }
+  #emergencycard .row.ok { color:#7ee787; }
+  #emergencycard .row.ok .box { color:#7ee787; }
+  #emergencycard .row.ok .state { color:#7ee787; }
+  @keyframes emergPulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
   /* Bailout summary card — twin of the crash card but cyan, fired when the
      pilot punches out instead of riding the plane into the ground. Same layout
      so saved screenshots and the brain wiring stay familiar. */
@@ -1139,6 +1169,21 @@
   <div class="row" id="csMixture"><span class="num">3.</span><span class="box">☐</span><span class="lbl">MIXTURE RICH</span><span class="state" id="csMixtureState">—</span></div>
   <div class="row" id="csPrime"><span class="num">4.</span><span class="box">☐</span><span class="lbl">PRIME CARB</span><span class="state" id="csPrimeState">DRY</span></div>
   <div class="foot" id="csFoot">0 / 4 · then press <kbd>I</kbd></div>
+</div>
+<!-- Emergency checklist (#emergencycard) — left-anchored amber popup that
+     appears the first frame an engine-failure latch (ENG FIRE / sustained
+     OVERHEAT / OIL LOSS) fires. One panel at a time, priority FIRE > OVERHEAT
+     > OIL. Rows tick green as the player executes the matching action; the
+     panel auto-dismisses 4s after every step is green or the moment the
+     failure latch clears. updateEmergencyChecklist() swaps row visibility
+     per active type so the same DOM serves all three flows. -->
+<div id="emergencycard">
+  <div class="ttl" id="emcTtl">🔥 ENGINE FIRE</div>
+  <div class="sub" id="emcSub">EMERGENCY CHECKLIST</div>
+  <div class="row" id="emcRow1"><span class="num">1.</span><span class="box">☐</span><span class="lbl" id="emcLbl1">—</span><span class="state" id="emcSt1">—</span></div>
+  <div class="row" id="emcRow2"><span class="num">2.</span><span class="box">☐</span><span class="lbl" id="emcLbl2">—</span><span class="state" id="emcSt2">—</span></div>
+  <div class="row" id="emcRow3"><span class="num">3.</span><span class="box">☐</span><span class="lbl" id="emcLbl3">—</span><span class="state" id="emcSt3">—</span></div>
+  <div class="row" id="emcRow4"><span class="num">4.</span><span class="box">☐</span><span class="lbl" id="emcLbl4">—</span><span class="state" id="emcSt4">—</span></div>
 </div>
 <div id="bailcard">
   <h3>🪂 BAILED OUT</h3>
@@ -10394,6 +10439,22 @@ const state = {
   // pips only once. Reset on resetPlane() and on every fresh armColdStart()
   // so each cold start re-arms the four chimes from scratch.
   coldStartPipMask: 0,
+  // Emergency checklist popup (#emergencycard) bookkeeping. `emergencyType`
+  // is which flow is currently displayed (`'fire' | 'overheat' | 'oilloss' |
+  // null`); `emergencyPipMask` is the same per-row chime mask the cold-start
+  // card uses so a step toggling off/on only pips once per event. `emergencyAllGreenAt`
+  // stamps the wall-clock time the last unmet step ticked green so the card
+  // can self-dismiss 4 s later even if the latch is still active (pilot did
+  // their job, panel is no longer informative). `emergencyChtPrev` and
+  // `emergencyChtFallT` track CHT delta for the OVERHEAT "NOSE DOWN" row —
+  // we need sustained downward movement (~3 s of falling CHT) before ticking
+  // green so a single jittery frame can't fake it. All four wipe in
+  // resetPlane() so a fresh sortie starts with no stale latch.
+  emergencyType: null,
+  emergencyPipMask: 0,
+  emergencyAllGreenAt: 0,
+  emergencyChtPrev: 0,
+  emergencyChtFallT: 0,
   // Approach plate kneeboard (#kneeboard) overlay. Shift+N toggles, Esc
   // closes. Pure HUD overlay — does NOT pause the sim and does NOT block
   // input, so it's not listed in isAnyOtherModalOpen(). Auto-closes on
@@ -12679,6 +12740,14 @@ function resetPlane(){
   // sortie re-arms the ATC call.
   state.oilPsi = 0;
   state.oilLowAtcLatch = false;
+  // Emergency checklist (#emergencycard): wipe the active flow + per-row
+  // pip mask + all-green stamp + CHT-fall tracker so the next sortie's
+  // engine-failure latches start with a clean panel and re-pip from row 1.
+  state.emergencyType = null;
+  state.emergencyPipMask = 0;
+  state.emergencyAllGreenAt = 0;
+  state.emergencyChtPrev = 0;
+  state.emergencyChtFallT = 0;
   // Density altitude: recomputed each frame in updateDensityAltitude(), so
   // a hard reset here is mostly cosmetic — it just keeps the gauge from
   // showing a stale needle the first frame after reset.
@@ -14073,6 +14142,257 @@ function updateColdStartCard(){
       foot.innerHTML = done + ' / ' + COLD_START_ROWS.length + ' · then press <kbd>I<\/kbd>';
       if (foot.classList.contains('ready')) foot.classList.remove('ready');
     }
+  }
+}
+// ====== EMERGENCY CHECKLIST CARD (#emergencycard) ======
+// Left-anchored amber popup that mirrors the cold-start card pattern but
+// fires reactively on engine-failure latches instead of the cold-start
+// ritual. Three flows, priority FIRE > OVERHEAT > OIL LOSS — only one
+// shows at a time, swapped via the row label/state DOM so a single panel
+// serves all three. Each flow's evaluators read live state (mixture,
+// throttle, engineOut, CHT delta, gear / sink) so the rows tick green as
+// the player executes the matching action, exactly like the cold-start
+// card ticks for canopy / brake / mixture / prime. Auto-dismisses 4 s
+// after every row is green OR the active failure latch clears, whichever
+// is first. Hidden in photo / replay / pause / crash / intro so saved
+// PNGs + frozen frames stay clean.
+//
+// Why these step sets: they're the real fix actions for each failure
+// path in this sim. FIRE = cut fuel (mixture 0) + idle + ignition off +
+// glide; ignore them and the airframe melts through 100% damage into the
+// existing airframe-failure crash branch. OVERHEAT = back off power +
+// rich mixture + nose down so CHT bleeds back below redline before the
+// 0.3 %/s damage tick adds up. OIL LOSS = idle and put it down NOW; the
+// pressure drop is a leading indicator that the bearings are starving.
+// Without this panel pilots learned the failure paths the hard way — by
+// dying twice and reading the crash card.
+const EMERG_AUTO_DISMISS_MS = 4000; // hold after all-green before sliding out
+const EMERG_CHT_FALL_SECS    = 3.0; // sustained CHT drop before "NOSE DOWN" ticks
+const EMERG_FLOWS = {
+  fire: {
+    cls:    'fire',
+    title:  '🔥 ENGINE FIRE',
+    sub:    'EMERGENCY CHECKLIST',
+    rows: [
+      // Step 1 — starve the fire. Real-world: pull the mixture to idle-cutoff.
+      // In-sim: any path that drives state.mixture below 5 % counts (the
+      // `-` key, leaning hotkeys, or the existing mixture lever click).
+      { label:'MIXTURE CUT',
+        check: () => {
+          const m = state.mixture || 0;
+          return { ok: m <= 0.05, state: Math.round(m * 100) + '%' };
+        } },
+      // Step 2 — throttle to idle so the prop stops fanning the flames.
+      { label:'THROTTLE IDLE',
+        check: () => {
+          const t = state.throttle || 0;
+          return { ok: t <= 0.05, state: Math.round(t * 100) + '%' };
+        } },
+      // Step 3 — ignition off (`X` toggle). engineOut === true is the
+      // single source of truth for "the magnetos are dead" across the sim.
+      { label:'IGNITION OFF',
+        check: () => ({ ok: !!state.engineOut, state: state.engineOut ? 'OFF' : 'ON' }) },
+      // Step 4 — glide to a field. We can't auto-detect intent, but we CAN
+      // detect a controlled descent (sinking + airspeed above stall margin)
+      // which is exactly the posture you want for a fire-out glide. Falls
+      // back to a `—` placeholder on the ground or in level flight so the
+      // row doesn't lie.
+      { label:'GLIDE TO FIELD',
+        check: () => {
+          const sinking = state.vel && state.vel.y < -0.5;
+          const flying  = !state.onGround && !state.crashed;
+          return { ok: flying && sinking, state: flying ? (sinking ? 'SINK' : '—') : 'GND' };
+        } },
+    ],
+  },
+  overheat: {
+    cls:    'overheat',
+    title:  '⚠ ENGINE OVERHEAT',
+    sub:    'EMERGENCY CHECKLIST',
+    rows: [
+      // Step 1 — throttle back under 50 %. Sustained high power is the
+      // root cause of the overheat latch in ENG_TEMP_OVERHEAT_SECS land.
+      { label:'THROTTLE <50%',
+        check: () => {
+          const t = state.throttle || 0;
+          return { ok: t < 0.5, state: Math.round(t * 100) + '%' };
+        } },
+      // Step 2 — push mixture full rich. A lean mixture at high power is
+      // why CHT spiked in the first place; rich + reduced power cools fast.
+      { label:'MIXTURE RICH',
+        check: () => {
+          const m = state.mixture || 0;
+          return { ok: m >= 0.85, state: Math.round(m * 100) + '%' };
+        } },
+      // Step 3 — nose down to drive more cooling air through the cowl.
+      // We tick this when CHT has been falling for EMERG_CHT_FALL_SECS so a
+      // single jittery frame can't fake it. emergencyChtPrev + Fall accum
+      // are wiped on resetPlane() and on every fresh emergency arm below.
+      { label:'NOSE DOWN — COOL CHT',
+        check: () => {
+          const t = state.engineTempC || 0;
+          return { ok: (state.emergencyChtFallT || 0) >= EMERG_CHT_FALL_SECS,
+                   state: Math.round(t) + '°C' };
+        } },
+      // Row 4 is hidden for OVERHEAT (only 3 steps).
+      { hidden:true },
+    ],
+  },
+  oilloss: {
+    cls:    'oilloss',
+    title:  '⚠ OIL PRESSURE LOSS',
+    sub:    'EMERGENCY CHECKLIST',
+    rows: [
+      // Step 1 — throttle to idle to slow further damage to the bearings.
+      { label:'THROTTLE IDLE',
+        check: () => {
+          const t = state.throttle || 0;
+          return { ok: t <= 0.05, state: Math.round(t * 100) + '%' };
+        } },
+      // Step 2 — nearest field, land ASAP. Tick when gear is down AND we're
+      // descending: that's the universal "committing to land" posture.
+      { label:'NEAREST FIELD — LAND ASAP',
+        check: () => {
+          const gearDown = !!state.gearDown;
+          const sinking  = state.vel && state.vel.y < -0.3;
+          return { ok: gearDown && sinking,
+                   state: gearDown ? (sinking ? 'GEAR DN' : 'GEAR DN') : 'GEAR UP' };
+        } },
+      // Rows 3 + 4 hidden for OIL LOSS (only 2 steps).
+      { hidden:true },
+      { hidden:true },
+    ],
+  },
+};
+function _emergencyActiveType(){
+  // Priority order: fire trumps overheat trumps oil. Engine fire usually
+  // pulls oil pressure and CHT along with it, so the FIRE checklist is the
+  // only one that's actually useful while a fire is in flight — cluttering
+  // the screen with oil + overheat panels in that moment would just bury
+  // the lead.
+  if (state.engineFire)          return 'fire';
+  if (state.engineTempWarnLatch) return 'overheat';
+  if (state.oilLowAtcLatch)      return 'oilloss';
+  return null;
+}
+function updateEmergencyChecklist(dt){
+  const card = document.getElementById('emergencycard');
+  if (!card) return;
+  // Visibility gate — hide in photo / replay / pause / crash / intro so
+  // saved PNGs and frozen frames stay clean. Crash already disabled the
+  // engine systems by then, so no useful action remains for the pilot.
+  const gated = state.photoMode || state.replayActive || state.paused
+              || state.crashed   || state.introOpen;
+  // The active failure determines which flow we're showing. Switching
+  // between flows (e.g. overheat → fire) wipes the pip mask + all-green
+  // stamp so the new flow's first row pips fresh.
+  let activeType = gated ? null : _emergencyActiveType();
+  // Auto-dismiss latch — once every row in the active flow has been green
+  // for EMERG_AUTO_DISMISS_MS, treat the panel as done and hide even if the
+  // failure latch is still set (pilot did their job; further nagging adds
+  // nothing). The latch resets when activeType changes or the flow re-arms.
+  if (activeType && state.emergencyAllGreenAt > 0
+      && performance.now() - state.emergencyAllGreenAt >= EMERG_AUTO_DISMISS_MS){
+    activeType = null;
+  }
+  // Type transition bookkeeping. A fresh arm (null → something or
+  // something → something-else) wipes the pip mask, all-green stamp, and
+  // resets the CHT-fall tracker so the OVERHEAT row 3 doesn't immediately
+  // tick from a stale prev-frame reading.
+  if (activeType !== state.emergencyType){
+    state.emergencyType        = activeType;
+    state.emergencyPipMask     = 0;
+    state.emergencyAllGreenAt  = 0;
+    state.emergencyChtPrev     = state.engineTempC || 0;
+    state.emergencyChtFallT    = 0;
+  }
+  // CHT-fall tracker (OVERHEAT row 3). Accumulate seconds while CHT is
+  // strictly decreasing; reset on any non-decrease so brief plateaus don't
+  // count. Always runs (cheap) so the value is fresh when the OVERHEAT flow
+  // becomes active mid-flight.
+  const chtNow = state.engineTempC || 0;
+  if (chtNow < (state.emergencyChtPrev - 0.05)){
+    state.emergencyChtFallT = (state.emergencyChtFallT || 0) + (dt || 0);
+  } else {
+    state.emergencyChtFallT = 0;
+  }
+  state.emergencyChtPrev = chtNow;
+  const wasVisible = card.classList.contains('show');
+  if (!activeType){
+    if (wasVisible){
+      card.classList.remove('show');
+      card.classList.remove('fire', 'overheat', 'oilloss', 'allgreen');
+    }
+    return;
+  }
+  // Show + classify so the colored border / title swap. Cleared first so
+  // a fire-then-overheat sequence (engine fire that triggers a real
+  // sustained overheat) repaints with the correct accent.
+  if (!wasVisible) card.classList.add('show');
+  card.classList.remove('fire', 'overheat', 'oilloss');
+  const flow = EMERG_FLOWS[activeType];
+  card.classList.add(flow.cls);
+  // Title + sub repaint. Cheap DOM writes (always overwritten on type
+  // change, idempotent on every other frame).
+  const ttlEl = document.getElementById('emcTtl');
+  const subEl = document.getElementById('emcSub');
+  if (ttlEl) ttlEl.textContent = flow.title;
+  if (subEl) subEl.textContent = flow.sub;
+  // Row evaluation. Walks all 4 row slots in DOM order so hidden rows in
+  // 3-step + 2-step flows actually disappear instead of leaving stale OK
+  // marks from a previous flow.
+  let visibleRows = 0;
+  let okRows      = 0;
+  for (let i = 0; i < 4; i++){
+    const rowEl = document.getElementById('emcRow' + (i + 1));
+    const lblEl = document.getElementById('emcLbl' + (i + 1));
+    const stEl  = document.getElementById('emcSt'  + (i + 1));
+    if (!rowEl) continue;
+    const def = flow.rows[i];
+    if (!def || def.hidden){
+      rowEl.style.display = 'none';
+      rowEl.classList.remove('ok');
+      const boxEl = rowEl.querySelector('.box');
+      if (boxEl) boxEl.textContent = '☐';
+      continue;
+    }
+    rowEl.style.display = '';
+    visibleRows++;
+    if (lblEl) lblEl.textContent = def.label;
+    let res;
+    try { res = def.check(); } catch(e){ res = { ok:false, state:'—' }; }
+    const ok = !!res.ok;
+    if (ok) okRows++;
+    const wasOk = rowEl.classList.contains('ok');
+    if (ok !== wasOk){
+      rowEl.classList.toggle('ok', ok);
+      const boxEl = rowEl.querySelector('.box');
+      if (boxEl) boxEl.textContent = ok ? '✓' : '☐';
+      // Per-row pip on the off→on transition. Mirrors the cold-start card's
+      // chime gate so a step toggling off-and-back-on only pips once per
+      // active flow. playCalloutChime is a soft sine pip already used by
+      // the radalt callouts — reusing keeps the audio palette consistent.
+      const bit = 1 << i;
+      if (ok && !((state.emergencyPipMask || 0) & bit)){
+        state.emergencyPipMask = (state.emergencyPipMask || 0) | bit;
+        if (typeof playCalloutChime === 'function'){
+          try { playCalloutChime(); } catch(e){ /* audio off / suspended */ }
+        }
+      }
+    }
+    if (stEl) stEl.textContent = res.state || '—';
+  }
+  // All-green tracking. Stamp the wall-clock time the FIRST frame every
+  // visible row is OK so the auto-dismiss timer above can age it out.
+  // Clearing the stamp the moment any row drops back to not-ok keeps the
+  // panel sticky if the pilot fumbles a step mid-recovery.
+  const allGreen = (visibleRows > 0 && okRows === visibleRows);
+  if (allGreen){
+    if (state.emergencyAllGreenAt === 0) state.emergencyAllGreenAt = performance.now();
+    card.classList.add('allgreen');
+  } else {
+    state.emergencyAllGreenAt = 0;
+    card.classList.remove('allgreen');
   }
 }
 // ====== Approach plate kneeboard (Shift+N) ======
@@ -26221,6 +26541,11 @@ function loop(now){
       // after step() so the four-row state read matches the latest
       // canopy / brake / mixture / prime input.
       updateColdStartCard();
+      // Emergency checklist popup (#emergencycard) repaint. Cheap when no
+      // engine-failure latch is active (early-bails inside before any DOM
+      // writes). Called after step() so the row evaluators see the latest
+      // mixture / throttle / engineOut / CHT / oil state from this frame.
+      updateEmergencyChecklist(dt);
       // Approach plate kneeboard (Shift+N) repaint. Same cheap pattern as
       // updatePreflight: early-returns immediately when state.kneeboardOpen
       // is false, so closed-panel frames don't pay for the DOM writes or the
