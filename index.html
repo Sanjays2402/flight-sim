@@ -539,6 +539,7 @@
   <div class="gauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
   <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
+  <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -12330,6 +12331,7 @@ const cpChtCv = document.getElementById('cpCht');
 const cpOilCv = document.getElementById('cpOil');
 const cpMagCv = document.getElementById('cpMag');
 const cpBrkCv = document.getElementById('cpBrk');
+const cpFfCv  = document.getElementById('cpFf');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
@@ -12338,6 +12340,7 @@ const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
 const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
 const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
+const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -12890,6 +12893,85 @@ function drawCockpitBrake(tempC){
     ctx.fillText('FADE', cx, cy + R*0.78);
   }
 }
+function drawCockpitFuelFlow(){
+  if (!cpFfCtx) return;
+  const W = cpFfCv.width, H = cpFfCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpFfCtx;
+  _cpBezel(ctx, W, H);
+  // Scale 0..20 GPH across the same 240° sweep used by the ASI / RPM gauges
+  // so the panel reads as a matched set.
+  const FF_MAX = 20;
+  const sweep = Math.PI * 4/3;
+  const startA = -Math.PI - Math.PI/6;
+  // Map engine state to fuel flow: live engine sips ~2 GPH at idle, ramps to
+  // ~9 GPH at cruise (~60% throttle), and burns ~16 GPH at full power. Mild
+  // quadratic so cruise sits where the spec puts it (linear would overshoot).
+  // Engine off / fuel-out reads 0; cold-start / restart ramps up to idle as
+  // the starter spools so the gauge moves while the player waits on the crank.
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  let gph;
+  if (state.coldStart){
+    gph = state.ignitionT >= 0 ? Math.min(2, state.ignitionT / COLD_START_SPOOL_S * 2.4) : 0;
+  } else if (engineLive){
+    const t = Math.max(0, Math.min(1, state.throttle));
+    gph = 2 + 14 * (0.7 * t + 0.3 * t * t);
+    if (state.airRestart && state.ignitionT >= 0){
+      // Mid air-restart, blend the starter spool against the windmilling base
+      // so the needle visibly kicks during the 1.6s crank.
+      const spool = Math.min(2, state.ignitionT / COLD_START_SPOOL_S * 2.4);
+      gph = Math.max(spool, gph * 0.5 + spool * 0.5);
+    }
+  } else {
+    gph = 0;
+  }
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // Major ticks every 4 GPH with labels, minor every 1 GPH.
+  for (let v = 0; v <= FF_MAX; v += 1){
+    const a = startA + (v / FF_MAX) * sweep;
+    const major = (v % 4 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Green cruise arc 4..10 GPH, red over-burn arc 14..20 so a sustained
+  // full-throttle climb visibly screams "you're burning the tank."
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA + (4 / FF_MAX) * sweep, startA + (10 / FF_MAX) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#ff5252';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28, startA + (14 / FF_MAX) * sweep, startA + (FF_MAX / FF_MAX) * sweep);
+  ctx.stroke();
+  // "GPH" unit hint up top so the numbers (0..20) read as a flow rate.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('GPH', cx, cy - R*0.35);
+  // Needle.
+  const f = Math.max(0, Math.min(FF_MAX, gph));
+  const a = startA + (f / FF_MAX) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout below center. Mirrors the RPM color rules: dim grey when
+  // the engine isn't burning anything, red past the over-burn band, green
+  // when sipping fuel like a sane cruise.
+  ctx.fillStyle = (!engineLive && !state.coldStart) ? '#ff8080'
+                  : (f >= 14 ? '#ff5252' : '#7ee787');
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(f.toFixed(1), cx, cy + R*0.55);
+}
 function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -12905,6 +12987,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   drawCockpitOil(state.oilPsi);
   drawCockpitMag(hdgDeg || 0, dt || 0);
   drawCockpitBrake(state.brakeTempC);
+  drawCockpitFuelFlow();
 }
 
 // ====== Camera ======
