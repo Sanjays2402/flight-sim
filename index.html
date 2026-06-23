@@ -911,6 +911,7 @@
   <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
   <div class="gauge"><canvas id="cpVor" width="220" height="220" title="Click around the dial to set OBS course · Right-click to center on current bearing"></canvas><div class="glbl">VOR / CDI</div></div>
   <div class="gauge"><canvas id="cpDa"  width="220" height="220" title="Pressure altitude vs density altitude · amber over +2000ft DA, red over +4000ft"></canvas><div class="glbl">DENSITY ALT ft</div></div>
+  <div class="gauge"><canvas id="cpAdf" width="220" height="220" title="NDB / ADF · pointer aims at tuned beacon · click to cycle stations"></canvas><div class="glbl">ADF / NDB</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -1992,6 +1993,20 @@ const AIRPORTS = [
   { id:'KSEA', name:'Sea Field', x:    0, z:    0, len:1800, w:50, hdg:0,    isMain:true,  elev:0    },
   { id:'KHIL', name:'Hilltop',   x: 7800, z:-6200, len:1300, w:42, hdg:0.35, isMain:false, elev:240 },
   { id:'KLAK', name:'Lakeshore', x:-6500, z: 8800, len:1500, w:46, hdg:1.55, isMain:false, elev:5   }
+];
+
+// NDB (Non-Directional Beacon) network. Three fixed-position beacons sit
+// ~6-10 km outside each ground field so an inbound or outbound flight from
+// any airport naturally passes one en route, giving the new ADF gauge
+// something useful to point at. Pure data — no physics, no audio (real
+// ADFs are silent unless you tune the morse), no scenery beyond the
+// mini-map diamond + ident label rendered in drawMinimap(). The cockpit
+// ADF gauge picks the closest beacon by default; clicking the canvas
+// cycles through them so a pilot can practice tracking a specific one.
+const NDBS = [
+  { id:'BPN', name:'Bayport',  x:  4500, z:  5500 },
+  { id:'RYE', name:'Ryeford',  x: 12500, z:-10500 },
+  { id:'WLK', name:'Westlake', x:-10500, z: 14500 }
 ];
 
 // Carrier deck — a flat anchored "runway" sitting on the ocean a few km west
@@ -8607,6 +8622,17 @@ const state = {
   // keeps the OBS so a series of practice flights doesn't keep clobbering
   // the pilot's setting; it does re-pick the station via the per-frame draw.
   vor: { obs: 0, station: null, lastRangeM: -1 },
+  // Cockpit ADF (Automatic Direction Finder) receiver. Picks one of the
+  // three NDBs (BPN/RYE/WLK) and points a yellow needle at the bearing of
+  // the tuned beacon FROM the plane, in the plane's reference frame. With
+  // `station` < 0 the gauge auto-selects the closest beacon each frame so
+  // a pilot who never touches the canvas still has something useful to fly
+  // toward; tapping the canvas cycles through 0/1/2/-1 so the player can
+  // lock onto a specific NDB and "fly the head of the needle" home. Survives
+  // resetPlane() (matching VOR / pitot heat) so the setting persists across
+  // sorties. Pure derived readout off the NDBS list — no new physics, no
+  // new audio, no scenery beyond a mini-map diamond + ident.
+  adf: { station: -1 },
   // In-air deadstick restart ritual. Parallel to coldStart for ground starts:
   // when the player presses X with engineOut while airborne, we check that
   // throttle is low (<30%) and airspeed is high enough to windmill the prop
@@ -19575,6 +19601,67 @@ function drawMinimap(hdgDeg){
       minimapCtx.restore();
     }
   }
+  // NDB beacons: small magenta diamond + 3-letter ident at each fixed-position
+  // navigation aid. Dim by default so they don't fight with airport markers;
+  // when the cockpit ADF is tuned to a specific NDB (state.adf.station >= 0)
+  // that one brightens so the player can see which beacon the needle is
+  // tracking. Off-map beacons get a small rim tick like airports do.
+  if (typeof NDBS !== 'undefined' && NDBS){
+    const tunedIdx = (state.adf && typeof state.adf.station === 'number') ? state.adf.station : -1;
+    let nearestIdx = -1;
+    if (tunedIdx < 0 || tunedIdx >= NDBS.length){
+      // Auto-mode: highlight the nearest beacon so the player can see what
+      // the ADF needle is pointing at without staring at the cockpit gauge.
+      let best = Infinity;
+      for (let i = 0; i < NDBS.length; i++){
+        const b = NDBS[i];
+        const dx = b.x - plane.position.x;
+        const dz = b.z - plane.position.z;
+        const d2 = dx*dx + dz*dz;
+        if (d2 < best){ best = d2; nearestIdx = i; }
+      }
+    }
+    for (let i = 0; i < NDBS.length; i++){
+      const b = NDBS[i];
+      const dx = b.x - plane.position.x;
+      const dz = b.z - plane.position.z;
+      const px = cx + dx * scale;
+      const py = cy + dz * scale;
+      const isTuned = (i === tunedIdx) || (tunedIdx < 0 && i === nearestIdx);
+      const color = isTuned ? '#ff7be5' : '#7a4a6a';
+      const alpha = isTuned ? 1.0 : 0.55;
+      if (px < 4 || px > W-4 || py < 4 || py > H-4){
+        // Off-map: small dim diamond on the rim pointing at the beacon.
+        const ang = Math.atan2(dz, dx);
+        const ex = cx + Math.cos(ang) * (R - 14);
+        const ey = cy + Math.sin(ang) * (R - 14);
+        minimapCtx.save();
+        minimapCtx.globalAlpha = alpha * 0.75;
+        minimapCtx.fillStyle = color;
+        minimapCtx.translate(ex, ey);
+        minimapCtx.rotate(Math.PI / 4);
+        minimapCtx.fillRect(-2.5, -2.5, 5, 5);
+        minimapCtx.restore();
+        continue;
+      }
+      // On-map: filled magenta diamond + 3-letter ident label.
+      minimapCtx.save();
+      minimapCtx.globalAlpha = alpha;
+      minimapCtx.fillStyle = color;
+      minimapCtx.translate(px, py);
+      minimapCtx.rotate(Math.PI / 4);
+      minimapCtx.fillRect(-3.5, -3.5, 7, 7);
+      minimapCtx.restore();
+      minimapCtx.save();
+      minimapCtx.globalAlpha = alpha;
+      minimapCtx.fillStyle = color;
+      minimapCtx.font = 'bold 8px ui-monospace, monospace';
+      minimapCtx.textAlign = 'left';
+      minimapCtx.textBaseline = 'top';
+      minimapCtx.fillText(b.id, px + 6, py - 9);
+      minimapCtx.restore();
+    }
+  }
   // Carrier deck: thin gray rectangle oriented to the deck heading so the
   // pilot can read distance/bearing to the trap target straight off the map.
   // Labelled "CV" in white; off-map ticks reuse the airport rim treatment
@@ -20488,6 +20575,7 @@ const cpFfCv  = document.getElementById('cpFf');
 const cpChrCv = document.getElementById('cpChr');
 const cpVorCv = document.getElementById('cpVor');
 const cpDaCv  = document.getElementById('cpDa');
+const cpAdfCv = document.getElementById('cpAdf');
 // Smoothed cockpit panel "dusk lighting" intensity (0..1). Lazy-eased toward
 // the live runway-edge-light dusk gate inside drawCockpitPanel() each frame
 // so the amber post-light wash fades in/out glassily across sunrise/sunset.
@@ -20505,6 +20593,7 @@ const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
 const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
 const cpVorCtx = cpVorCv && cpVorCv.getContext('2d');
 const cpDaCtx  = cpDaCv  && cpDaCv.getContext('2d');
+const cpAdfCtx = cpAdfCv && cpAdfCv.getContext('2d');
 // Click on the chronograph gauge to start/stop, right-click to record a lap
 // split, double-click to reset both clocks. Pure visual instrument — every
 // interaction lives on the canvas itself so no new keybinding is taken.
@@ -20569,6 +20658,30 @@ if (cpVorCv){
     let radial = Math.atan2(dx, -dz) * 180 / Math.PI;
     radial = ((Math.round(radial) % 360) + 360) % 360;
     state.vor.obs = radial;
+  });
+}
+// ADF gauge interaction: click the canvas to cycle through the available
+// NDB stations (auto-nearest → BPN → RYE → WLK → back to auto). All
+// interaction lives on the canvas itself so no new keybinding is taken,
+// matching the chronograph + VOR pattern. Right-click also resets back to
+// the auto-nearest mode so a pilot can bail out of a manual pick fast.
+if (cpAdfCv){
+  cpAdfCv.addEventListener('click', e => {
+    e.preventDefault();
+    if (!state.adf) return;
+    const N = (typeof NDBS !== 'undefined' && NDBS) ? NDBS.length : 0;
+    if (N <= 0) return;
+    // -1 (auto) → 0 → 1 → ... → N-1 → back to -1
+    let s = state.adf.station;
+    if (typeof s !== 'number') s = -1;
+    s = (s < 0) ? 0 : (s + 1);
+    if (s >= N) s = -1;
+    state.adf.station = s;
+  });
+  cpAdfCv.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!state.adf) return;
+    state.adf.station = -1;
   });
 }
 function _cpBezel(ctx, W, H){
@@ -21591,6 +21704,150 @@ function drawCockpitVor(){
   ctx.font = 'bold 10px ui-monospace, monospace';
   ctx.fillText('VOR/CDI', cx, cy - R * 0.65);
 }
+function drawCockpitAdf(hdgDegArg){
+  if (!cpAdfCtx) return;
+  if (typeof NDBS === 'undefined' || !NDBS || NDBS.length === 0) return;
+  const W = cpAdfCv.width, H = cpAdfCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpAdfCtx;
+  _cpBezel(ctx, W, H);
+  // Pick the tuned beacon: -1 (or out-of-range) = auto-nearest; otherwise the
+  // pilot has cycled the canvas to lock onto a specific NDB ident.
+  let stationIdx = (state.adf && typeof state.adf.station === 'number') ? state.adf.station : -1;
+  let autoMode = (stationIdx < 0 || stationIdx >= NDBS.length);
+  if (autoMode){
+    let best = Infinity, pick = 0;
+    for (let i = 0; i < NDBS.length; i++){
+      const b = NDBS[i];
+      const dx = plane.position.x - b.x;
+      const dz = plane.position.z - b.z;
+      const d2 = dx*dx + dz*dz;
+      if (d2 < best){ best = d2; pick = i; }
+    }
+    stationIdx = pick;
+  }
+  const station = NDBS[stationIdx];
+  // Rotating compass card: the plane's current heading sits at the top of
+  // the dial under a fixed lubber line (so the gauge always reads "this is
+  // where the nose points"). 0° card position = top of dial; we rotate by
+  // -hdgRad so the indicated heading number ends up there. Cardinals are
+  // larger + colored so the gauge reads as a real ADF face.
+  const hdgDeg = (typeof hdgDegArg === 'number')
+    ? ((hdgDegArg % 360) + 360) % 360
+    : (((Math.atan2(-plane.matrix.elements[8], plane.matrix.elements[10]) * 180 / Math.PI) % 360) + 360) % 360;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R - 14, 0, Math.PI*2); ctx.clip();
+  ctx.translate(cx, cy);
+  ctx.rotate(-hdgDeg * Math.PI / 180);
+  ctx.fillStyle = '#0a0d12';
+  ctx.beginPath(); ctx.arc(0, 0, R - 14, 0, Math.PI*2); ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let d = 0; d < 360; d += 10){
+    const a = (d - 90) * Math.PI / 180;
+    const r1 = R - 18;
+    const r2 = (d % 30 === 0) ? R - 32 : R - 26;
+    ctx.strokeStyle = '#dfe';
+    ctx.lineWidth = (d % 90 === 0) ? 2.4 : (d % 30 === 0 ? 1.4 : 0.8);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+    ctx.stroke();
+    if (d % 30 === 0){
+      let label = '';
+      if      (d === 0)   label = 'N';
+      else if (d === 90)  label = 'E';
+      else if (d === 180) label = 'S';
+      else if (d === 270) label = 'W';
+      else label = String(d / 10);
+      const isCard = (d % 90 === 0);
+      ctx.fillStyle = (d === 0) ? '#ff7b7b' : (isCard ? '#ffd166' : '#dfe');
+      ctx.font = 'bold ' + (isCard ? 14 : 11) + 'px ui-monospace, monospace';
+      const rt = R - 44;
+      const ax = Math.cos(a) * rt, ay = Math.sin(a) * rt;
+      // Counter-rotate so labels stay upright as the card spins.
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(hdgDeg * Math.PI / 180);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  // Fixed lubber line at the top of the dial so the pilot reads heading
+  // directly above the rotating card.
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - R + 8);
+  ctx.lineTo(cx, cy - R + 24);
+  ctx.stroke();
+  // ADF needle: aims at the magnetic bearing of the tuned beacon FROM the
+  // plane, in the plane's reference frame. Since the compass card is
+  // already rotated so the plane's heading is at the top, the needle is
+  // drawn at the *world* bearing-to-station angle and rides along with the
+  // card so "head of the needle" always points at the actual beacon.
+  const dxs = station.x - plane.position.x;
+  const dzs = station.z - plane.position.z;
+  let bearingToStation = Math.atan2(dxs, -dzs) * 180 / Math.PI;
+  bearingToStation = ((bearingToStation % 360) + 360) % 360;
+  // Needle angle on the card: bearing - hdg gives the offset from the
+  // plane's nose (0 = directly ahead, +90 = right wing, -90 = left wing).
+  let needleDeg = bearingToStation - hdgDeg;
+  while (needleDeg > 180) needleDeg -= 360;
+  while (needleDeg < -180) needleDeg += 360;
+  // Tail end of the needle is a slim grey, head is bright yellow + a small
+  // arrowhead chevron so the player can instantly read direction.
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(needleDeg * Math.PI / 180);
+  // Tail (dim).
+  ctx.strokeStyle = '#6a7a8a';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, 8);
+  ctx.lineTo(0, R - 26);
+  ctx.stroke();
+  // Head (bright yellow).
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 3.6;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(0, -(R - 26));
+  ctx.stroke();
+  // Arrowhead chevron at the head end.
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.moveTo(0, -(R - 26));
+  ctx.lineTo(-6, -(R - 38));
+  ctx.lineTo( 6, -(R - 38));
+  ctx.closePath();
+  ctx.fill();
+  // Center hub.
+  ctx.fillStyle = '#dfe';
+  ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  // Bottom readout: ident, distance, and mode (AUTO vs MAN).
+  const distM = Math.hypot(dxs, dzs);
+  const distStr = distM >= 1000
+    ? (distM / 1000).toFixed(1) + ' km'
+    : Math.round(distM) + ' m';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#7ee787';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(station.id, cx, cy + R * 0.42);
+  ctx.fillStyle = '#9fb0c0';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText(distStr, cx, cy + R * 0.62);
+  ctx.fillStyle = autoMode ? '#6aa' : '#ffb347';
+  ctx.font = 'bold 9px ui-monospace, monospace';
+  ctx.fillText(autoMode ? 'AUTO' : 'MAN', cx, cy + R * 0.78);
+  // ADF/NDB label up top — matches the unit hint on the other gauges so
+  // the panel reads as a matched set.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillText('ADF/NDB', cx, cy - R * 0.55);
+}
 function drawCockpitDa(daFt, daOverride){
   if (!cpDaCtx) return;
   const W = cpDaCv.width, H = cpDaCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
@@ -21757,6 +22014,10 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // (the OBS is a pilot setting that survives the power-up; the needle
   // and TO/FROM flag fall out of state.vor and the live plane position).
   drawCockpitVor();
+  // ADF / NDB: derived from the NDB list + the tuned station, mirrors the
+  // VOR's tolerance of the avionics self-test sweep (the needle just keeps
+  // pointing at the beacon while the rest of the panel powers up).
+  drawCockpitAdf(magV);
   // Density altitude: derived from state.densityAltFt (updated each frame
   // in updateDensityAltitude()) so the gauge tracks live OAT + altitude
   // without any extra plumbing. Self-test override sweeps the dial.
