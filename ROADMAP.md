@@ -392,6 +392,15 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Engine start checklist overlay — small bottom-right card on the intro/cold-start screen listing the four real cold-start steps (1. Master ON, 2. Mixture RICH, 3. Throttle CRACKED, 4. Mags BOTH) with a green ✓ ticking in as you set each one (mixture lever, throttle nudge above 0%, mags toggle, parking brake released). Card slides in with the cold-start ritual and slides out the second the engine catches. Teaches the real start procedure without a tutorial system — just look at the card, do the steps, watch them check off.
+
+- [ ] Storm cell visualization on the weather radar — the existing radar panel currently draws blob clouds. Add 1–3 amber/red "cell" blobs drifting on the wind that actually represent the rain weather + storm-flash zones, so the radar finally shows *where the storm is* relative to the plane. Storm cells fade when rain toggles off. Turns the radar from "vibe-only ornament" into something a pilot can actually steer around.
+
+- [ ] Tower flyby horn / wave — fly under 200m AGL within 500m of an airport tower and a one-shot ATC "Nice pass, [callsign]!" line fires with a cheerful two-note horn chirp + a tiny `+1 FLYBY` toast in the corner. Cooldown of 30s per airport so a circuit pattern doesn't spam it. Tracks total flybys in pilot stats. Adds a reason to actually buzz the tower instead of just dutifully landing every time.
+
+- [ ] Animated control surfaces (ailerons + rudder + elevator) — already animated flaps. Now make the ailerons deflect with stick roll, the elevator deflect with stick pitch, and the rudder deflect with yaw input, all visible in chase/orbit/flyby cams. Tiny meshes that already exist as wing/tail geometry — just split out the trailing 25% as separate children and rotate them on input. Massive "oh, this is a real plane" upgrade for ~40 LOC and zero new assets.
+
+- [ ] Sunset golden-hour tinted screenshots — during the dawn (~05:30–06:30) and dusk (~19:00–20:00) windows of the time-of-day cycle, photo-mode saves get a subtle warm color grade baked into the JPEG/PNG (slight orange lift in highlights, pulled-back blues in shadows, +5% saturation). HUD shows a tiny `🌇 GOLDEN HOUR` pill in photo mode so pilots know the bonus is live. Free visual upgrade for the existing gallery system, and a soft nudge to fly at the prettiest times of day.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
