@@ -758,6 +758,7 @@
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
   <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
+  <div class="gauge"><canvas id="cpVor" width="220" height="220" title="Click around the dial to set OBS course · Right-click to center on current bearing"></canvas><div class="glbl">VOR / CDI</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -7896,6 +7897,16 @@ const state = {
   // already early-returns when the panel is hidden). resetPlane() wipes it
   // so every fresh sortie starts at 00:00.0.
   chrono: { running: false, elapsedMs: 0, lapMs: 0 },
+  // Cockpit VOR receiver. Picks the nearest airport as the station, computes
+  // the radial FROM the station to the plane, and the CDI needle deflects
+  // left/right based on how far that radial is off the selected OBS course
+  // (full deflection at ±10°, matching real VOR scaling). OBS is set by
+  // clicking around the dial perimeter (sets to clicked bearing) or right-
+  // clicking to snap onto the current FROM radial. Pure derived readout off
+  // the existing airport list — no new physics, no new audio. resetPlane()
+  // keeps the OBS so a series of practice flights doesn't keep clobbering
+  // the pilot's setting; it does re-pick the station via the per-frame draw.
+  vor: { obs: 0, station: null },
   // In-air deadstick restart ritual. Parallel to coldStart for ground starts:
   // when the player presses X with engineOut while airborne, we check that
   // throttle is low (<30%) and airspeed is high enough to windmill the prop
@@ -17832,6 +17843,7 @@ const cpMagCv = document.getElementById('cpMag');
 const cpBrkCv = document.getElementById('cpBrk');
 const cpFfCv  = document.getElementById('cpFf');
 const cpChrCv = document.getElementById('cpChr');
+const cpVorCv = document.getElementById('cpVor');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
@@ -17842,6 +17854,7 @@ const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
 const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
 const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
 const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
+const cpVorCtx = cpVorCv && cpVorCv.getContext('2d');
 // Click on the chronograph gauge to start/stop, right-click to record a lap
 // split, double-click to reset both clocks. Pure visual instrument — every
 // interaction lives on the canvas itself so no new keybinding is taken.
@@ -17865,6 +17878,47 @@ if (cpChrCv){
     // window doesn't fill in with the same number across multiple right-
     // clicks on a paused chrono.
     if (state.chrono.running) state.chrono.lapMs = state.chrono.elapsedMs;
+  });
+}
+// VOR / CDI gauge interaction: click anywhere around the dial perimeter to
+// set the OBS (omni-bearing selector) course — the angle from the gauge
+// center to the click point becomes the desired course. Right-click snaps
+// the OBS onto the current FROM radial (a one-tap "center the needle"
+// shortcut so the pilot can quickly establish where they are relative to
+// the station). All interaction lives on the canvas itself so no new
+// keybinding is taken, matching the chronograph pattern next door.
+if (cpVorCv){
+  function _vorClickAngleDeg(e){
+    const rect = cpVorCv.getBoundingClientRect();
+    // Translate event coords into canvas-internal pixel coords (canvas is
+    // rendered at 110px CSS but is 220 internal, so the scale factor cancels
+    // when we work in centered offsets — we only need the direction).
+    const cx = rect.left + rect.width * 0.5;
+    const cy = rect.top  + rect.height * 0.5;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    // atan2(dx, -dy) gives 0° at the top of the dial growing clockwise so
+    // it matches the compass-style "degrees from north" convention the rest
+    // of the panel uses.
+    let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
+    deg = ((Math.round(deg) % 360) + 360) % 360;
+    return deg;
+  }
+  cpVorCv.addEventListener('click', e => {
+    e.preventDefault();
+    if (!state.vor) return;
+    state.vor.obs = _vorClickAngleDeg(e);
+  });
+  cpVorCv.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!state.vor || !state.vor.station) return;
+    // Snap OBS to the current FROM radial (bearing from station to plane).
+    const s = state.vor.station;
+    const dx = plane.position.x - s.x;
+    const dz = plane.position.z - s.z;
+    let radial = Math.atan2(dx, -dz) * 180 / Math.PI;
+    radial = ((Math.round(radial) % 360) + 360) % 360;
+    state.vor.obs = radial;
   });
 }
 function _cpBezel(ctx, W, H){
@@ -18596,6 +18650,194 @@ function drawCockpitChrono(){
   const lapText = chr.lapMs > 0 ? _formatChrono(chr.lapMs) : '--:--.-';
   ctx.fillText('LAP ' + lapText, cx, cy + R*0.62);
 }
+function drawCockpitVor(){
+  if (!cpVorCtx) return;
+  const W = cpVorCv.width, H = cpVorCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpVorCtx;
+  _cpBezel(ctx, W, H);
+  // Pick the nearest airport as the VOR station. Real fields don't always
+  // collocate a VOR with the runway, but for a sim the airports are the
+  // only meaningful landmarks so they pull double duty here. Carrier deck
+  // is intentionally excluded — a steaming flat-top isn't a fixed beacon.
+  let station = null;
+  let best = Infinity;
+  for (let i = 0; i < AIRPORTS.length; i++){
+    const a = AIRPORTS[i];
+    const dx = plane.position.x - a.x;
+    const dz = plane.position.z - a.z;
+    const d2 = dx*dx + dz*dz;
+    if (d2 < best){ best = d2; station = a; }
+  }
+  if (state.vor) state.vor.station = station;
+  const obs = (state.vor && typeof state.vor.obs === 'number') ? state.vor.obs : 0;
+  // Rotating course card: the OBS sits under a fixed lubber line at top, so
+  // we rotate the underlying card by -obs so the chosen degree number ends
+  // up at top center. Matches the magnetic compass drum pattern next door.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R - 14, 0, Math.PI*2); ctx.clip();
+  ctx.translate(cx, cy);
+  ctx.rotate(-obs * Math.PI / 180);
+  ctx.fillStyle = '#0a0d12';
+  ctx.beginPath(); ctx.arc(0, 0, R - 14, 0, Math.PI*2); ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let d = 0; d < 360; d += 10){
+    const a = (d - 90) * Math.PI / 180; // 0° course at top
+    const r1 = R - 18;
+    const r2 = (d % 30 === 0) ? R - 32 : R - 26;
+    ctx.strokeStyle = '#dfe';
+    ctx.lineWidth = (d % 90 === 0) ? 2.4 : (d % 30 === 0 ? 1.4 : 0.8);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+    ctx.stroke();
+    if (d % 30 === 0){
+      let label = '';
+      if      (d === 0)   label = 'N';
+      else if (d === 90)  label = 'E';
+      else if (d === 180) label = 'S';
+      else if (d === 270) label = 'W';
+      else label = String(d / 10);
+      const isCard = (d % 90 === 0);
+      ctx.fillStyle = (d === 0) ? '#ff7b7b' : (isCard ? '#ffd166' : '#dfe');
+      ctx.font = 'bold ' + (isCard ? 14 : 11) + 'px ui-monospace, monospace';
+      const rt = R - 44;
+      const ax = Math.cos(a) * rt, ay = Math.sin(a) * rt;
+      // Counter-rotate so labels read upright as the card spins.
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(obs * Math.PI / 180);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  // Compute the VOR brain. Radial FROM the station to the plane is the
+  // bearing measured at the station looking at the aircraft — atan2(dx,-dz)
+  // matches the rest of the sim's "degrees from north, clockwise" math.
+  let radialFrom = 0;
+  if (station){
+    const dx = plane.position.x - station.x;
+    const dz = plane.position.z - station.z;
+    radialFrom = Math.atan2(dx, -dz) * 180 / Math.PI;
+  }
+  radialFrom = ((radialFrom % 360) + 360) % 360;
+  // Course deviation: difference between the radial-from-station and the
+  // selected OBS course, normalised to (-180, 180]. Positive = plane is
+  // right of course (needle deflects left so the pilot "flies the needle"
+  // back toward course). Real VOR scaling = ±10° maps to full-scale needle
+  // deflection; beyond that the needle pegs.
+  let dev = radialFrom - obs;
+  while (dev > 180) dev -= 360;
+  while (dev < -180) dev += 360;
+  // TO/FROM flag: if the OBS roughly matches the radial-from-station, the
+  // plane is FROM the station on that course. If the OBS matches the
+  // reciprocal, the plane is TO the station. Standard real-world rule:
+  // |dev| <= 90 => FROM, otherwise => TO. Inside the cone of confusion
+  // (very close to the station) the flag flips rapidly, which is also
+  // accurate — we don't try to hide that behavior.
+  const isFrom = Math.abs(dev) <= 90;
+  // For the CDI, when TO is showing, the needle reads relative to the
+  // reciprocal course (i.e., flip the deflection sign so the pilot still
+  // "flies the needle" correctly toward the chosen course).
+  let cdiDeg = dev;
+  if (!isFrom){
+    cdiDeg = dev > 0 ? dev - 180 : dev + 180;
+  }
+  // Full-scale at ±10°.
+  const cdiClamped = Math.max(-10, Math.min(10, cdiDeg));
+  // Selected-course pointer: a yellow triangle at the top of the gauge
+  // (under the lubber line) plus a thin yellow line that runs across the
+  // dial face along the OBS axis. The CDI bar slides perpendicular to that
+  // line by an amount proportional to cdiClamped.
+  const lineLen = R - 40;
+  ctx.save();
+  ctx.translate(cx, cy);
+  // Course line points along the OBS direction (rotated about gauge center)
+  // — we draw the line as if OBS is at the top (already implied by the
+  // bezel orientation), so no extra rotation is needed for the line; the
+  // card rotation handled the digit alignment.
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(0, -lineLen);
+  ctx.lineTo(0,  lineLen);
+  ctx.stroke();
+  // OBS pointer triangle at the top (selected course arrow).
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.moveTo(0, -lineLen - 2);
+  ctx.lineTo(-7, -lineLen + 12);
+  ctx.lineTo( 7, -lineLen + 12);
+  ctx.closePath();
+  ctx.fill();
+  // Reciprocal tail at the bottom (small notch so the OBS axis reads
+  // unambiguously).
+  ctx.beginPath();
+  ctx.moveTo(0, lineLen + 2);
+  ctx.lineTo(-5, lineLen - 10);
+  ctx.lineTo( 5, lineLen - 10);
+  ctx.closePath();
+  ctx.fill();
+  // Five dots either side of center marking the 2/4/6/8/10° scale.
+  ctx.fillStyle = '#9fb0c0';
+  for (let d = -10; d <= 10; d += 2){
+    if (d === 0) continue;
+    const r = (d / 10) * (lineLen - 16);
+    ctx.beginPath(); ctx.arc(r, 0, 2.4, 0, Math.PI*2); ctx.fill();
+  }
+  // CDI bar: the displaced center segment that the pilot "flies the needle"
+  // back onto. Positive cdiClamped = plane is right of course → bar shifts
+  // left so the pilot turns left to capture. Color the bar green when the
+  // station is reachable and the dev is small, otherwise white so it reads
+  // against the dial regardless of error magnitude.
+  const cdiX = -(cdiClamped / 10) * (lineLen - 16);
+  const onCourse = Math.abs(cdiDeg) < 2;
+  ctx.strokeStyle = onCourse ? '#7ee787' : '#dfe';
+  ctx.lineWidth = 4.5;
+  ctx.beginPath();
+  ctx.moveTo(cdiX, -lineLen + 22);
+  ctx.lineTo(cdiX,  lineLen - 22);
+  ctx.stroke();
+  ctx.restore();
+  // Fixed lubber line at the top (so the player sees the selected course
+  // number under it on the card).
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - R + 6);
+  ctx.lineTo(cx, cy - R + 18);
+  ctx.stroke();
+  // TO/FROM flag in the lower-left and selected OBS / station readout in
+  // the lower-right so a glance gives the player everything they need.
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Station identifier up top (under the lubber line). Falls back to a
+  // dim "--" when no station was selected (defensive — AIRPORTS always has
+  // entries, but a future map-edit could leave it empty).
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText(station ? station.id : '--', cx, cy - R * 0.45);
+  // TO/FROM flag — green "TO" if you'll fly toward the station on this OBS,
+  // white "FROM" if you're flying away. Hidden if no station, mirroring
+  // real receivers that show a "NAV" flag when no signal is available.
+  if (station){
+    ctx.fillStyle = isFrom ? '#9fb0c0' : '#7ee787';
+    ctx.font = 'bold 13px ui-monospace, monospace';
+    ctx.fillText(isFrom ? 'FROM' : 'TO', cx - R * 0.42, cy + R * 0.45);
+  }
+  // Selected OBS course in the lower-right. Color matches the chronograph
+  // "green when active" convention; turns green when the CDI is on-course.
+  ctx.fillStyle = onCourse ? '#7ee787' : '#ffd166';
+  ctx.font = 'bold 16px ui-monospace, monospace';
+  const obsShown = ((Math.round(obs) % 360) + 360) % 360;
+  ctx.fillText('OBS ' + String(obsShown).padStart(3, '0') + '°', cx + R * 0.05, cy + R * 0.62);
+  // VOR / CDI label up top — matches the unit hint on the other gauges so
+  // the panel reads as a matched set.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillText('VOR/CDI', cx, cy - R * 0.65);
+}
 function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -18680,6 +18922,11 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
     if (state.chrono.elapsedMs > 3599999) state.chrono.elapsedMs = 3599999;
   }
   drawCockpitChrono();
+  // VOR / CDI is purely derived from the airport list + the OBS knob, so
+  // it tolerates the avionics self-test sweep without any special-casing
+  // (the OBS is a pilot setting that survives the power-up; the needle
+  // and TO/FROM flag fall out of state.vor and the live plane position).
+  drawCockpitVor();
 }
 
 // ====== Camera ======
