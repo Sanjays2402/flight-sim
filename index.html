@@ -583,6 +583,14 @@
   #photo .btn:hover { background:rgba(60,120,75,.95); }
   body.photo-mode { cursor:grab; }
   body.photo-mode.dragging { cursor:grabbing; }
+  /* Golden-hour pill (shown only in photo mode during the dawn ~05:30-06:30
+     and dusk ~19:00-20:00 todHours windows). Tells the player the warm
+     color grade is live so the bonus baked into the next PNG isn't
+     invisible. Pointer-events off so it never eats orbit drags; hidden in
+     the saved PNG via the savePhoto() overlay-hide sweep so the pill
+     itself never bakes into the shot. */
+  #goldenPill { position:fixed; top:18px; left:50%; transform:translateX(-50%); padding:6px 14px; font-size:11px; letter-spacing:2px; font-weight:800; color:#ffe2a8; background:rgba(40,22,8,.78); border:1px solid #d8924a; border-radius:8px; backdrop-filter:blur(8px); box-shadow:0 0 18px rgba(232,160,74,.45), inset 0 0 12px rgba(180,110,40,.32); display:none; z-index:9; pointer-events:none; user-select:none; -webkit-user-select:none; text-shadow:0 0 6px rgba(255,196,110,.6); }
+  #goldenPill.show { display:block; }
   /* Big centered countdown digit shown when the player triggers Shift+S in
      photo mode. Pulses in with each tick so the count reads visually as
      well as audibly. Hidden by default (display:none) and toggled per-tick
@@ -1147,6 +1155,13 @@
   <div class="ttl">📸 PHOTO MODE</div>
   <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save · <kbd>Shift+S</kbd> 3-2-1 · <kbd>/</kbd> gallery · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span><span class="btn" id="photoGal" style="margin-left:6px;">GALLERY</span></div>
 </div>
+<!-- Golden-hour pill — only shown in photo mode during the dawn (~05:30-06:30)
+     and dusk (~19:00-20:00) windows of the time-of-day cycle. Tells the
+     player a subtle warm color grade will get baked into the next saved
+     PNG so the bonus is never invisible. Hidden for a single frame inside
+     savePhoto()'s overlay-hide sweep so the pill itself never bakes into
+     the shot. -->
+<div id="goldenPill">🌇 GOLDEN HOUR</div>
 <div id="photoCount">3</div>
 <div id="mctrl">
   <div id="mstick"><div class="knob" id="mknob"></div></div>
@@ -2191,6 +2206,24 @@ function applyTimeOfDay(h){
     t.mat.emissive.setRGB(v, v, v);
   }
   return { dir, k, nightT };
+}
+
+// Golden-hour strength (0..1) used by photo-mode color grading. Returns 1.0
+// inside the dawn (~05:30-06:30) and dusk (~19:00-20:00) plateaus, ramps
+// linearly across a 30-minute shoulder on each side, 0 everywhere else.
+// Pure helper — no scene side-effects, safe to call every frame.
+function goldenHourStrength(h){
+  const t = ((h % 24) + 24) % 24;
+  // [start ramp-in, plateau start, plateau end, end ramp-out]
+  const dawn = [5.0, 5.5, 6.5, 7.0];
+  const dusk = [18.5, 19.0, 20.0, 20.5];
+  function trapezoid(x, w){
+    if (x <= w[0] || x >= w[3]) return 0;
+    if (x >= w[1] && x <= w[2]) return 1;
+    if (x < w[1]) return (x - w[0]) / Math.max(0.0001, w[1] - w[0]);
+    return (w[3] - x) / Math.max(0.0001, w[3] - w[2]);
+  }
+  return Math.max(trapezoid(t, dawn), trapezoid(t, dusk));
 }
 
 // ====== SKY DOME with sun disc + halo ======
@@ -25701,6 +25734,10 @@ function loop(now){
       // Throttle/control input is ignored, the prop also holds position so
       // the saved PNG isn't a motion-blurred disc.
       updatePhotoCamera(dt);
+      // Drive the golden-hour pill in/out based on todHours. Cheap, only
+      // matters while photo mode is on, but the call is gated inside
+      // tickGoldenHourPill() too so it's safe to call unconditionally.
+      tickGoldenHourPill();
       // Tick any active Shift+S countdown so it drains in real time even
       // though the rest of the sim is frozen.
       tickPhotoCountdown(dt);
@@ -25907,16 +25944,34 @@ function setPhotoMode(on){
     setHudHidden(true);
     if (photoEl) photoEl.classList.add('show');
     document.body.classList.add('photo-mode');
+    // Sync the golden-hour pill on entry so it reads right on frame 1.
+    tickGoldenHourPill();
   } else {
     setHudHidden(false);
     if (photoEl) photoEl.classList.remove('show');
     document.body.classList.remove('photo-mode');
     document.body.classList.remove('dragging');
     photoDragId = -1;
+    // Hide the golden-hour pill on exit so it doesn't linger past photo mode.
+    if (goldenPillEl && goldenPillEl.classList.contains('show')){
+      goldenPillEl.classList.remove('show');
+    }
     // Cancel any in-progress Shift+S countdown so the digit doesn't linger
     // across the exit and so the next entry doesn't inherit stale state.
     cancelPhotoCountdown();
   }
+}
+// Golden-hour pill: shown only in photo mode during dawn/dusk windows so
+// the player knows the next saved screenshot will get a warm color grade
+// baked into it. Cheap toggle — no allocations, no per-pixel work, and
+// self-gates on photoMode so non-photo frames pay nothing.
+const goldenPillEl = document.getElementById('goldenPill');
+function tickGoldenHourPill(){
+  if (!goldenPillEl) return;
+  const on = !!state.photoMode && goldenHourStrength(state.todHours || 0) > 0.001;
+  const shown = goldenPillEl.classList.contains('show');
+  if (on && !shown) goldenPillEl.classList.add('show');
+  else if (!on && shown) goldenPillEl.classList.remove('show');
 }
 function updatePhotoCamera(/*dt*/){
   // Orbit around the plane at distance photoDist with pitch+yaw controlled
@@ -25946,8 +26001,68 @@ function savePhoto(){
   const countEl = document.getElementById('photoCount');
   const countWasShown = countEl && countEl.classList.contains('show');
   if (countWasShown){ countEl.classList.remove('show'); countEl.classList.remove('pop'); }
+  // Hide the golden-hour pill the same way so the warm-tint pill never bakes
+  // into the actual screenshot (the bonus is on the pixels, not on the UI).
+  const goldenWasShown = goldenPillEl && goldenPillEl.classList.contains('show');
+  if (goldenWasShown) goldenPillEl.classList.remove('show');
   // Render immediately so the frame matches the hidden-overlay state.
   renderer.render(scene, camera);
+  // Golden-hour color grade: during dawn / dusk windows we bake a subtle warm
+  // tint into the saved PNG (orange lift in highlights, cooler-blue knocked
+  // back in shadows, +5% saturation). When the grade is active we route the
+  // download + gallery dataURL through an offscreen 2D canvas instead of the
+  // raw WebGL one. Strength scales by goldenHourStrength() so the ramp-in /
+  // ramp-out shoulders fade gently instead of snapping on.
+  const goldenAmt = state.photoMode ? goldenHourStrength(state.todHours || 0) : 0;
+  let sourceCanvas = canvas; // canvas the gallery + download read from
+  if (goldenAmt > 0.001){
+    try {
+      const w = canvas.width, h = canvas.height;
+      if (w > 0 && h > 0){
+        const grade = document.createElement('canvas');
+        grade.width = w; grade.height = h;
+        const gctx = grade.getContext('2d');
+        if (gctx){
+          gctx.drawImage(canvas, 0, 0);
+          const img = gctx.getImageData(0, 0, w, h);
+          const d = img.data;
+          // Strength caps each effect well under the level that would read as
+          // "filter" instead of "golden hour". Multiplied by goldenAmt so the
+          // shoulder ramps fade the grade in/out smoothly.
+          const liftR  = 18 * goldenAmt;   // orange lift in highlights (R)
+          const liftG  =  6 * goldenAmt;   // a touch of warmth in mids   (G)
+          const cutB   = 22 * goldenAmt;   // pulled-back blue in shadows (B)
+          const sat    = 1 + 0.05 * goldenAmt; // +5% saturation at peak
+          for (let i = 0; i < d.length; i += 4){
+            let r = d[i], g = d[i+1], b = d[i+2];
+            // Luminance approximation (rec. 601) for highlight / shadow weights.
+            const Y = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+            const hi = Y > 0.6 ? (Y - 0.6) / 0.4 : 0;   // 0..1 in highlights
+            const lo = Y < 0.4 ? (0.4 - Y) / 0.4 : 0;   // 0..1 in shadows
+            r += liftR * hi;
+            g += liftG * hi;
+            b -= cutB * lo;
+            // Saturation: pivot each channel around the luminance gray axis.
+            const Yp = r * 0.299 + g * 0.587 + b * 0.114;
+            r = Yp + (r - Yp) * sat;
+            g = Yp + (g - Yp) * sat;
+            b = Yp + (b - Yp) * sat;
+            d[i]   = r < 0 ? 0 : r > 255 ? 255 : r;
+            d[i+1] = g < 0 ? 0 : g > 255 ? 255 : g;
+            d[i+2] = b < 0 ? 0 : b > 255 ? 255 : b;
+            // alpha untouched
+          }
+          gctx.putImageData(img, 0, 0);
+          sourceCanvas = grade;
+        }
+      }
+    } catch(e){
+      // Any failure (tainted canvas, context loss, OOM on huge frames) falls
+      // back to the raw WebGL canvas — the player still gets their PNG, just
+      // without the warm grade baked in.
+      sourceCanvas = canvas;
+    }
+  }
   // Grab a moderate-quality JPEG dataURL while the framebuffer is still in
   // its HUD-free state — this seeds the screenshot gallery (`/` key) with a
   // copy of the exact frame the player just downloaded. JPEG @ 0.78 keeps
@@ -25956,7 +26071,7 @@ function savePhoto(){
   // gallery push instead of breaking the download path below.
   let galleryDataUrl = null;
   try {
-    galleryDataUrl = canvas.toDataURL('image/jpeg', 0.78);
+    galleryDataUrl = sourceCanvas.toDataURL('image/jpeg', 0.78);
     if (typeof galleryDataUrl === 'string' && galleryDataUrl.indexOf('data:image/jpeg') !== 0){
       // Safari / iOS occasionally fall back to PNG when JPEG encoding fails;
       // either way it's a valid data URL the gallery can render + re-download.
@@ -25964,12 +26079,13 @@ function savePhoto(){
   } catch(e){ galleryDataUrl = null; }
   const finish = () => {
     if (overlayWasShown) photoEl.classList.add('show');
+    if (goldenWasShown && goldenPillEl) goldenPillEl.classList.add('show');
     // Don't restore the countdown digit — the countdown is finished by the
     // time savePhoto() fires from the tick path, and a manual S press should
     // also cancel any active countdown (handled in the keydown path).
   };
   try {
-    canvas.toBlob(blob => {
+    sourceCanvas.toBlob(blob => {
       finish();
       if (!blob) return;
       const url = URL.createObjectURL(blob);
