@@ -65,6 +65,20 @@
   #atc .msg { color:#cfe; }
   #atc.flash { animation:atcFlash 0.45s ease-out; }
   @keyframes atcFlash { 0% { background:rgba(40,90,55,.92); border-color:#7ee787; } 100% { background:rgba(8,14,22,.78); border-color:#1e3548; } }
+  /* Squawk transponder readout: small pill pinned just under the right edge
+     of the ATC strip showing the current 4-digit code. VFR default is 1200,
+     hop missions get a fresh random code per leg, and emergencies (engine
+     fire / fuel critical / airframe damage past 80%) latch the squawk to
+     7700 with red text. Code changes fade an amber border highlight over
+     1.4s via the `flash` class so the player notices the swap. Hidden in
+     photo mode via PHOTO_HIDE_IDS so saved PNGs stay clean. */
+  #squawk { position:fixed; top:88px; left:50%; transform:translate(176px,0); padding:3px 10px; font-size:11px; font-weight:700; letter-spacing:2px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); font-family:inherit; z-index:5; pointer-events:none; }
+  #squawk .lbl { color:#9bb; font-weight:600; margin-right:6px; letter-spacing:1px; }
+  #squawk .code { color:#cfe; }
+  #squawk.emerg .code { color:#ff7a7a; text-shadow:0 0 6px rgba(255,90,90,.55); }
+  #squawk.flash { animation:sqFlash 1.4s ease-out; }
+  @keyframes sqFlash { 0% { border-color:#ffd166; box-shadow:0 0 12px rgba(255,209,102,.6); } 100% { border-color:#1e3548; box-shadow:none; } }
+  @media (max-width: 760px){ #squawk { left:auto; right:8px; transform:none; } }
   #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #vsi canvas { display:block; width:100%; height:100%; }
   /* Glideslope indicator: vertical "meatball" / PAPI strip pinned to the
@@ -468,6 +482,7 @@
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
+<div id="squawk"><span class="lbl">SQ</span><span class="code" id="squawkCode">1200</span></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
 <div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
@@ -5796,6 +5811,14 @@ const state = {
   hopDone: false,
   hopStartMs: 0,
   hopElapsedMs: 0,
+  // Transponder squawk code shown under the ATC strip. Default 1200 (VFR);
+  // hop missions get a random per-leg code, and any active emergency
+  // (engine fire / fuel critical red / damage past 80%) latches to 7700.
+  // `squawkEmerg` lets us tell "player flying a hop with a borrowed code"
+  // apart from "player squawking 7700 because something's on fire" so the
+  // pill colors itself red only in the latter case.
+  squawk: '1200',
+  squawkEmerg: false,
   // Ring-chase mission state. Plane flies through `ringChain` in order; first
   // ring is armed at mission start, an axis-plane hit detector inside the
   // ring's loop advances `ringIdx`. Best time persisted to localStorage.
@@ -6706,6 +6729,107 @@ function tickATC(now){
   }
 }
 
+// ====== TRANSPONDER SQUAWK ======
+// Tiny HUD pill under the right edge of the ATC strip showing the current
+// 4-digit transponder code. Real pilots dial 1200 for VFR, IFR clearances
+// hand out a specific code, and 7700 is the universal emergency squawk.
+// We mirror that on the HUD without any of the radio plumbing:
+//   * Default is `1200` (VFR).
+//   * Hop missions assign a random 4-digit code per leg via _rollSquawkCode
+//     and rotate it as the player completes each leg.
+//   * Any active emergency (engine fire, fuel state critical/red, airframe
+//     damage past 80%) latches the code to `7700` and turns the readout red.
+//     The emergency latch clears once every emergency condition has cleared,
+//     restoring the pre-emergency code so a quick scare doesn't permanently
+//     ruin the player's hop assignment.
+//   * `setSquawk()` fades an amber border highlight for 1.4s on every code
+//     change so the pilot actually notices the swap.
+const squawkEl     = document.getElementById('squawk');
+const squawkCodeEl = document.getElementById('squawkCode');
+function _rollSquawkCode(){
+  // Random 4-digit code in the standard VFR/discrete range. Avoid the four
+  // reserved emergency codes (7500 hijack, 7600 radio fail, 7700 emergency,
+  // 1200 VFR default) so a hop leg never accidentally hands the player a
+  // code that would imply something nasty is happening.
+  const RESERVED = new Set(['7500','7600','7700','1200','0000']);
+  for (let i = 0; i < 8; i++){
+    // Each octal-style digit 0-7 keeps it shaped like a real transponder code.
+    let code = '';
+    for (let d = 0; d < 4; d++) code += Math.floor(Math.random() * 8);
+    if (!RESERVED.has(code)) return code;
+  }
+  return '4242'; // fallback if we somehow rolled reserved 8x in a row
+}
+function setSquawk(code, opts){
+  if (!code) return;
+  if (state.squawk === code && !(opts && opts.force)){
+    // Same code, nothing to do. Skip the flash so re-asserts during an
+    // emergency tick don't strobe the pill every frame.
+    return;
+  }
+  state.squawk = code;
+  if (squawkCodeEl) squawkCodeEl.textContent = code;
+  if (squawkEl){
+    squawkEl.classList.toggle('emerg', !!state.squawkEmerg);
+    // Retrigger the amber flash animation by toggling the class off and
+    // back on. Same reflow trick used by the ATC strip.
+    squawkEl.classList.remove('flash');
+    void squawkEl.offsetWidth;
+    squawkEl.classList.add('flash');
+  }
+}
+function _emergencyActive(){
+  // Any one of these flips the squawk to 7700 until they all clear. Fuel
+  // threshold matches the existing red-flash readout (~10%) so the HUD
+  // pill and the squawk transition together.
+  if (state.engineFire) return true;
+  if (state.fuel > 0 && state.fuel <= 0.10) return true;
+  if (state.damage >= 0.80) return true;
+  return false;
+}
+// Pre-emergency code is restored when every emergency condition clears, so a
+// hop pilot doesn't permanently lose their assigned per-leg code from one
+// brief scare. Updated whenever a non-emergency setSquawk happens.
+let _squawkPreEmerg = '1200';
+function tickSquawk(){
+  const emerg = _emergencyActive();
+  if (emerg){
+    if (!state.squawkEmerg){
+      // Latch on: remember the pre-emergency code so we can restore it once
+      // the situation calms down.
+      _squawkPreEmerg = state.squawk;
+      state.squawkEmerg = true;
+      setSquawk('7700', { force:true });
+      pushATC('Squawk 7700, declaring emergency.', { tag:'PILOT', now:true });
+    }
+  } else if (state.squawkEmerg){
+    // Latch off: drop back to whatever code we were on before the scare.
+    state.squawkEmerg = false;
+    setSquawk(_squawkPreEmerg || '1200', { force:true });
+  }
+}
+function assignHopLegSquawk(){
+  // Called at hop mission start and on every leg advance. Skipped while an
+  // emergency latch is active so we don't visibly stomp 7700 mid-mayday;
+  // _squawkPreEmerg gets updated so the post-emergency restore picks up the
+  // new leg's code instead of the old one.
+  const code = _rollSquawkCode();
+  if (state.squawkEmerg){
+    _squawkPreEmerg = code;
+  } else {
+    setSquawk(code);
+  }
+}
+function resetSquawkVFR(){
+  // Called from resetPlane / startMission for non-hop modes so a returning
+  // pilot always sees the familiar 1200 unless something on the airframe is
+  // actually broken. Force-set so the flash fires on mission switch.
+  state.squawkEmerg = false;
+  _squawkPreEmerg = '1200';
+  setSquawk('1200', { force:true });
+  if (squawkEl) squawkEl.classList.remove('emerg');
+}
+
 function resetPlane(){
   plane.position.set(MAIN_AP.x, MAIN_AP.elev + GEAR_H, MAIN_AP.z + MAIN_AP.len/2 - 100);
   plane.quaternion.identity();
@@ -6900,6 +7024,14 @@ function startMission(mode){
     state.hopDone = false;
     state.hopStartMs = performance.now();
     state.hopElapsedMs = 0;
+    // Hop legs each get their own discrete squawk code, just like a real
+    // IFR clearance. tickSquawk will still latch 7700 over the top of this
+    // for any active emergency.
+    assignHopLegSquawk();
+  } else {
+    // Every other mode (free / tng / ring / carrier / wing) is VFR; show
+    // the standard 1200 unless an emergency overrides it.
+    resetSquawkVFR();
   }
   // Carrier mission: clear the trap-counter so a fresh run starts at zero.
   // First trap inside the deck touchdown box fires the ceremonial banner;
@@ -8296,8 +8428,14 @@ function step(dt){
               // Fire ceremonial banner + fanfare on the very last leg — the
               // existing #status pill still shows the per-landing score detail.
               showMissionDone('MISSION COMPLETE', 'Airport Hop · ' + fmtHopTime(state.hopElapsedMs) + ' · +' + state.scoreTotal);
+              // Hop is done; drop back to VFR 1200 so the squawk pill matches
+              // the rest of the post-mission HUD.
+              resetSquawkVFR();
             } else {
               extra = ' · next: ' + state.hopOrder[state.hopIdx];
+              // Fresh leg, fresh squawk. Real-world clearances do the same
+              // whenever you switch to a new departure controller.
+              assignHopLegSquawk();
             }
           } else {
             extra = ' · wrong field, want ' + want;
@@ -12066,6 +12204,10 @@ function loop(now){
   // Also skipped while paused so the timeline doesn't drift behind the modal.
   if (!state.introOpen && !state.photoMode && !state.paused){
     tickATC(now);
+    // Squawk transponder: latch 7700 on emergencies, restore prior code
+    // once everything has calmed down. Cheap state-machine, runs every
+    // frame because the underlying conditions are already-cached booleans.
+    tickSquawk();
   }
   updateRainOverlay(dt);
   updateBirdSplat(dt);
@@ -12102,7 +12244,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','sunGlare','bino','crashcard','landcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','vsi','glide','ils','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','replay','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','sunGlare','bino','crashcard','landcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
