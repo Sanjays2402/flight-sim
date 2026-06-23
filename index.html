@@ -15077,9 +15077,30 @@ function step(dt){
         }
         state.tgLastTdMs = _tgNow;
         state.tgAirborneAfterTd = false;
-        if (state.tgStreak > (pilotStats.bestTgStreak || 0)){
+        // Snapshot the prior lifetime peak BEFORE we bump it so the
+        // "NEW BEST STREAK" toast fires the first touchdown that ties
+        // or beats it, and again on every touchdown that extends the
+        // new record (each level is naturally one-shot because the
+        // streak only ever increments by exactly 1 per landing).
+        const _tgPriorBest = pilotStats.bestTgStreak || 0;
+        if (state.tgStreak > _tgPriorBest){
           pilotStats.bestTgStreak = state.tgStreak;
           savePilotStats();
+        }
+        // Fire the celebratory green toast when the live streak ties or
+        // beats the prior lifetime peak. Gated to free/tng modes the
+        // way the streak counter already is, and hidden in photo /
+        // pause / replay / intro / crash so saved frames stay clean.
+        if (state.tgStreak >= 2 && _tgPriorBest >= 1
+            && state.tgStreak >= _tgPriorBest
+            && (state.mode === 'free' || state.mode === 'tng')
+            && !state.photoMode && !state.paused && !state.replayActive
+            && !state.introOpen && !state.crashed
+            && typeof showToast === 'function'){
+          const _tgBeat = state.tgStreak > _tgPriorBest;
+          showToast('\u{1F525}', 'NEW BEST STREAK \u00d7' + state.tgStreak,
+            _tgBeat ? 'New personal best \u2014 keep them coming.'
+                    : 'Tied your lifetime best \u2014 one more for the record.');
         }
         let extra = '';
         // Airport-hop progression: only count landings at the current target field.
