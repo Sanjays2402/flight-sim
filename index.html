@@ -2452,6 +2452,94 @@ function makeTaxiArrows(a){
 }
 for (const a of AIRPORTS) makeTaxiArrows(a);
 
+// ====== TAXIWAY SIGNS ======
+// Static airport signs at the two taxiway/runway intersections at each ground
+// airport — one cluster at each runway threshold on the +x taxi-strip side.
+// Each cluster sits on a low post and carries two panels:
+//   - red mandatory-instruction sign with white block letters "<DD>-<DD>" so
+//     the runway-holding point reads the same way real airports paint it.
+//     Uses runwayDesignator() so the digits always match the painted runway
+//     numbers and the ATC callouts ("36-18" at KSEA, "02-20" at KHIL,
+//     "09-27" at KLAK).
+//   - yellow location sign with black letters naming the taxiway segment
+//     ("A1" at the threshold matching a.hdg's landing direction, "A2" at the
+//     opposite end). Cheap immersion upgrade that finally makes the apron-
+//     to-runway taxi feel like a real airport. Pairs naturally with the
+//     existing taxi guidance arrows and the marshaller.
+function makeTaxiwaySigns(a){
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // "<DD>-<DD>" with the lower designator first (real ICAO convention).
+  const dA = parseInt(runwayDesignator(a.hdg), 10);
+  const dB = parseInt(runwayDesignator(a.hdg + Math.PI), 10);
+  const lo = Math.min(dA, dB), hi = Math.max(dA, dB);
+  const holdLabel = String(lo).padStart(2,'0') + '-' + String(hi).padStart(2,'0');
+  // Render a sign panel into a 256x96 canvas (~2.67:1 aspect). Letters are
+  // sized to fill the inset like real FAA signage. Same helper drives both
+  // the red mandatory and the yellow location panels so they read consistent.
+  function makePanelTexture(label, bgHex, fgHex, borderHex){
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+    const cx = cv.getContext('2d');
+    cx.fillStyle = bgHex; cx.fillRect(0, 0, cv.width, cv.height);
+    // Inset border (white on red, black on yellow) — matches FAA layout.
+    cx.strokeStyle = borderHex; cx.lineWidth = 6;
+    cx.strokeRect(6, 6, cv.width - 12, cv.height - 12);
+    cx.fillStyle = fgHex;
+    cx.font = 'bold 64px ui-monospace, "SF Mono", Menlo, monospace';
+    cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    cx.fillText(label, cv.width/2, cv.height/2 + 2);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  }
+  // Build one sign cluster at a given (lx, lz) on the +x side of the runway,
+  // facing along the taxi strip so a pilot rolling toward the threshold sees
+  // both panels broadside. taxiLabel names the taxiway segment.
+  function buildCluster(lx, lz, taxiLabel){
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, 1.1, 6),
+      new THREE.MeshLambertMaterial({ color: 0x9aa0a6 })
+    );
+    post.position.set(lx, 0.55, lz);
+    grp.add(post);
+    // Red mandatory "hold short" panel on top, yellow location panel below.
+    // Width ~2.2m, height ~0.8m — visible from the taxi strip without towering
+    // over taxiing aircraft. Two-sided so both directions of taxi traffic read
+    // them (a pilot back-taxiing for the opposite threshold sees the same
+    // hold-short label, which is correct).
+    const panelGeo = new THREE.PlaneGeometry(2.2, 0.8);
+    const redTex = makePanelTexture(holdLabel, '#b8231c', '#ffffff', '#ffffff');
+    const redMat = new THREE.MeshBasicMaterial({
+      map: redTex, transparent: false, side: THREE.DoubleSide
+    });
+    const redPanel = new THREE.Mesh(panelGeo, redMat);
+    // Face the +z direction in local space (the taxi strip runs ±z), so the
+    // panel broadside reads to a pilot rolling along the strip.
+    redPanel.position.set(lx, 1.45, lz);
+    grp.add(redPanel);
+    const yellowTex = makePanelTexture(taxiLabel, '#f0c41a', '#111111', '#111111');
+    const yellowMat = new THREE.MeshBasicMaterial({
+      map: yellowTex, transparent: false, side: THREE.DoubleSide
+    });
+    const yellowPanel = new THREE.Mesh(panelGeo, yellowMat);
+    yellowPanel.position.set(lx, 0.65, lz);
+    grp.add(yellowPanel);
+  }
+  // Place one cluster at each runway threshold on the +x taxi-strip side,
+  // just inboard of the threshold so a taxiing pilot meets the hold-short
+  // sign before crossing onto the runway. stripX matches the chevron row so
+  // the signs sit at the natural taxiway/runway intersection point. The
+  // label pair is fixed (A1 at -z end, A2 at +z end) so a pilot looking at
+  // "A1" on the mini-map can correlate with the painted name in-world.
+  const signX = a.w/2 + 5;            // just off the runway edge, inboard of stripX (a.w/2 + 9)
+  buildCluster(signX, -a.len/2 - 4, 'A1');   // -z threshold (lands flying +z)
+  buildCluster(signX,  a.len/2 + 4, 'A2');   // +z threshold (lands flying -z)
+}
+for (const a of AIRPORTS) makeTaxiwaySigns(a);
+
 function updateTaxiArrows(dt){
   // Cheap visibility gate: only on the ground and within range of an airport.
   // Nearest-airport distance is recomputed every frame in step() but we want
