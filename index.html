@@ -9230,6 +9230,14 @@ function pickBurgerAirport(excludeId){
   return pool[Math.floor(Math.random() * pool.length)].id;
 }
 state.burgerAp = pickBurgerAirport(null);
+// Wind-shift tower call: per-airport memory of the wind FROM degrees the
+// last time the player full-stopped (technically: dropped through 25 km/h)
+// on a runway at that field. Used by updateLandCardRollout() to fire a
+// one-shot TWR "winds now ..." advisory when wind has swung > 30 deg since
+// the previous landing on that airport. Survives resetPlane() / mission
+// changes by design — the call is about session-level wind shifts between
+// sorties, not about a single flight's rollout. Keys are airport ids.
+state.lastLandWind = {};
 (function setupAirshowSmokeBtn(){
   // Wire the on-screen `~` HUD button to the same toggle the keyboard uses.
   // Click works on desktop; touch devices also trigger click on tap. The
@@ -10364,6 +10372,46 @@ function updateLandCardRollout(){
   const m = Math.hypot(dx, dz);
   if (m > d.rolloutM) d.rolloutM = m;
   const gs = Math.hypot(state.vel.x, state.vel.z);
+  // Wind-shift tower call: the wind-shear system shouts shear on short final
+  // but goes silent once the wheels are down. The moment ground speed drops
+  // below ~25 km/h on a runway (still rolling, just slow enough that it's
+  // clearly a landing not a touch-and-go), check whether wind has swung more
+  // than 30 deg since the previous landing on this airport. If so, tower
+  // fires a one-shot "<id> winds now <DDD> at <KT>, advise." call. Either
+  // way we stamp state.lastLandWind[id] with the current FROM heading so the
+  // NEXT landing on this field has a fresh baseline. d.windShiftFired latches
+  // per-rollout so we only run this check + ATC push once. Carrier deck is
+  // skipped via the AIRPORTS.indexOf gate (carrier id isn't in AIRPORTS).
+  if (!d.windShiftFired && gs < (25/3.6)){
+    try {
+      const proj2 = (typeof landingProj === 'function')
+        ? landingProj(plane.position.x, plane.position.z)
+        : null;
+      if (proj2 && proj2.ri && proj2.onRunway && proj2.ri.ap
+          && typeof AIRPORTS !== 'undefined' && AIRPORTS.indexOf(proj2.ri.ap) !== -1){
+        d.windShiftFired = true;
+        const apId = proj2.ri.ap.id;
+        const wx = state.wind ? state.wind.x : 0;
+        const wz = state.wind ? state.wind.z : 0;
+        const wSpd = Math.hypot(wx, wz);
+        let fromDeg = Math.atan2(-wx, -wz) * 180/Math.PI;
+        if (fromDeg < 0) fromDeg += 360;
+        const prev = state.lastLandWind ? state.lastLandWind[apId] : undefined;
+        if (typeof prev === 'number'){
+          // Shortest-arc delta in degrees (0..180), wrap-safe.
+          const delta = Math.abs(((fromDeg - prev + 540) % 360) - 180);
+          if (delta > 30 && typeof pushATC === 'function' && !state.crashed){
+            const kt = Math.round(wSpd * 1.94384);
+            const dirStr = String(Math.round(fromDeg / 10) * 10 % 360).padStart(3,'0');
+            const tail = (kt < 3) ? 'calm' : (dirStr + ' at ' + kt);
+            pushATC(apId + ' winds now ' + tail + ', advise.', { tag:'TWR' });
+          }
+        }
+        if (!state.lastLandWind) state.lastLandWind = {};
+        state.lastLandWind[apId] = fromDeg;
+      }
+    } catch(e){ /* wind-shift call is flavor — never block the land card */ }
+  }
   if (lcRollEl){
     lcRollEl.textContent = Math.round(d.rolloutM) + ' m';
     lcRollEl.className = 'val' + (d.rolloutM >= 1800 ? ' bad'
