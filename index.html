@@ -9258,6 +9258,10 @@ function resetPlane(){
   // respective thresholds (see step()).
   state.fuelWarnLow = false;
   state.fuelWarnCrit = false;
+  // Bingo-fuel auto-divert latch: one-shot per sortie so a fresh take-off
+  // re-arms. Clears here on resetPlane and also re-arms inside step() once
+  // the range cushion grows back past 1.6× the distance to the nearest field.
+  state.bingoLatch = false;
   // ATIS cooldown: a hot reset re-arms the Shift+A broadcast immediately so
   // the player can grab a fresh weather read the moment the new sortie starts.
   state.atisCooldownUntil = 0;
@@ -12054,6 +12058,79 @@ function step(dt){
   // the threshold while we're sipping the last drop.
   if (state.fuelWarnLow && state.fuel >= 0.25) state.fuelWarnLow = false;
   if (state.fuelWarnCrit && state.fuel >= 0.15) state.fuelWarnCrit = false;
+  // Bingo fuel auto-suggest divert. Mirrors the cockpit FUEL FLOW gph curve
+  // and the mini-map fuel range ring so the three readouts stay coherent:
+  // when our straight-line range at current burn drops under 1.2× the
+  // distance to the nearest ground airport, fire a one-shot PILOT "Bingo
+  // fuel, diverting <id>" and drop a magenta waypoint pin on that field so
+  // the existing bearing/distance/AP heading-hold plumbing literally points
+  // the pilot at where to land. Free-flight only (matches the rest of the
+  // waypoint contract), gated on a live burning engine + fuel left + no
+  // existing waypoint (so we never stomp a pilot already routing somewhere
+  // on purpose). Latches once per sortie; the latch clears once the cushion
+  // grows back past ~1.6× (refuel pit stop, throttle pulled, divert
+  // completed) so a future leg can re-arm. Carrier is intentionally skipped
+  // from the divert pool — a default "go to CV-01" on a water-shy bingo is
+  // a worse outcome than the existing low-fuel ATC nudges.
+  if (!state.bingoLatch
+      && state.mode === 'free'
+      && !state.engineOut
+      && !state.coldStart
+      && state.fuel > 0.001
+      && !state.waypoint
+      && !state.crashed && !state.replayActive && !state.photoMode
+      && !state.introOpen && !state.paused){
+    // gph proxy matches drawCockpitFf() + the minimap range ring exactly so
+    // the cockpit gauge, the dashed ring, and this auto-divert all agree on
+    // what "burn rate" means right now.
+    const _tt = Math.max(0, Math.min(1, state.throttle));
+    const _gphProxy = 2 + 14 * (0.7 * _tt + 0.3 * _tt * _tt);
+    if (_gphProxy > 0.05){
+      const _perSec = _gphProxy / 5760;       // matches range-ring calibration
+      const _secLeft = state.fuel / _perSec;
+      const _rangeM = _secLeft * (210 / 3.6); // CRUISE_KMH = 210, same as ring
+      // Closest GROUND airport (carrier skipped on purpose — see above).
+      let _bestAp = null, _bestD = 1e9;
+      for (const a of AIRPORTS){
+        const d = Math.hypot(a.x - plane.position.x, a.z - plane.position.z);
+        if (d < _bestD){ _bestD = d; _bestAp = a; }
+      }
+      if (_bestAp && _rangeM < _bestD * 1.2){
+        state.bingoLatch = true;
+        state.waypoint = { x: _bestAp.x, z: _bestAp.z };
+        state.ap.wpFollow = false;
+        const _distKm = _bestD / 1000;
+        showStatus('BINGO FUEL', 'DIVERT → ' + _bestAp.id + ' · ' + _distKm.toFixed(1) + ' km', 'hard');
+        pushATC('Bingo fuel, diverting ' + _bestAp.id + '.', { tag:'PILOT', now:true });
+      }
+    }
+  }
+  // Re-arm the bingo latch once the cushion grows back (refuel, throttle
+  // pulled, divert completed). Hysteresis keeps it from chattering across
+  // the trigger line.
+  if (state.bingoLatch){
+    if (state.fuel <= 0.001){
+      state.bingoLatch = false;
+    } else {
+      const _tt2 = Math.max(0, Math.min(1, state.throttle));
+      const _gphProxy2 = 2 + 14 * (0.7 * _tt2 + 0.3 * _tt2 * _tt2);
+      if (_gphProxy2 > 0.05){
+        const _perSec2 = _gphProxy2 / 5760;
+        const _secLeft2 = state.fuel / _perSec2;
+        const _rangeM2 = _secLeft2 * (210 / 3.6);
+        let _bestD2 = 1e9;
+        for (const a of AIRPORTS){
+          const d = Math.hypot(a.x - plane.position.x, a.z - plane.position.z);
+          if (d < _bestD2) _bestD2 = d;
+        }
+        if (_rangeM2 >= _bestD2 * 1.6) state.bingoLatch = false;
+      } else {
+        // Engine sipping nothing measurable (idle taxi, ground stopped) —
+        // safe to re-arm so the next throttled climb gets a fresh check.
+        state.bingoLatch = false;
+      }
+    }
+  }
   // Refuel on the ground at an airport apron. Conditions: wheels on the deck,
   // crawling or stopped, throttle pulled to idle, and parked inside an airport's
   // apron rectangle (the wider grey pad around each runway). Refill rate fills
