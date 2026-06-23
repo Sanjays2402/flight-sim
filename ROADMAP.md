@@ -164,6 +164,16 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Engine start checklist toast — when the player first taps `I` to ignite from cold, fire a 3-line checklist toast ("FUEL ON ✓ MIXTURE RICH ✓ MAGS BOTH ✓") that fades over ~2.5s. Pure flavor over the existing cold-start sequence — no new physics, no new gating — but it makes the ignition ritual feel like cranking a real plane instead of pressing a button. Hidden in photo / replay / pause via the same pattern as the bird-strike splatter.
+
+- [ ] Compass card click-to-bug — clicking anywhere on the compass strip at the top of the HUD now drops the heading bug onto the bearing under the click (snapping to the nearest degree). Pairs with the existing `[` / `]` nudges so pilots can either fine-tune with keys or drop a coarse bug with a tap. Tiny LOC (single click handler + getBoundingClientRect math), massive UX win for mouse + touch players.
+
+- [ ] Runway numbers painted on the threshold — each runway gets its two-digit designator (`27`, `09`, `36`, etc.) painted in large white block letters at both ends, centered between the centerline stripes about 30 m in from the threshold. Uses the existing `runwayDesignator()` helper so the numbers always match the ATC callouts. Free immersion upgrade on every approach, makes "land on 27" actually mean something visually instead of just being a number in the ticker.
+
+- [ ] Map clip-to-airport on the mini-map — double-click an airport icon on the mini-map to auto-set that airport as a magenta waypoint (same pin the existing single-click waypoint uses). Saves the "squint at the icon, find the lat/long, drop pin nearby" dance. Reuses the waypoint plumbing entirely, just a new dblclick handler that snaps the pin to the airport center.
+
+- [ ] ATC line on takeoff clearance — when the player first advances throttle past 70% on a runway with brakes off, fire a one-shot TWR call "<id>, cleared for takeoff RWY <DD>, wind <DDD> at <NN>." Uses the existing `runwayDesignator()` + wind state. Pairs with the existing arrival + airborne callouts so the full takeoff loop now sounds like real radio chatter instead of just "airborne" at rotation. Re-arms after a full stop so touch-and-go patterns get fresh clearances each time.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
