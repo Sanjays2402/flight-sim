@@ -761,6 +761,23 @@
   #jumpsel .ap.notam .meta { color:#ffd166; }
   #jumpsel .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
   #jumpsel kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
+  /* Approach plate sketch (P inside the J overlay): compact top-down
+     diagram swapped in place of the airport list. Pure read-only; closes
+     back to the list with P / BACK and closes the whole overlay with Esc/J. */
+  #jumpsel .plate { display:none; flex-direction:column; gap:8px; margin-bottom:10px; text-align:left; }
+  #jumpsel.plate-on .list { display:none; }
+  #jumpsel.plate-on .plate { display:flex; }
+  #jumpsel .plate .head { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; }
+  #jumpsel .plate .head .id { color:#7ee787; font-weight:800; letter-spacing:2px; font-size:13px; }
+  #jumpsel .plate .head .nm { color:#cfe; font-weight:600; font-size:11px; flex:1 1 auto; }
+  #jumpsel .plate .head .back { color:#ffd166; font-size:10px; padding:3px 8px; border-radius:4px; border:1px solid #ffd166; background:rgba(60,45,15,.35); cursor:pointer; font-family:inherit; letter-spacing:1px; }
+  #jumpsel .plate .head .back:hover { background:rgba(80,60,20,.6); }
+  #jumpsel .plate canvas { width:100%; height:200px; display:block; background:#0a141c; border:1px solid #2a4a6a; border-radius:6px; }
+  #jumpsel .plate .info { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:10px; letter-spacing:1px; padding:6px 10px; border-radius:6px; background:rgba(20,40,60,.55); border:1px solid #2a4a6a; }
+  #jumpsel .plate .info .k { color:#9bb; }
+  #jumpsel .plate .info .v { color:#cfe; font-family:'JetBrains Mono','Menlo',monospace; }
+  #jumpsel .plate .info .v.acc { color:#7ee787; }
+  #jumpsel .plate .nav { display:flex; gap:6px; justify-content:center; font-size:10px; color:#9bb; letter-spacing:1px; }
   /* Transponder squawk keypad: same modal vibe as #jumpsel. Opens with K
      (toggle), displays the current 4-digit entry, an octal keypad (0-7 +
      Backspace + CLR + ENT), and four big preset buttons for the standard
@@ -1254,7 +1271,17 @@
     <h2>QUICK JUMP</h2>
     <div class="sub">PICK A FIELD</div>
     <div class="list" id="jumpList"></div>
-    <div class="hint">press <kbd>1</kbd>–<kbd>9</kbd> to jump · hold <kbd>Shift</kbd> for opposite end · <kbd>J</kbd>/<kbd>Esc</kbd> to cancel</div>
+    <div class="plate" id="jumpPlate">
+      <div class="head">
+        <span class="id" id="jumpPlateId">----</span>
+        <span class="nm" id="jumpPlateNm">Plate</span>
+        <button type="button" class="back" id="jumpPlateBack">← LIST</button>
+      </div>
+      <canvas id="jumpPlateCanvas" width="560" height="400"></canvas>
+      <div class="info" id="jumpPlateInfo"></div>
+      <div class="nav">press <kbd>1</kbd>–<kbd>9</kbd> to swap field · <kbd>P</kbd> back to list</div>
+    </div>
+    <div class="hint">press <kbd>1</kbd>–<kbd>9</kbd> to jump · hold <kbd>Shift</kbd> for opposite end · <kbd>P</kbd> plate · <kbd>J</kbd>/<kbd>Esc</kbd> to cancel</div>
   </div>
 </div>
 <div id="sqkeypad">
@@ -1379,7 +1406,7 @@
       <span>Ignition crank (cold start / restart)</span><span><kbd>I</kbd></span>
       <span>Time skip (+1h)</span><span><kbd>T</kbd> · <kbd>Shift</kbd>+<kbd>T</kbd> = -1h</span>
       <span>Pause menu</span><span><kbd>Esc</kbd></span>
-      <span>Quick-jump airport</span><span><kbd>J</kbd>, <kbd>1</kbd>–<kbd>9</kbd> · <kbd>Shift</kbd>+digit = other end</span>
+      <span>Quick-jump airport</span><span><kbd>J</kbd>, <kbd>1</kbd>–<kbd>9</kbd> · <kbd>Shift</kbd>+digit = other end · <kbd>P</kbd> = plate</span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
     <div class="tip" id="helpRotateTip">
@@ -10401,6 +10428,14 @@ const state = {
   // matching airport's runway threshold (free-flight only). Other Esc/keyboard
   // handlers check this gate so the overlay's Esc/J close path wins cleanly.
   jumpOpen: false,
+  // Approach plate sketch sub-mode of the J overlay. -1 = list view (default),
+  // 0..AIRPORTS.length-1 = showing that airport's plate. Pressing P inside
+  // the J overlay toggles between the list and the plate of the first
+  // selectable airport; from plate mode, digits 1-9 swap which field's plate
+  // is shown without teleporting, and P / BACK returns to the list. Esc/J
+  // closes the whole overlay either way. Pure read-only — the plate never
+  // affects flight state.
+  jumpPlateIdx: -1,
   // #sqkeypad transponder keypad modal is visible. Same gate idea as
   // jumpOpen: the K-toggle handler and any Esc consumer check this so the
   // keypad's own close path wins cleanly before falling through to pause.
@@ -11390,9 +11425,12 @@ addEventListener('keydown', e=>{
     }
     // Photo mode toggle. Skip while the intro modal is up (no plane in the
     // world yet) or during replay (the replay banner is already playing back
-    // a fixed segment). Defined globally; the setup function below wires the
-    // overlay, drag-to-orbit, wheel-zoom, and save behavior.
+    // a fixed segment). Also skip while the J quick-jump overlay is showing
+    // its approach-plate sketch — in that mode P toggles back to the list.
+    // Defined globally; the setup function below wires the overlay,
+    // drag-to-orbit, wheel-zoom, and save behavior.
     if (state.introOpen || state.replayActive) return;
+    if (state.jumpOpen) return;
     setPhotoMode(!state.photoMode);
   }
   if (e.code==='KeyY'){
@@ -28027,6 +28065,16 @@ updateCamModeUi();
   const panel    = document.getElementById('jumpsel');
   const listEl   = document.getElementById('jumpList');
   if (!panel || !listEl) return;
+  // Plate sub-mode elements — optional (legacy HTML may not have them, in
+  // which case the P-toggle bails silently and the rest of the overlay
+  // keeps working).
+  const plateEl   = document.getElementById('jumpPlate');
+  const plateCv   = document.getElementById('jumpPlateCanvas');
+  const plateIdEl = document.getElementById('jumpPlateId');
+  const plateNmEl = document.getElementById('jumpPlateNm');
+  const plateInfo = document.getElementById('jumpPlateInfo');
+  const plateBack = document.getElementById('jumpPlateBack');
+  const plateCtx  = plateCv ? plateCv.getContext('2d') : null;
 
   // Teleport the plane to ap's runway threshold, mirroring resetPlane()'s
   // pose math but for the chosen field. Throttle is bumped to 30% so the
@@ -28176,6 +28224,282 @@ updateCamModeUi();
     if (state.ilskeypadOpen) return false;
     return true;
   }
+
+  // ===== Approach plate sketch =====
+  // Top-down read-only chart of an airport: runway box with both threshold
+  // designators painted at each end, dashed left-hand traffic pattern box
+  // (reuses the mini-map pattern-entry geometry: 1.5 km lateral, 2 km past
+  // either threshold), a wind sock arrow pointing INTO the wind (matches the
+  // physical sock orientation so the chart agrees with the world), field
+  // elevation, and a fake CTAF frequency. Below the canvas, a compact text
+  // block lists LENGTH / SURFACE / PATTERN. Pure pixel painting — no scene
+  // objects, no flight-state mutation.
+  //
+  // Fake CTAF: deterministic per-airport so it doesn't flicker between opens.
+  // Real CTAFs are in the 122.7–122.975 MHz UNICOM band; we pick from that
+  // pool using a tiny hash on the airport id.
+  function fakeCtaf(ap){
+    const pool = ['122.700','122.725','122.750','122.800','122.825','122.875','122.900','122.925','122.975'];
+    let h = 0;
+    for (let i = 0; i < ap.id.length; i++) h = ((h << 5) - h + ap.id.charCodeAt(i)) | 0;
+    return pool[Math.abs(h) % pool.length];
+  }
+
+  function drawPlateCanvas(ap){
+    if (!plateCv || !plateCtx) return;
+    // Use the CSS-displayed size so the chart fills the box without DPR
+    // blur — the canvas attributes default to 560x400 but the .plate canvas
+    // CSS pins width:100%. We re-size the backing store to match the actual
+    // displayed pixel count + DPR each open so the chart stays crisp.
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const cssW = plateCv.clientWidth  || 320;
+    const cssH = plateCv.clientHeight || 200;
+    if (plateCv.width  !== Math.round(cssW * dpr)) plateCv.width  = Math.round(cssW * dpr);
+    if (plateCv.height !== Math.round(cssH * dpr)) plateCv.height = Math.round(cssH * dpr);
+    const W = plateCv.width, H = plateCv.height;
+    const ctx = plateCtx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Background + dotted reference grid so the chart reads as a sketch.
+    ctx.fillStyle = '#0a141c';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(126,231,135,0.07)';
+    ctx.lineWidth = 1;
+    const gridStep = Math.round(40 * dpr);
+    for (let x = gridStep; x < W; x += gridStep){
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = gridStep; y < H; y += gridStep){
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    // World-to-canvas scale: pattern box spans roughly
+    //   ~(len + 2 * 2000)m along the strip and ~(2 * 1500)m across.
+    // Reserve a margin so labels + sock fit; use whichever axis hits limit
+    // first so neither dimension overflows.
+    const PG_LAT_M   = 1500;
+    const PG_FINAL_M = 2000;
+    const spanAlong = ap.len + 2 * PG_FINAL_M;
+    const spanLat   = 2 * PG_LAT_M;
+    const margin = Math.round(34 * dpr);
+    // Plate "up" = runway forward. Width axis = lateral. So:
+    //   canvas Y maps to along (runway axis)
+    //   canvas X maps to lat   (perpendicular)
+    const scaleY = (H - 2 * margin) / spanAlong;
+    const scaleX = (W - 2 * margin) / spanLat;
+    const scale  = Math.min(scaleX, scaleY);
+    const cx = W / 2, cy = H / 2;
+    // Helper: along (+ = runway forward), lat (- = LEFT of centerline).
+    const px = (al, la) => cx + la * scale;
+    const py = (al, la) => cy - al * scale;
+    // Pattern box (dashed magenta, left-hand traffic). Sits ON the centerline
+    // for crosswind + final and at -PG_LAT for downwind — same geometry the
+    // mini-map already draws live.
+    const halfLen = ap.len / 2;
+    const corners = [
+      [ halfLen + PG_FINAL_M, 0          ],
+      [ halfLen + PG_FINAL_M, -PG_LAT_M  ],
+      [-halfLen - PG_FINAL_M, -PG_LAT_M  ],
+      [-halfLen - PG_FINAL_M, 0          ]
+    ];
+    ctx.strokeStyle = 'rgba(255,108,247,0.55)';
+    ctx.lineWidth = 1.4 * dpr;
+    ctx.setLineDash([5 * dpr, 4 * dpr]);
+    ctx.beginPath();
+    ctx.moveTo(px(corners[0][0], corners[0][1]), py(corners[0][0], corners[0][1]));
+    for (let i = 1; i < corners.length; i++){
+      ctx.lineTo(px(corners[i][0], corners[i][1]), py(corners[i][0], corners[i][1]));
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Tiny leg labels along the pattern.
+    ctx.fillStyle = 'rgba(255,108,247,0.85)';
+    ctx.font = (10 * dpr) + "px 'JetBrains Mono','Menlo',monospace";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('DOWNWIND', px(0, -PG_LAT_M) - 0, py(0, -PG_LAT_M));
+    ctx.fillText('BASE',     px(halfLen + PG_FINAL_M, -PG_LAT_M/2),  py(halfLen + PG_FINAL_M, -PG_LAT_M/2));
+    ctx.fillText('FINAL',    px(halfLen + PG_FINAL_M/2, 6),          py(halfLen + PG_FINAL_M/2, 6));
+    ctx.fillText('CROSSWIND',px(-halfLen - PG_FINAL_M, -PG_LAT_M/2), py(-halfLen - PG_FINAL_M, -PG_LAT_M/2));
+    // Runway rectangle (dark grey fill, light edge).
+    const rwHalfW = Math.max(2 * dpr, (ap.w / 2) * scale);
+    const rwHalfL = (ap.len / 2) * scale;
+    ctx.fillStyle = '#1c2530';
+    ctx.fillRect(cx - rwHalfW, cy - rwHalfL, rwHalfW * 2, rwHalfL * 2);
+    ctx.strokeStyle = '#7ee787';
+    ctx.lineWidth = 1.2 * dpr;
+    ctx.strokeRect(cx - rwHalfW, cy - rwHalfL, rwHalfW * 2, rwHalfL * 2);
+    // Centerline dashed.
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1 * dpr;
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - rwHalfL);
+    ctx.lineTo(cx, cy + rwHalfL);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Runway designators at each threshold. forward threshold (along +halfLen)
+    // is reached by a plane flying TOWARD ap.hdg, so it gets the reciprocal
+    // designator (hdg + π); the negative-along end gets ap.hdg.
+    let desigFwd = '--', desigRev = '--';
+    if (typeof runwayDesignator === 'function'){
+      desigFwd = runwayDesignator(ap.hdg + Math.PI);
+      desigRev = runwayDesignator(ap.hdg);
+    }
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold ' + (16 * dpr) + "px 'JetBrains Mono','Menlo',monospace";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(desigFwd, cx, cy - rwHalfL + 12 * dpr);
+    ctx.fillText(desigRev, cx, cy + rwHalfL - 12 * dpr);
+    // Wind sock arrow: points INTO the wind (which way you take off / land
+    // into the breeze). Wind vector points TO direction wind blows; "from"
+    // is the opposite. Show in the top-right corner with a wind-speed pill.
+    const wx = (state && state.wind) ? state.wind.x : 0;
+    const wz = (state && state.wind) ? state.wind.z : 0;
+    const wSpd = Math.hypot(wx, wz);
+    const wAng = (wSpd > 0.3) ? Math.atan2(-wz, -wx) : 0; // world angle pointing FROM the wind
+    const sockCx = W - margin * 0.9;
+    const sockCy = margin * 0.95;
+    const sockR  = 22 * dpr;
+    // Compass disc backdrop so the arrow has context.
+    ctx.fillStyle = 'rgba(20,40,60,0.85)';
+    ctx.beginPath(); ctx.arc(sockCx, sockCy, sockR, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#2a4a6a'; ctx.lineWidth = 1 * dpr;
+    ctx.beginPath(); ctx.arc(sockCx, sockCy, sockR, 0, Math.PI*2); ctx.stroke();
+    // Tiny N tick at top of disc.
+    ctx.fillStyle = '#9bb';
+    ctx.font = 'bold ' + (8 * dpr) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', sockCx, sockCy - sockR + 6 * dpr);
+    if (wSpd > 0.3){
+      // Arrow: tail to head along wAng (atan2 of wind-FROM vector in world
+      // XZ, mapped to canvas where +x=east(right) and +z=south(down) so the
+      // disc reads as a north-up compass without any sign flips on y).
+      const ax = sockCx + Math.cos(wAng) * (sockR - 3 * dpr);
+      const ay = sockCy + Math.sin(wAng) * (sockR - 3 * dpr);
+      const bx = sockCx - Math.cos(wAng) * (sockR - 3 * dpr);
+      const by = sockCy - Math.sin(wAng) * (sockR - 3 * dpr);
+      ctx.strokeStyle = '#ff7a3a';
+      ctx.lineWidth = 2.4 * dpr;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ax, ay); ctx.stroke();
+      // Arrowhead at the head end — same canvas-Y-down rotation as the
+      // shaft so the wedge stays aligned with the line direction.
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(wAng);
+      ctx.fillStyle = '#ff7a3a';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-6 * dpr, -4 * dpr);
+      ctx.lineTo(-6 * dpr,  4 * dpr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else {
+      // Dead calm — dot in the middle so the disc doesn't read as a missing
+      // glyph.
+      ctx.fillStyle = '#9bb';
+      ctx.beginPath(); ctx.arc(sockCx, sockCy, 2 * dpr, 0, Math.PI*2); ctx.fill();
+    }
+    // Wind speed pill under the disc.
+    ctx.fillStyle = '#cfe';
+    ctx.font = 'bold ' + (9 * dpr) + "px 'JetBrains Mono','Menlo',monospace";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const wKt = Math.round(wSpd * 1.94384);
+    ctx.fillText(wKt + ' KT', sockCx, sockCy + sockR + 3 * dpr);
+    // RWY-UP note in the bottom-left so the player knows the diagram is
+    // rotated to put the runway vertical (the wind-rose inset above stays
+    // north-up, standard chart convention).
+    ctx.fillStyle = '#9bb';
+    ctx.font = (9 * dpr) + "px 'JetBrains Mono','Menlo',monospace";
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('RWY-UP', 6 * dpr, H - 6 * dpr);
+    ctx.restore();
+  }
+
+  function renderPlate(idx){
+    if (!plateEl || !plateInfo) return;
+    // Bail if the panel was closed (or plate mode dropped) between schedule
+    // and execution — prevents the deferred rAF from re-asserting a stale
+    // jumpPlateIdx after a fast J/Esc dismiss.
+    if (!state.jumpOpen) return;
+    const ap = AIRPORTS[idx];
+    if (!ap) return;
+    state.jumpPlateIdx = idx;
+    if (plateIdEl) plateIdEl.textContent = ap.id;
+    if (plateNmEl) plateNmEl.textContent = ap.name;
+    drawPlateCanvas(ap);
+    // Compose the info rows. Most are static per-airport, ATIS/wind is live.
+    let desigFwd = '--', desigRev = '--';
+    if (typeof runwayDesignator === 'function'){
+      desigFwd = runwayDesignator(ap.hdg + Math.PI);
+      desigRev = runwayDesignator(ap.hdg);
+    }
+    const rwyDesig = desigFwd + '/' + desigRev;
+    const ctaf = fakeCtaf(ap);
+    const closedNote = (typeof isAirportClosed === 'function' && isAirportClosed(ap)) ? ' · 🚫 NOTAM' : '';
+    const rows = [
+      ['RWY',     rwyDesig + ' (HDG ' + Math.round(((ap.hdg * 180/Math.PI) % 360 + 360) % 360) + '°)'],
+      ['LENGTH',  Math.round(ap.len) + ' m'],
+      ['WIDTH',   Math.round(ap.w) + ' m'],
+      ['SURFACE', 'PAVED' + closedNote],
+      ['ELEV',    Math.round(ap.elev) + ' m'],
+      ['PATTERN', 'LEFT'],
+      ['CTAF',    ctaf + ' MHz']
+    ];
+    let html = '';
+    for (const [k, v] of rows){
+      const vClass = (k === 'CTAF' || k === 'RWY') ? 'v acc' : 'v';
+      html += '<span class="k">' + k + '</span><span class="' + vClass + '">' + v + '</span>';
+    }
+    plateInfo.innerHTML = html;
+  }
+
+  // Pick a sensible default airport for the plate: the first row that isn't
+  // the player's current field (so the plate shows a destination, not the
+  // strip you're parked on). Fall back to index 0 if nothing else fits.
+  function defaultPlateIdx(){
+    const hereId = currentAirportId();
+    for (let i = 0; i < AIRPORTS.length; i++){
+      if (AIRPORTS[i].id !== hereId) return i;
+    }
+    return 0;
+  }
+
+  function openPlate(idx){
+    if (!plateEl) return;
+    const useIdx = (typeof idx === 'number' && idx >= 0 && idx < AIRPORTS.length) ? idx : defaultPlateIdx();
+    panel.classList.add('plate-on');
+    // Add state flag before deferred render so plate-mode key gates still
+    // resolve correctly during the same turn.
+    state.jumpPlateIdx = useIdx;
+    // Defer one rAF so clientWidth/clientHeight see the post-display layout
+    // and the canvas backing store is sized to the actual rendered box.
+    if (typeof requestAnimationFrame === 'function'){
+      requestAnimationFrame(() => renderPlate(useIdx));
+    } else {
+      renderPlate(useIdx);
+    }
+  }
+  function closePlate(){
+    if (!plateEl) return;
+    panel.classList.remove('plate-on');
+    state.jumpPlateIdx = -1;
+  }
+  function plateIsOpen(){
+    return state.jumpOpen && state.jumpPlateIdx >= 0 && !!plateEl;
+  }
+  if (plateBack){
+    plateBack.addEventListener('click', e => {
+      e.stopPropagation();
+      closePlate();
+    });
+  }
   function openPanel(){
     if (state.jumpOpen) return;
     state.jumpOpen = true;
@@ -28185,6 +28509,7 @@ updateCamModeUi();
   function closePanel(){
     if (!state.jumpOpen) return;
     state.jumpOpen = false;
+    closePlate();
     panel.classList.remove('show');
   }
 
@@ -28204,7 +28529,20 @@ updateCamModeUi();
     }
     if (!state.jumpOpen) return;
     if (e.code === 'Escape'){ e.preventDefault(); closePanel(); return; }
-    // Digit1…Digit9 (top-row) and Numpad1…Numpad9 both teleport.
+    // P toggles between the list and the approach-plate sketch. In list
+    // mode it opens the default airport's plate; in plate mode it closes
+    // back to the list. Always preventDefault so the global photo-mode
+    // P handler (which already early-returns when jumpOpen) stays inert.
+    if (e.code === 'KeyP'){
+      e.preventDefault();
+      if (plateIsOpen()) closePlate();
+      else openPlate();
+      return;
+    }
+    // Digit1…Digit9 (top-row) and Numpad1…Numpad9: in list mode they
+    // teleport, in plate mode they swap which airport's plate is shown
+    // (without teleporting) so the player can compare fields before they
+    // commit to a jump.
     let n = -1;
     if (e.code.startsWith('Digit'))  n = parseInt(e.code.slice(5), 10);
     if (e.code.startsWith('Numpad')) n = parseInt(e.code.slice(6), 10);
@@ -28212,6 +28550,10 @@ updateCamModeUi();
     e.preventDefault();
     const ap = AIRPORTS[n - 1];
     if (!ap) return;
+    if (plateIsOpen()){
+      renderPlate(n - 1);
+      return;
+    }
     const opp = !!e.shiftKey;
     closePanel();
     teleportTo(ap, opp);
