@@ -518,6 +518,34 @@
   #logbook button.danger { color:#ff8a8a; border-color:#5a2a2a; }
   #logbook button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
   #logbook button.danger:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
+  /* Photo gallery modal (/ key): mirrors #logbook but with a thumbnail grid.
+     Each cell holds a captured frame plus per-shot Download / Delete buttons.
+     Ring buffer caps at GALLERY_MAX so the localStorage payload stays under
+     the ~5 MB browser limit; entries are stored as moderate-quality JPEG
+     data URLs (smaller than PNG but still good enough to re-download). */
+  #gallery { position:fixed; inset:0; background:rgba(0,5,12,.86); display:none; align-items:center; justify-content:center; z-index:30; }
+  #gallery.show { display:flex; }
+  #gallery .card { width:760px; max-width:94vw; padding:22px 24px 18px; border:1px solid #1e3548; border-radius:12px; background:rgba(8,14,22,.96); color:#cfe; font-size:12px; }
+  #gallery h2 { font-size:20px; color:#7ee787; margin-bottom:6px; letter-spacing:2px; font-weight:800; }
+  #gallery .sub { font-size:10px; color:#7aa; letter-spacing:1px; margin-bottom:10px; }
+  #gallery .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; max-height:62vh; overflow-y:auto; padding:6px; border:1px solid rgba(30,53,72,.6); border-radius:6px; background:rgba(0,5,12,.4); }
+  #gallery .cell { position:relative; background:rgba(20,30,42,.7); border:1px solid #2a4a6a; border-radius:6px; overflow:hidden; aspect-ratio:16/9; display:flex; flex-direction:column; }
+  #gallery .cell img { width:100%; height:100%; object-fit:cover; display:block; cursor:pointer; }
+  #gallery .cell .meta { position:absolute; left:0; right:0; bottom:0; padding:3px 6px; font-size:9px; color:#cfe; background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,5,12,.78) 65%); letter-spacing:.5px; pointer-events:none; display:flex; justify-content:space-between; align-items:center; }
+  #gallery .cell .ops { position:absolute; top:4px; right:4px; display:flex; gap:4px; opacity:0; transition:opacity .15s ease; }
+  #gallery .cell:hover .ops, #gallery .cell:focus-within .ops { opacity:1; }
+  #gallery .cell .ops button { font-family:inherit; font-size:10px; font-weight:700; letter-spacing:.5px; padding:3px 6px; border-radius:4px; border:1px solid #2a4a6a; background:rgba(8,14,22,.92); color:#cfe; cursor:pointer; }
+  #gallery .cell .ops button:hover { background:rgba(40,80,110,.95); border-color:#7ee787; color:#7ee787; }
+  #gallery .cell .ops button.del { color:#ff8a8a; border-color:#5a2a2a; }
+  #gallery .cell .ops button.del:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
+  #gallery .empty { padding:36px 8px; text-align:center; color:#7aa; font-size:11px; letter-spacing:1px; line-height:1.6; }
+  #gallery .hint { font-size:10px; color:#9bb; margin:10px 0 4px; line-height:1.4; }
+  #gallery .actions { display:flex; gap:8px; margin-top:8px; }
+  #gallery button.bar { flex:1; padding:8px; border-radius:6px; background:rgba(20,40,60,.7); border:1px solid #2a4a6a; color:#cfe; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:1px; cursor:pointer; }
+  #gallery button.bar.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
+  #gallery button.bar.danger { color:#ff8a8a; border-color:#5a2a2a; }
+  #gallery button.bar:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; }
+  #gallery button.bar.danger:hover { background:rgba(80,30,30,.85); border-color:#ff5252; color:#ff5252; }
   /* Photo mode: press P to freeze the world, free-orbit the camera around the
      plane, and save a screenshot. The overlay is a small bottom-center pill
      so it stays out of the actual photo; we also hide it for one frame around
@@ -915,7 +943,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1084,7 +1112,7 @@
 </div>
 <div id="photo">
   <div class="ttl">📸 PHOTO MODE</div>
-  <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save · <kbd>Shift+S</kbd> 3-2-1 · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span></div>
+  <div class="hint">drag to orbit · wheel to zoom · <kbd>S</kbd> save · <kbd>Shift+S</kbd> 3-2-1 · <kbd>/</kbd> gallery · <kbd>P</kbd>/<kbd>Esc</kbd> exit<span class="btn" id="photoSave">SAVE</span><span class="btn" id="photoGal" style="margin-left:6px;">GALLERY</span></div>
 </div>
 <div id="photoCount">3</div>
 <div id="mctrl">
@@ -1185,6 +1213,8 @@
     <div class="row"><span class="name">FORMATIONS</span><span class="val" id="stFormations">0</span></div>
     <div class="row"><span class="name">🤝 WINGS WAGGED</span><span class="val" id="stWingsWagged">0</span></div>
     <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
+    <div class="row"><span class="name">⚓ CARRIER TRAPS</span><span class="val" id="stTraps">0</span></div>
+    <div class="row"><span class="name">⚓ BEST WIRE</span><span class="val hi" id="stBestWire">—</span></div>
     <div class="row"><span class="name">BEST T&amp;G STREAK</span><span class="val" id="stTg">0</span></div>
     <div class="row"><span class="name">BEST LANDING STREAK</span><span class="val" id="stLs">0</span></div>
     <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
@@ -1207,6 +1237,18 @@
       <button id="logReset" class="danger" type="button">CLEAR</button>
       <button id="logCopy" type="button">📋 COPY</button>
       <button id="logClose" class="primary" type="button">CLOSE</button>
+    </div>
+  </div>
+</div>
+<div id="gallery">
+  <div class="card">
+    <h2>📸 GALLERY</h2>
+    <div class="sub">Last <span id="galCap">12</span> photo-mode captures · newest first</div>
+    <div class="grid" id="galGrid"></div>
+    <div class="hint">Press <kbd style="background:#1a2a3a;border:1px solid #2a4a6a;border-radius:3px;padding:1px 5px;font-size:10px;color:#cfe;">P</kbd> to enter photo mode then <kbd style="background:#1a2a3a;border:1px solid #2a4a6a;border-radius:3px;padding:1px 5px;font-size:10px;color:#cfe;">S</kbd> to capture. Shots are stashed here automatically.</div>
+    <div class="actions">
+      <button id="galReset" class="bar danger" type="button">CLEAR ALL</button>
+      <button id="galClose" class="bar primary" type="button">CLOSE</button>
     </div>
   </div>
 </div>
@@ -1491,6 +1533,8 @@ const STATS_DEFAULT = {
   formations: 0,           // formation-flight sessions with AI traffic (5s+ in close parallel)
   wingsWagged: 0,          // wing-wave greetings exchanged with the AI plane (lifetime counter)
   burgers: 0,              // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
+  carrierTraps: 0,         // lifetime arrested-wire traps on the carrier deck (tailhook down + wire caught)
+  bestWire: 0,             // best (lowest-distance-to-#3) wire ever caught; 3 = perfect trap. 0 = none yet
   bestTgStreak: 0,         // longest touch-and-go streak (touchdown+lift-off within 12s, no full-stop)
   bestLandStreak: 0,       // longest streak of consecutive successful landings without a crash (any mode, survives full-stops)
   perfectLandings: 0,      // count of landings scored 300+ (used by rank progression)
@@ -1762,6 +1806,60 @@ function fmtLogDate(ts){
   return months[d.getMonth()] + ' ' + d.getDate() + ' ' + hh + ':' + mm;
 }
 const MISSION_LABELS = { free:'FREE', tng:'T&G', hop:'HOP', ring:'RING', carrier:'CV' };
+
+// ====== SCREENSHOT GALLERY ======
+// Ring buffer of recent photo-mode captures. Each entry holds a moderate-
+// quality JPEG data URL (cap ~1280 px wide) plus a tiny timestamp; that lets
+// the gallery overlay both preview thumbnails and re-download the original
+// frame without going back to the live scene. JPEG (not PNG) keeps the total
+// localStorage payload well under the ~5 MB browser limit so 12 captures fit
+// comfortably alongside the rest of the persisted player state (logbook,
+// stats, settings, achievements, ghost replay). On quota errors we trim the
+// oldest entries one at a time until the write succeeds — so the buffer
+// degrades gracefully on a full drive instead of silently dropping captures.
+const GALLERY_KEY = 'flightsim.gallery.v1';
+const GALLERY_MAX = 12;
+let photoGallery = [];
+try {
+  const raw = localStorage.getItem(GALLERY_KEY);
+  if (raw){
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) photoGallery = arr.filter(e => e && typeof e === 'object' && typeof e.dataUrl === 'string').slice(0, GALLERY_MAX);
+  }
+} catch(e){ /* corrupt — stay empty */ }
+function savePhotoGallery(){
+  // Trim oldest entries on QuotaExceededError so a full localStorage doesn't
+  // strand the player with a broken gallery — they lose old shots, not new
+  // ones. Defensive cap iter to avoid an infinite loop if any other error
+  // type fires.
+  let trims = 0;
+  while (true){
+    try {
+      localStorage.setItem(GALLERY_KEY, JSON.stringify(photoGallery));
+      return;
+    } catch(e){
+      if (photoGallery.length === 0 || trims >= GALLERY_MAX) return;
+      photoGallery.pop();
+      trims++;
+    }
+  }
+}
+// Push one capture onto the front of the ring buffer (newest first). The
+// dataUrl is the moderate-quality JPEG produced by savePhoto() right after
+// the overlay-hidden render; ts is captured locally so the gallery cell can
+// show a relative time. Old entries past GALLERY_MAX are trimmed off the end.
+function pushPhotoGallery(dataUrl){
+  if (!dataUrl) return;
+  photoGallery.unshift({ ts: Date.now(), dataUrl: dataUrl });
+  if (photoGallery.length > GALLERY_MAX) photoGallery.length = GALLERY_MAX;
+  savePhotoGallery();
+  if (typeof refreshGalleryGrid === 'function') refreshGalleryGrid();
+}
+// Forward-declared so savePhoto() can call it lazily even before the
+// setupGalleryUi IIFE assigns the real implementation below. No-op default
+// means an early-tick capture (shouldn't ever happen — photo mode is gated
+// post-intro) wouldn't crash the save path.
+let refreshGalleryGrid = function(){};
 
 // ====== ACHIEVEMENTS ======
 // Quick toast popups for one-time milestones (first landing, 10 landings,
@@ -5266,6 +5364,35 @@ const CANOPY_DRAG_BUMP  = 0.08;    // +8% drag while the canopy is open in fligh
   const finAcc = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.4), matAccent);
   finAcc.position.set(0, 1.05, 3.5); plane.add(finAcc);
 }
+
+// ====== TAILHOOK ======
+// Slim arm that hangs off the tail when deployed (Shift+H). Pivots from a
+// stowed up-tucked angle to a ~55° nose-up rest angle so it visibly sticks
+// out behind/below the empennage when the player drops it. Built as a Group
+// so the lerp animation rotates around the mount point, not the cylinder
+// center, and the hook hangs naturally from the rear fuselage.
+const tailhookPivot = new THREE.Group();
+tailhookPivot.position.set(0, -0.05, 3.55);
+plane.add(tailhookPivot);
+{
+  // The arm itself — thin dark steel cylinder pointing aft from the pivot.
+  const armMat = new THREE.MeshLambertMaterial({ color: 0x222428 });
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1.2, 8), armMat);
+  arm.rotation.x = Math.PI/2;
+  arm.position.set(0, 0, 0.6); // arm tip extends 1.2m aft of the pivot
+  tailhookPivot.add(arm);
+  // Hook head — small block at the tip so the silhouette reads as a real hook.
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.18), armMat);
+  head.position.set(0, -0.06, 1.15);
+  tailhookPivot.add(head);
+}
+// Stowed (default) = pivot rotated up against the fuselage so it stays out of
+// view on planes/ground; deployed = pivot rotated down to ~ -35° around X so
+// the arm reaches behind + slightly below the tail. Visual animation lerps
+// state.tailhookAnim toward target every frame.
+const TAILHOOK_STOWED_RAD   = -1.05;  // tucked up under the tail
+const TAILHOOK_DEPLOYED_RAD = -0.18;  // arm angles slightly down-and-back
+tailhookPivot.rotation.x = TAILHOOK_STOWED_RAD;
 
 const propGroup = new THREE.Group();
 {
@@ -10800,6 +10927,18 @@ addEventListener('keydown', e=>{
     }
   }
   if (e.code==='KeyH'){
+    // Shift+H = tailhook toggle. Hands off to the autopilot path on a plain H
+    // so the existing AP behavior stays intact. Tailhook is purely visual +
+    // landing-system flavor on non-carrier strips, but it's what actually
+    // arms the arrestor-wire trap on the carrier deck.
+    if (e.shiftKey){
+      if (state.introOpen) return;
+      state.tailhook = !state.tailhook;
+      playGearClunk(); // close-enough thunk for a small mechanical arm
+      showStatus('TAILHOOK ' + (state.tailhook ? 'DOWN' : 'UP'), null, state.tailhook ? 'good' : 'hard');
+      pushATC('Hook ' + (state.tailhook ? 'down.' : 'up.'), { tag:'PILOT' });
+      return;
+    }
     // Autopilot toggle. Only engages in the air (no point on the ground), and
     // only if not crashed. Captures the altitude + heading at the moment of
     // engagement so the AP keeps you exactly where you were, and snaps the
@@ -12178,6 +12317,15 @@ function resetPlane(){
   state.reverserPrevActive = false;
   state.reverserDustT = 0;
   clearReverseDust();
+  // Tailhook (Shift+H). Stowed by default — deck landings outside the wires
+  // still get the existing high-friction arrestor cheat, but a real trap
+  // requires the hook to be down. Animation lerps in updateTailhookAnim().
+  state.tailhook = false;
+  state.tailhookAnim = 0;
+  // Arrestor-wire snap. When a deck landing catches a wire, this latches
+  // active for `dur` seconds and applies a hard horizontal decel each frame
+  // until ground speed drains below ~3 m/s or the timer expires.
+  state.arrestor = { active: false, wireId: 0, t: 0, dur: 0.5, decel: 0 };
   // Wingtip condensation streamers — wipe any leftover puffs from the prior
   // sortie so a fresh spawn doesn't start with stale wisps drifting around.
   clearWingtipCondensation();
@@ -14440,6 +14588,49 @@ function playCrankCough(){
 // underneath, fired the frame the reverser actually engages (not just the frame
 // the player presses Z). Mirrors the flap whoosh pattern so we reuse the same
 // audio path style — no new long-lived nodes. Volume scales with master.
+// One-shot metallic clang fired when the tailhook catches an arrestor wire on
+// the carrier deck. Layered: bright top-end snap (filtered noise around 3 kHz)
+// for the wire-on-steel ring, then a fast-decaying low body thump so it lands
+// with weight instead of feeling like a tin lid. ~250 ms total.
+function playArrestorClang(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.55 * settings.volume;
+  if (vol <= 0) return;
+  // Top-end snap: noise through a high-Q bandpass for a clean wire ring.
+  const nDur = 0.25;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * nDur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(3200, t0);
+  bp.frequency.exponentialRampToValueAtTime(1800, t0 + nDur);
+  bp.Q.value = 4.0;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0, t0);
+  ng.gain.linearRampToValueAtTime(vol * 0.85, t0 + 0.008);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + nDur);
+  src.connect(bp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + nDur + 0.02);
+  // Low body thump under the clang so the trap reads as a real impact event.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(130, t0);
+  osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.22);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0, t0);
+  og.gain.linearRampToValueAtTime(vol * 0.55, t0 + 0.01);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.26);
+}
+
 function playReverserWhoosh(){
   const ctx = sfxReady();
   if (!ctx) return;
@@ -17499,14 +17690,80 @@ function step(dt){
         if (land && land.ri && land.ri.ap === CARRIER){
           state.carrierTraps += 1;
           const inBox = Math.abs(land.lz) <= CARRIER.boxHalfLen;
+          // Tailhook + wire detection. Wires sit at deck-local z = -12, 0, +12, +24
+          // (drawn in buildCarrier). Number them by approach direction so the
+          // first wire crossed is always #1 and the bow-most is #4 — plane's
+          // deck-frame velocity tells us which way the pilot is rolling.
+          // Real-carrier convention: #3 is the target wire, hence the perfect
+          // trap. Within ARRESTOR_CATCH_M of any wire counts as a catch.
+          const ARRESTOR_CATCH_M = 6.0; // ±6 m around the wire is generous-but-fair
+          let wireCaught = 0;
+          if (state.tailhook && state.gearDown && sinkRate <= 6){
+            const csC = Math.cos(-CARRIER.hdg), snC = Math.sin(-CARRIER.hdg);
+            // Velocity in deck-local frame. Positive vz_local = rolling toward +z.
+            const vzLocal = state.vel.x*snC + state.vel.z*csC;
+            // Canonical wire layout: lz -12, 0, +12, +24. If rolling toward +z
+            // the first crossed is lz=-12 (wire #1) and #4 is lz=+24; if rolling
+            // toward -z, flip so #1 is lz=+24 and #4 is lz=-12. A near-stationary
+            // touchdown is rare but we treat +z as the default approach.
+            const towardPlus = vzLocal >= 0;
+            const wireLz = towardPlus ? [-12, 0, 12, 24] : [24, 12, 0, -12];
+            let bestDist = ARRESTOR_CATCH_M, bestIdx = -1;
+            for (let i=0;i<4;i++){
+              const d = Math.abs(land.lz - wireLz[i]);
+              if (d < bestDist){ bestDist = d; bestIdx = i; }
+            }
+            if (bestIdx >= 0){
+              wireCaught = bestIdx + 1; // 1..4
+              // Schedule the snap. ~6 g over ~0.5 s on the horizontal velocity
+              // vector, applied as an extra friction-like impulse in step()'s
+              // ground-friction block. Stacks with the existing 7.5 friction
+              // arrestor cheat so a hooked trap stops cold while an unhooked
+              // bolter still rolls but doesn't get the magic stop.
+              const groundSp = Math.hypot(state.vel.x, state.vel.z);
+              state.arrestor.active = true;
+              state.arrestor.wireId = wireCaught;
+              state.arrestor.t = 0;
+              state.arrestor.dur = 0.5;
+              // 6 g ≈ 58.86 m/s². We need the impulse to actually halt the plane
+              // over ~0.5 s, so scale decel so even a 70 m/s touchdown stops in
+              // time, but cap at the 6 g headline figure for the visible card.
+              state.arrestor.decel = Math.max(58.86, groundSp / 0.5);
+              playArrestorClang();
+              // Lifetime stats: total traps + best wire (3 = perfect; lower is
+              // better in the "distance from #3" sense, but expose the literal
+              // number to keep it readable). Track "best" as the wire closest
+              // to #3, breaking ties by recency so a #3 always wins.
+              pilotStats.carrierTraps = (pilotStats.carrierTraps || 0) + 1;
+              const bw = pilotStats.bestWire || 0;
+              const distNew = Math.abs(wireCaught - 3);
+              const distOld = bw > 0 ? Math.abs(bw - 3) : 99;
+              if (distNew <= distOld) pilotStats.bestWire = wireCaught;
+              savePilotStats();
+              if (wireCaught === 3){
+                pushATC('Three wire — perfect trap!', { tag:'PILOT', now:true });
+              } else {
+                pushATC(['One wire — a little short.', 'Two wire, looking good.', 'Three wire — perfect trap!', 'Four wire — long, but you caught it.'][wireCaught - 1], { tag:'PILOT', now:true });
+              }
+              showStatus('TRAP · WIRE #' + wireCaught + (wireCaught === 3 ? ' · OK!' : ''), null, 'good');
+            }
+          }
           if (state.mode === 'carrier' && !state.carrierDone && inBox){
             state.carrierDone = true;
-            extra = ' · TRAPPED — wire engaged';
-            showMissionDone('TRAPPED', 'CV-01 · wire engaged · +' + (state.scoreTotal + score));
+            extra = wireCaught
+              ? (' · TRAPPED · wire #' + wireCaught + (wireCaught === 3 ? ' (perfect!)' : ''))
+              : ' · TRAPPED — wire engaged';
+            showMissionDone('TRAPPED', 'CV-01 · ' + (wireCaught ? ('wire #' + wireCaught) : 'wire engaged') + ' · +' + (state.scoreTotal + score));
           } else if (state.mode === 'carrier' && !inBox){
-            extra = ' · deck landing, missed the box';
+            extra = wireCaught ? (' · wire #' + wireCaught + ' · outside box') : ' · deck landing, missed the box';
           } else if (state.mode === 'carrier' && state.carrierDone){
-            extra = ' · trap #' + state.carrierTraps;
+            extra = wireCaught ? (' · trap #' + state.carrierTraps + ' · wire #' + wireCaught) : (' · trap #' + state.carrierTraps);
+          } else if (wireCaught){
+            // Free-flight or other modes — still surface the wire catch in the
+            // landing card so the player gets feedback on the hook attempt.
+            extra = ' · wire #' + wireCaught + (wireCaught === 3 ? ' (perfect!)' : '');
+          } else if (state.tailhook){
+            extra = ' · hook down, missed the wires';
           }
         }
         const title = (sinkRate < 2.5 ? 'GREASED IT' : 'GOOD LANDING') + ' · +' + score;
@@ -17645,6 +17902,24 @@ function step(dt){
         const newSp = Math.max(0, sp - friction*dt*Math.max(2, sp*0.1));
         vh.multiplyScalar(newSp/sp);
         state.vel.x = vh.x; state.vel.z = vh.z;
+      }
+      // Arrestor-wire snap: while latched, apply a hard linear decel directly
+      // to the horizontal velocity vector so the plane stops in roughly 0.5 s
+      // regardless of touchdown speed. Stacks ON TOP of regular friction so
+      // brake/reverser inputs still feel additive. Auto-clears when speed
+      // drains below 3 m/s or the timer expires.
+      if (state.arrestor && state.arrestor.active){
+        state.arrestor.t += dt;
+        const vh2 = new THREE.Vector3(state.vel.x, 0, state.vel.z);
+        const sp2 = vh2.length();
+        if (sp2 > 0.01){
+          const newSp = Math.max(0, sp2 - state.arrestor.decel * dt);
+          vh2.multiplyScalar(newSp / sp2);
+          state.vel.x = vh2.x; state.vel.z = vh2.z;
+        }
+        if (state.arrestor.t >= state.arrestor.dur || Math.hypot(state.vel.x, state.vel.z) < 3){
+          state.arrestor.active = false;
+        }
       }
       // Dribble a fresh dust puff every ~0.15s while reversed and still rolling,
       // so the trail of dust matches the rollout instead of being a one-shot.
@@ -17880,6 +18155,20 @@ function step(dt){
   flapR.rotation.x = flapAnimRad;
   gearGrp.position.y = -gearAnim * GEAR_LIFT;
   gearGrp.visible = gearAnim < 0.999;
+
+  // Tailhook ease — lerp state.tailhookAnim toward target (1 = deployed) and
+  // rotate the pivot between stowed/deployed angles. ~1.4 s travel matches
+  // the gear feel and gives the player a moment to commit before deck contact.
+  {
+    const target = state.tailhook ? 1 : 0;
+    const step = (1 / 1.4) * dt;
+    if (state.tailhookAnim < target) state.tailhookAnim = Math.min(target, state.tailhookAnim + step);
+    else if (state.tailhookAnim > target) state.tailhookAnim = Math.max(target, state.tailhookAnim - step);
+    if (tailhookPivot){
+      const a = state.tailhookAnim;
+      tailhookPivot.rotation.x = TAILHOOK_STOWED_RAD + (TAILHOOK_DEPLOYED_RAD - TAILHOOK_STOWED_RAD) * a;
+    }
+  }
 
   // Animated control surfaces: lerp the rendered deflection toward the live
   // effective stick input (pIn/rIn/yIn already include AP overrides + trim).
@@ -25089,7 +25378,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -25169,6 +25458,20 @@ function savePhoto(){
   if (countWasShown){ countEl.classList.remove('show'); countEl.classList.remove('pop'); }
   // Render immediately so the frame matches the hidden-overlay state.
   renderer.render(scene, camera);
+  // Grab a moderate-quality JPEG dataURL while the framebuffer is still in
+  // its HUD-free state — this seeds the screenshot gallery (`/` key) with a
+  // copy of the exact frame the player just downloaded. JPEG @ 0.78 keeps
+  // each entry well under ~300 KB so 12 captures fit comfortably in
+  // localStorage. Wrapped so a context loss / WebGL hiccup just drops the
+  // gallery push instead of breaking the download path below.
+  let galleryDataUrl = null;
+  try {
+    galleryDataUrl = canvas.toDataURL('image/jpeg', 0.78);
+    if (typeof galleryDataUrl === 'string' && galleryDataUrl.indexOf('data:image/jpeg') !== 0){
+      // Safari / iOS occasionally fall back to PNG when JPEG encoding fails;
+      // either way it's a valid data URL the gallery can render + re-download.
+    }
+  } catch(e){ galleryDataUrl = null; }
   const finish = () => {
     if (overlayWasShown) photoEl.classList.add('show');
     // Don't restore the countdown digit — the countdown is finished by the
@@ -25193,6 +25496,10 @@ function savePhoto(){
   } catch (e){
     finish();
   }
+  // Push to the gallery ring buffer after kicking off the download so a
+  // localStorage quota error never blocks the actual save. pushPhotoGallery()
+  // handles its own quota retry by trimming oldest entries.
+  if (galleryDataUrl) pushPhotoGallery(galleryDataUrl);
 }
 // Photo countdown (Shift+S): kicks off a 3-2-1 visible countdown then fires
 // savePhoto() on hitting zero. The orbit camera, drag/wheel input, and
@@ -25347,6 +25654,8 @@ addEventListener('keydown', e => {
     formations: document.getElementById('stFormations'),
     wingsWagged: document.getElementById('stWingsWagged'),
     burgers:  document.getElementById('stBurgers'),
+    traps:    document.getElementById('stTraps'),
+    bestWire: document.getElementById('stBestWire'),
     tgStreak: document.getElementById('stTg'),
     landStreak: document.getElementById('stLs'),
     perfect:  document.getElementById('stPerfect'),
@@ -25369,6 +25678,11 @@ addEventListener('keydown', e => {
     if (cells.formations) cells.formations.textContent = pilotStats.formations || 0;
     if (cells.wingsWagged) cells.wingsWagged.textContent = pilotStats.wingsWagged || 0;
     if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
+    if (cells.traps) cells.traps.textContent = pilotStats.carrierTraps || 0;
+    if (cells.bestWire){
+      const bw = pilotStats.bestWire || 0;
+      cells.bestWire.textContent = bw > 0 ? ('#' + bw + (bw === 3 ? ' · OK!' : '')) : '—';
+    }
     if (cells.tgStreak) cells.tgStreak.textContent = pilotStats.bestTgStreak || 0;
     if (cells.landStreak) cells.landStreak.textContent = pilotStats.bestLandStreak || 0;
     if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
@@ -25549,6 +25863,157 @@ addEventListener('keydown', e => {
       e.preventDefault();
       closePanel();
     }
+  });
+})();
+
+// ====== PHOTO GALLERY UI ======
+// Modal grid of recent photo-mode captures (`/` to open globally, or via the
+// GALLERY button in the photo-mode pill / the gallery hotkey while in photo
+// mode). Each cell shows a thumb, a relative timestamp, and per-shot
+// Download / Delete buttons that hover-reveal. The grid stays in sync with
+// `photoGallery` via refreshGalleryGrid() which pushPhotoGallery() calls
+// after each successful capture so newly-shot frames slot in live without
+// closing + reopening.
+(function setupGalleryUi(){
+  const panel = document.getElementById('gallery');
+  const grid = document.getElementById('galGrid');
+  const btnClose = document.getElementById('galClose');
+  const btnReset = document.getElementById('galReset');
+  const photoGalBtn = document.getElementById('photoGal');
+  const capLbl = document.getElementById('galCap');
+  if (!panel || !grid || !btnClose) return;
+  if (capLbl) capLbl.textContent = String(GALLERY_MAX);
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => (
+      c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;'
+      : c === '"' ? '&quot;' : '&#39;'
+    ));
+  }
+  // Relative "3m ago" / "2h ago" / "yesterday" label. Falls back to the
+  // logbook date format for anything older than ~24h so the cell still
+  // reads cleanly when a player comes back after a long break.
+  function fmtAgo(ts){
+    const now = Date.now();
+    const delta = Math.max(0, now - (ts || 0));
+    if (delta < 60 * 1000) return 'just now';
+    if (delta < 60 * 60 * 1000) return Math.floor(delta / 60000) + 'm ago';
+    if (delta < 24 * 60 * 60 * 1000) return Math.floor(delta / 3600000) + 'h ago';
+    return (typeof fmtLogDate === 'function') ? fmtLogDate(ts) : new Date(ts).toLocaleString();
+  }
+  function refresh(){
+    if (!photoGallery || photoGallery.length === 0){
+      grid.innerHTML = '<div class="empty">No captures yet — press <strong style="color:#cfe;">P</strong> to enter photo mode, then <strong style="color:#cfe;">S</strong> to save a shot.<br>Saved frames will show up here automatically.</div>';
+      return;
+    }
+    const parts = [];
+    for (let i = 0; i < photoGallery.length; i++){
+      const e = photoGallery[i];
+      const ago = escapeHtml(fmtAgo(e.ts || 0));
+      parts.push(
+        '<div class="cell" data-idx="' + i + '">' +
+          '<img src="' + escapeHtml(e.dataUrl) + '" alt="capture ' + (i + 1) + '" data-idx="' + i + '" />' +
+          '<div class="ops">' +
+            '<button type="button" data-act="dl" data-idx="' + i + '" title="Download PNG">DL</button>' +
+            '<button type="button" class="del" data-act="del" data-idx="' + i + '" title="Delete this capture">×</button>' +
+          '</div>' +
+          '<div class="meta"><span>#' + (i + 1) + '</span><span>' + ago + '</span></div>' +
+        '</div>'
+      );
+    }
+    grid.innerHTML = parts.join('');
+  }
+  // Expose refresh up to pushPhotoGallery() so newly-captured frames slot in
+  // live without closing + reopening the modal. Defined as a let above so we
+  // can swap the forward-declared no-op with the real implementation.
+  refreshGalleryGrid = refresh;
+  function openPanel(){
+    // Refuse to open during a replay / intro / pause-frozen state where the
+    // user clearly isn't trying to browse photos. The `/` hotkey already
+    // gates on these, but a stray click on the photo-mode GALLERY button
+    // mid-replay (unlikely but possible) should also no-op cleanly.
+    if (typeof state !== 'undefined' && state.introOpen) return;
+    refresh();
+    panel.classList.add('show');
+  }
+  function closePanel(){ panel.classList.remove('show'); }
+  // Trigger a real PNG download from a stored data URL by routing it through
+  // a temporary <a download>. The data URL is whatever JPEG / PNG the encoder
+  // produced at capture time, so the filename extension is .jpg by default to
+  // match the actual bytes; a PNG-encoded fallback (rare — Safari) is still
+  // a valid image so the player's downloads folder stays readable.
+  function downloadShot(idx){
+    const e = photoGallery[idx];
+    if (!e || !e.dataUrl) return;
+    const a = document.createElement('a');
+    const ts = new Date(e.ts || Date.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const isJpeg = e.dataUrl.indexOf('data:image/jpeg') === 0;
+    const ext = isJpeg ? 'jpg' : 'png';
+    a.href = e.dataUrl;
+    a.download = 'flight-sim-' + ts + '.' + ext;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  function deleteShot(idx){
+    if (idx < 0 || idx >= photoGallery.length) return;
+    photoGallery.splice(idx, 1);
+    savePhotoGallery();
+    refresh();
+  }
+  grid.addEventListener('click', ev => {
+    const t = ev.target;
+    if (!t) return;
+    // Click on a thumbnail (img with data-idx but no data-act): download it.
+    // Click on the DL or DEL button: route by data-act.
+    const idxAttr = t.getAttribute && t.getAttribute('data-idx');
+    if (idxAttr === null) return;
+    const idx = parseInt(idxAttr, 10);
+    if (!isFinite(idx) || idx < 0) return;
+    const act = t.getAttribute('data-act');
+    if (act === 'del'){ ev.stopPropagation(); deleteShot(idx); return; }
+    if (act === 'dl'){ ev.stopPropagation(); downloadShot(idx); return; }
+    // Clicking the bare image downloads it — same affordance as the explicit
+    // DL button so casual mouse / touch users don't have to hover-reveal.
+    if (t.tagName === 'IMG'){ ev.stopPropagation(); downloadShot(idx); }
+  });
+  btnClose.addEventListener('click', e => { e.stopPropagation(); closePanel(); });
+  panel.addEventListener('click', e => { if (e.target === panel) closePanel(); });
+  if (btnReset){
+    btnReset.addEventListener('click', e => {
+      e.stopPropagation();
+      if (!photoGallery || photoGallery.length === 0) return;
+      if (!confirm('Clear all ' + photoGallery.length + ' saved screenshots? This cannot be undone.')) return;
+      photoGallery.length = 0;
+      savePhotoGallery();
+      refresh();
+    });
+  }
+  if (photoGalBtn){
+    photoGalBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      openPanel();
+    });
+  }
+  // Global `/` hotkey opens / closes the gallery. Gated on intro modal,
+  // replay, and ignition keypad inputs so it never fights an active text
+  // field. Esc closes (handled in-panel below). Slash also gets a
+  // preventDefault so Firefox's Quick Find doesn't pop up on top of the sim.
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.code === 'Escape' && panel.classList.contains('show')){
+      e.preventDefault();
+      closePanel();
+      return;
+    }
+    if (e.code !== 'Slash') return;
+    // Ctrl+/ / Cmd+/ are common browser shortcuts (search, devtools focus)
+    // — leave them alone so we never trap the user's expected behavior.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // Intro modal up or mid-replay: don't pop a modal on top of another modal.
+    if (typeof state !== 'undefined' && (state.introOpen || state.replayActive)) return;
+    e.preventDefault();
+    if (panel.classList.contains('show')) closePanel(); else openPanel();
   });
 })();
 
