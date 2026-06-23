@@ -7180,6 +7180,13 @@ const state = {
   // toggle is honored mid-flight (off-by-toggle clears any pending ritual).
   coldStart: false,
   ignitionT: -1,
+  // Engine instrument startup self-test. Triggered only on ground cold-start
+  // crank (not in-air restart) when settings.coldStart is on; -1 = idle,
+  // >=0 = seconds elapsed since ignition. drawCockpitPanel() reads this to
+  // sweep every gauge needle from 0 → max → live value over SELF_TEST_S so
+  // the panel reads as a real avionics power-up. Cleared in resetPlane() and
+  // when the sweep finishes.
+  selfTestT: -1,
   // In-air deadstick restart ritual. Parallel to coldStart for ground starts:
   // when the player presses X with engineOut while airborne, we check that
   // throttle is low (<30%) and airspeed is high enough to windmill the prop
@@ -9326,6 +9333,7 @@ function resetPlane(){
   state.coldStart = false;
   state.airRestart = false;
   state.ignitionT = -1;
+  state.selfTestT = -1;
   armColdStart();
 }
 resetPlane();
@@ -10295,6 +10303,12 @@ function beginIgnition(){
   // so saved PNGs and frozen frames stay clean.
   if (state.coldStart && !state.photoMode && !state.replayActive && !state.paused){
     showChecklistToast();
+    // Engine instrument startup self-test: every cockpit gauge needle does a
+    // quick full-scale sweep (0 → max → operating value) while the starter
+    // is spooling, layered with a soft mechanical tick train. Gated to ground
+    // cold-start so the in-air deadstick restart stays focused on flying.
+    state.selfTestT = 0;
+    playInstrumentSelfTestClicks();
   }
   playIgnitionCrank();
 }
@@ -10325,6 +10339,35 @@ function finishIgnition(){
   state.engineOut = false;
   showStatus('ENGINE ONLINE', state.onGround ? 'cleared to taxi' : 'power restored', 'good');
   pushATC('Engine running, all gauges green.', { tag:'PILOT' });
+}
+// Engine instrument startup self-test — sweep duration in seconds. Splits into
+// a 0→max ramp (first half) and a max→operating ease (second half). Tuned to
+// finish well inside the COLD_START_SPOOL_S (1.6s) crank so the engine catches
+// just as the gauges settle on their live values.
+const SELF_TEST_S = 1.2;
+// Six soft mechanical clicks (~50ms apart) that layer over the starter whir so
+// the panel reads as a real avionics power-up: each gauge "pings" in sequence.
+// Uses the existing sfxReady() WebAudio path so no extra hardware nodes leak.
+function playInstrumentSelfTestClicks(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.18 * settings.volume;
+  if (vol <= 0) return;
+  // 6 clicks at ~50ms spacing, slight pitch walk so they don't sound robotic.
+  for (let i = 0; i < 6; i++){
+    const t = t0 + i * 0.05;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(1100 + i * 35, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    o.connect(g).connect(ctx.destination);
+    o.start(t);
+    o.stop(t + 0.04);
+  }
 }
 // Starter-motor whir + a quick catch thump. Cheap WebAudio nodes; mirrors
 // the gear/flap SFX style so nothing leaks across the loop.
@@ -11653,6 +11696,13 @@ function step(dt){
   if ((state.coldStart || state.airRestart) && state.ignitionT >= 0){
     state.ignitionT += dt;
     if (state.ignitionT >= COLD_START_SPOOL_S) finishIgnition();
+  }
+  // Engine instrument startup self-test: advance the gauge-sweep clock and
+  // clear it once the full-scale sweep completes so the panel snaps back to
+  // showing live values. Pure visual flavor on top of the cold-start ritual.
+  if (state.selfTestT >= 0){
+    state.selfTestT += dt;
+    if (state.selfTestT >= SELF_TEST_S) state.selfTestT = -1;
   }
   if (!state.crashed){
     if (state.coldStart){
@@ -15625,7 +15675,7 @@ function drawCockpitAlt(altM){
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.fillText('BARO ' + (state.baroInHg).toFixed(2), cx, cy + R*0.78);
 }
-function drawCockpitRpm(speedKmh){
+function drawCockpitRpm(speedKmh, rpmOverride){
   if (!cpRpmCtx) return;
   const W = cpRpmCv.width, H = cpRpmCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
   const ctx = cpRpmCtx;
@@ -15640,7 +15690,12 @@ function drawCockpitRpm(speedKmh){
   // shows 0 — the engine is off, no idle.
   const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
   let rpm;
-  if (state.coldStart){
+  // Engine instrument startup self-test override: when the cockpit panel is
+  // sweeping every needle full-scale, accept the overridden RPM value
+  // directly so the cold-start branch doesn't cap the needle at ~300 RPM.
+  if (typeof rpmOverride === 'number'){
+    rpm = rpmOverride;
+  } else if (state.coldStart){
     // During the crank itself, sweep up from 0 to ~300 RPM (starter motor)
     // so the gauge needle actually moves while the player waits.
     rpm = state.ignitionT >= 0 ? Math.min(300, state.ignitionT / COLD_START_SPOOL_S * 320) : 0;
@@ -15987,7 +16042,7 @@ function drawCockpitBrake(tempC){
     ctx.fillText('FADE', cx, cy + R*0.78);
   }
 }
-function drawCockpitFuelFlow(){
+function drawCockpitFuelFlow(gphOverride){
   if (!cpFfCtx) return;
   const W = cpFfCv.width, H = cpFfCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
   const ctx = cpFfCtx;
@@ -16004,7 +16059,12 @@ function drawCockpitFuelFlow(){
   // the starter spools so the gauge moves while the player waits on the crank.
   const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
   let gph;
-  if (state.coldStart){
+  // Engine instrument startup self-test override: same trick as the RPM
+  // gauge — accept the swept value directly so the cold-start branch doesn't
+  // cap the needle at ~2 GPH.
+  if (typeof gphOverride === 'number'){
+    gph = gphOverride;
+  } else if (state.coldStart){
     gph = state.ignitionT >= 0 ? Math.min(2, state.ignitionT / COLD_START_SPOOL_S * 2.4) : 0;
   } else if (engineLive){
     const t = Math.max(0, Math.min(1, state.throttle));
@@ -16070,18 +16130,75 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
   if (!cpEl || !cpEl.classList.contains('show')) return;
+  // Engine instrument startup self-test override: while the cold-start ritual
+  // is cranking, every gauge needle does a full-scale sweep (0 → max → live)
+  // over SELF_TEST_S so the panel reads as a real avionics power-up. First
+  // half ramps 0→max, second half eases max→live. Pure visual flavor — the
+  // underlying state values (state.engineTempC, state.oilPsi, etc.) are not
+  // mutated, so HUD warnings and physics see the real values throughout.
+  let asiV = indicatedKmh;
+  let altV = altM;
+  let rpmSpeed = (typeof trueKmh === 'number' ? trueKmh : indicatedKmh);
+  let rpmOverride;        // undefined = let drawCockpitRpm derive from state
+  let chtV = state.engineTempC;
+  let oilV = state.oilPsi;
+  let magV = hdgDeg || 0;
+  let brkV = state.brakeTempC;
+  let aiQ  = plane.quaternion;
+  let ffOverride;         // undefined = let drawCockpitFuelFlow derive from state
+  if (state.selfTestT >= 0){
+    const t = Math.max(0, Math.min(1, state.selfTestT / SELF_TEST_S));
+    // First half ramps 0→max, second half eases max→live so each needle
+    // visibly drops back to its operating value before the engine catches.
+    const upPhase   = (t < 0.5) ? (t / 0.5) : 1;     // 0..1 (held at 1 after the peak)
+    const settle    = (t < 0.5) ? 0 : ((t - 0.5) / 0.5); // 0..1 during the settle
+    const SWEEP_ASI = 400;     // ASI dial top
+    const SWEEP_ALT = 10000;   // long-needle one full turn + short-needle one full turn
+    const SWEEP_RPM = 2800;    // tach redline neighborhood
+    const SWEEP_CHT = 260;     // ENG_TEMP_MAX firewall
+    const SWEEP_OIL = 100;     // OIL_PSI_MAX
+    const SWEEP_MAG = 360;     // one full compass turn
+    const SWEEP_BRK = 400;     // BRAKE_TEMP_MAX
+    const SWEEP_FF  = 18;      // GPH near the over-burn band
+    if (t < 0.5){
+      asiV = SWEEP_ASI * upPhase;
+      altV = SWEEP_ALT * upPhase;
+      rpmOverride = SWEEP_RPM * upPhase;
+      chtV = 40 + (SWEEP_CHT - 40) * upPhase;
+      oilV = SWEEP_OIL * upPhase;
+      magV = SWEEP_MAG * upPhase;
+      brkV = 30 + (SWEEP_BRK - 30) * upPhase;
+      ffOverride = SWEEP_FF * upPhase;
+    } else {
+      asiV = SWEEP_ASI * (1 - settle) + indicatedKmh * settle;
+      altV = SWEEP_ALT * (1 - settle) + altM * settle;
+      rpmOverride = SWEEP_RPM * (1 - settle); // settles toward 0 — engine still off until finishIgnition()
+      chtV = SWEEP_CHT * (1 - settle) + state.engineTempC * settle;
+      oilV = SWEEP_OIL * (1 - settle) + state.oilPsi * settle;
+      magV = SWEEP_MAG * (1 - settle) + (hdgDeg || 0) * settle;
+      brkV = SWEEP_BRK * (1 - settle) + state.brakeTempC * settle;
+      ffOverride = SWEEP_FF * (1 - settle); // settles to 0 — fuel flow doesn't start until engine catches
+    }
+    // Attitude indicator wobble: synthesize a small pitch swing so the
+    // horizon line visibly moves during the self-test, then ease back to the
+    // real plane attitude over the settle phase. Roll stays at 0 so the
+    // wobble reads as a gyro spinning up, not a banking aircraft.
+    const pitchSweep = (t < 0.5) ? (upPhase * 0.6) : (0.6 * (1 - settle));
+    const _tmpAiQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitchSweep, 0, 0, 'YXZ'));
+    aiQ = (t < 0.5) ? _tmpAiQ : _tmpAiQ.slerp(plane.quaternion, settle);
+  }
   // ASI reads pilot-facing indicated airspeed (drops with pitot icing); RPM
   // gauge is mechanical and uses real airspeed for the windmilling proxy so
   // ice doesn't fake out the tach.
-  drawCockpitAsi(indicatedKmh);
-  drawCockpitAi(plane.quaternion);
-  drawCockpitAlt(altM);
-  drawCockpitRpm(typeof trueKmh === 'number' ? trueKmh : indicatedKmh);
-  drawCockpitCht(state.engineTempC);
-  drawCockpitOil(state.oilPsi);
-  drawCockpitMag(hdgDeg || 0, dt || 0);
-  drawCockpitBrake(state.brakeTempC);
-  drawCockpitFuelFlow();
+  drawCockpitAsi(asiV);
+  drawCockpitAi(aiQ);
+  drawCockpitAlt(altV);
+  drawCockpitRpm(rpmSpeed, rpmOverride);
+  drawCockpitCht(chtV);
+  drawCockpitOil(oilV);
+  drawCockpitMag(magV, dt || 0);
+  drawCockpitBrake(brkV);
+  drawCockpitFuelFlow(ffOverride);
 }
 
 // ====== Camera ======
