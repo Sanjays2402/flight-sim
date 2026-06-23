@@ -9219,6 +9219,15 @@ const state = {
   // memory; not persisted to localStorage since it should rotate each run.
   burgerAp: null,
   patternHinted: Object.create(null),
+  // Active-runway change suggestion: per-airport latch so the same wind
+  // direction doesn't spam the toast after the player declines to switch.
+  // Cleared on resetPlane() (mission restart) and teleportTo() (J / Shift+J
+  // quick-jump) so a fresh sortie or field change rearms every airport.
+  rwyChange: {
+    latched: Object.create(null),  // airport id -> true once the toast has fired this session/condition
+    nextCheckMs: 0,                 // performance.now() throttle (~30s recompute)
+    lastWindFromDeg: null           // last wind FROM degrees we evaluated; >30° swing forces an early recheck
+  },
   // Density altitude — pressure altitude shifted by how hot the air is.
   // Computed each frame from plane altitude (MSL) and faked OAT off
   // state.todHours. Drives the cockpit DA gauge readout and a thrust
@@ -10434,6 +10443,15 @@ function updateLandCardRollout(){
     // has already captured this run's peak via the in-touchdown bump.
     state.tgStreak = 0;
     state.tgAirborneAfterTd = false;
+    // Active-runway change suggestion: full-stop counts as "landed" so the
+    // per-airport latch map clears — the next time the player gets airborne
+    // again at this field the toast can re-fire if the wind still favours
+    // the opposite end. Mirrors the resetPlane / teleportTo clears.
+    if (state.rwyChange){
+      state.rwyChange.latched = Object.create(null);
+      state.rwyChange.nextCheckMs = 0;
+      state.rwyChange.lastWindFromDeg = null;
+    }
     // Arrival callout: tower clears the player to taxi the moment the wheels
     // actually stop on the runway. Latched by rollComplete so it only fires
     // once per rollout. Skip crashes (no clearance for wrecks) and skip stops
@@ -11358,6 +11376,14 @@ function resetPlane(){
     state.shear.endsAt = 0;
     state.shear.triggered = false;
     state.shear.rwyDesignator = '';
+  }
+  // Active-runway change suggestion latches — mission restart wipes the
+  // per-airport one-shot map so a fresh sortie re-evaluates wind vs lineup
+  // and fires the toast again if the favoured end still disagrees.
+  if (state.rwyChange){
+    state.rwyChange.latched = Object.create(null);
+    state.rwyChange.nextCheckMs = 0;
+    state.rwyChange.lastWindFromDeg = null;
   }
   // ILS lock (Shift+V manual course override) clears on every reset so a
   // fresh sortie auto-picks the nearest aligned runway again instead of
@@ -14011,6 +14037,140 @@ function tickWindShear(){
   if (typeof showShearEscape === 'function') showShearEscape();
 }
 
+// ====== ACTIVE-RUNWAY CHANGE SUGGESTION ======
+// Wind shifts during cruise. The wind sock, ATIS broadcast, and kneeboard all
+// quietly recompute the favoured runway end whenever the wind vector changes,
+// but the pilot is heads-down on the HUD and can miss the cue until they're
+// on short final into a sudden tail wind. This tick fires a one-shot toast +
+// PILOT ATC the moment the wind-favoured end of the strip the player is
+// currently lined up on flips to the OPPOSITE threshold, so the choice is
+// surfaced exactly when it actually matters (approaching or departing a
+// runway).
+//
+// Gates:
+//   - Cruise only: not crashed / replay / photo / intro / paused / onGround.
+//   - Nearest airport must be within RWY_CHANGE_RANGE_M (12 km, matches the
+//     kneeboard's KB_RANGE_M so the two read the same airport set).
+//   - Player must be roughly aligned with one runway end (±RWY_CHANGE_ALIGN_DEG
+//     of either threshold heading) so we only fire when the player is
+//     actually approaching or departing, not cruising over the field.
+//   - Recompute every RWY_CHANGE_RECHECK_MS (~30s) OR the instant wind FROM
+//     direction has swung > RWY_CHANGE_WIND_DELTA_DEG (30°) since the last check.
+//
+// Latch: state.rwyChange.latched[airportId] = true once fired. Cleared in
+// resetPlane() (mission restart) and teleportTo() (J / Shift+J quick-jump),
+// so a fresh sortie or field change rearms every airport. Same wind direction
+// keeps firing exactly once per airport until one of those events.
+const RWY_CHANGE_RANGE_M        = 12000;  // metres — must be within this of the airport centre
+const RWY_CHANGE_RECHECK_MS     = 30000;  // ms — periodic recompute interval
+const RWY_CHANGE_WIND_DELTA_DEG = 30;     // degrees of wind FROM swing that forces an early recheck
+const RWY_CHANGE_ALIGN_DEG      = 35;     // degrees of heading alignment with a runway end to count as lined up
+const RWY_CHANGE_MIN_WIND_MS    = 3;      // m/s minimum steady wind to bother evaluating (below this, runway choice doesn't matter)
+
+// Pick the wind-favoured threshold end of an airport. Returns +1 for the
+// canonical heading (ap.hdg) and -1 for the opposite. Mirrors the dot-product
+// projection _atisRunwayInUse / _kneeboardPickRunway share so the three reads
+// always agree.
+function _favoredRunwayFlip(ap){
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const spd = Math.hypot(wx, wz);
+  if (spd < 1.5) return 1;  // calm — canonical end (matches _atisRunwayInUse fallback)
+  const dotFor = (flip) => {
+    const cs = Math.cos(ap.hdg + (flip < 0 ? Math.PI : 0));
+    const sn = Math.sin(ap.hdg + (flip < 0 ? Math.PI : 0));
+    return -(wx * sn + wz * cs);  // positive = headwind component into landing direction
+  };
+  return (dotFor(1) >= dotFor(-1)) ? 1 : -1;
+}
+
+function tickRwyChangeSuggestion(){
+  const rc = state.rwyChange;
+  if (!rc) return;
+  // Cruise-only gate. Mirrors the wind-shear / approach-speed-callout gating
+  // so the toast can't surface in photo mode, mid-replay, on a wreck, or
+  // while the plane is still on the apron.
+  if (state.crashed || state.onGround || state.replayActive
+      || state.photoMode || state.introOpen || state.paused) return;
+  if (typeof AIRPORTS === 'undefined' || !AIRPORTS) return;
+
+  // Wind FROM convention matches the HUD readout + _atisRunwayInUse:
+  // atan2(-wx, -wz). Below the threshold the runway choice doesn't matter,
+  // so we skip outright (a calm-day touch-and-go shouldn't get nagged).
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const wSpd = Math.hypot(wx, wz);
+  if (wSpd < RWY_CHANGE_MIN_WIND_MS) return;
+  let fromDeg = Math.atan2(-wx, -wz) * 180/Math.PI;
+  if (fromDeg < 0) fromDeg += 360;
+
+  // Throttle: only run the full check on the periodic tick OR when wind has
+  // swung more than the delta threshold since the previous evaluation.
+  const now = performance.now();
+  let force = false;
+  if (rc.lastWindFromDeg != null){
+    const delta = Math.abs(((fromDeg - rc.lastWindFromDeg + 540) % 360) - 180);
+    if (delta > RWY_CHANGE_WIND_DELTA_DEG) force = true;
+  }
+  if (!force && now < rc.nextCheckMs) return;
+  rc.nextCheckMs = now + RWY_CHANGE_RECHECK_MS;
+  rc.lastWindFromDeg = fromDeg;
+
+  // Find nearest in-range airport. AIRPORTS only — the carrier deck isn't a
+  // wind-favoured-runway concept and isn't in this array anyway.
+  let bestAp = null, bestApD = Infinity;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < bestApD){ bestApD = d; bestAp = a; }
+  }
+  if (!bestAp || bestApD > RWY_CHANGE_RANGE_M) return;
+
+  // Player must be roughly lined up with one of the two thresholds of the
+  // strip. Reuses the meatball / crab math: project plane heading against
+  // both runway courses and pick whichever is closer, requiring at least one
+  // to be within RWY_CHANGE_ALIGN_DEG.
+  let hdgRad = 0;
+  try {
+    const e = new THREE.Euler().setFromQuaternion(plane.quaternion, 'YXZ');
+    hdgRad = -e.y;  // matches the runwayDesignator() body-frame convention
+  } catch(_){ return; }
+  let hdgDeg = ((hdgRad * 180/Math.PI) % 360 + 360) % 360;
+  const rwyHdgCanon = ((bestAp.hdg * 180/Math.PI) % 360 + 360) % 360;
+  const rwyHdgRecip = (rwyHdgCanon + 180) % 360;
+  const dh0 = ((hdgDeg - rwyHdgCanon) + 540) % 360 - 180;
+  const dh1 = ((hdgDeg - rwyHdgRecip) + 540) % 360 - 180;
+  const useRecip = Math.abs(dh1) < Math.abs(dh0);
+  const linedUpDh = useRecip ? dh1 : dh0;
+  if (Math.abs(linedUpDh) > RWY_CHANGE_ALIGN_DEG) return;
+  // "Currently lined up" end: +1 canonical, -1 opposite.
+  const linedUpFlip = useRecip ? -1 : 1;
+
+  // Wind-favoured end of the same strip.
+  const favFlip = _favoredRunwayFlip(bestAp);
+
+  // Only fire when the favoured end is the OPPOSITE of what the player is
+  // using. Same end (or calm wind) gets nothing — the choice doesn't matter.
+  if (favFlip === linedUpFlip) return;
+
+  // Per-airport latch: don't re-fire while the same condition still holds.
+  // Cleared in resetPlane() and teleportTo().
+  if (rc.latched[bestAp.id]) return;
+  rc.latched[bestAp.id] = true;
+
+  // Build the favoured-end designator using the same helper the windsock,
+  // ATIS, kneeboard, and departure callouts already share.
+  const favHdgRad = bestAp.hdg + (favFlip < 0 ? Math.PI : 0);
+  const favDesig = (typeof runwayDesignator === 'function') ? runwayDesignator(favHdgRad) : '';
+  if (!favDesig) return;
+
+  if (typeof showToast === 'function'){
+    showToast('\u{1F501}', 'RWY CHANGE', bestAp.id + ' favours RWY ' + favDesig);
+  }
+  if (typeof pushATC === 'function'){
+    pushATC('Wind shift \u2014 RWY ' + favDesig + ' in use.', { tag:'PILOT', now:true });
+  }
+}
+
 // ====== MID-FLIGHT TURBULENCE POCKETS ======
 // Invisible 200-500m wide bubbles drifting on the surface wind that, while
 // the plane is inside, inject a small randomized pitch + roll + vertical
@@ -16536,6 +16696,11 @@ function step(dt){
   if (performance.now() > state.windNextChangeMs) pickWindTarget();
   // Wind shear hazard: may override windTarget for a 4-6s burst on short final.
   tickWindShear();
+  // Active-runway change suggestion: when the wind-favoured end of the strip
+  // the player is currently lined up on flips to the OPPOSITE threshold, fire
+  // a one-shot amber toast + PILOT ATC "Wind shift — RWY <DD> in use." call.
+  // Latched per airport per session; clears on resetPlane() and teleportTo().
+  tickRwyChangeSuggestion();
   // Mid-flight turbulence pockets: invisible bubbles drifting on the surface
   // wind that inject body-frame pitch/roll/yaw jitter + a small vertical gust
   // when the plane is inside one. Mid-layer (800-2500m MSL) is rough; low and
@@ -23761,6 +23926,15 @@ updateCamModeUi();
     clearAirshowSmoke();
     stopReplay();
     clearReplayBuffer();
+    // Quick-jump cleared the player's idea of "the airport I was using" — wipe
+    // the active-runway change-suggestion latch map so the new field can fire
+    // its own one-shot "wind favours RWY <DD>" toast if the favoured end
+    // disagrees with how the player parks down.
+    if (state.rwyChange){
+      state.rwyChange.latched = Object.create(null);
+      state.rwyChange.nextCheckMs = 0;
+      state.rwyChange.lastWindFromDeg = null;
+    }
   }
 
   // The "current" airport is whichever runway nearestRunwayInfo picks AND we're
