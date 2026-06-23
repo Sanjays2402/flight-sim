@@ -7777,6 +7777,15 @@ const state = {
   // long static run-up at full throttle doesn't spam the strip.
   takeoffClearArmed: true,
   takeoffClearFired: false,
+  // Engine-start parking-brake hint. First time the player taps `I` (or
+  // the mobile IGN button) on the ground during cold-start with the
+  // parking brake OFF, fire a one-shot amber banner + soft PILOT ATC
+  // line and silently swallow the crank so real-pilot brake discipline
+  // gets a teaching moment. Latched per session so it only nags once
+  // per cold-start; re-arms in resetPlane() and after a full-stop on
+  // the ground (mirrors the takeoff-clearance re-arm pattern) so each
+  // fresh sortie can teach the lesson again.
+  parkingBrakeHintFired: false,
   // Hold-short callout. Tower fires "<id>, hold short of runway <DD>."
   // (or "...line up and wait..." if brakes are set) the first time the
   // player crosses the painted hold-short line at a runway threshold per
@@ -9773,6 +9782,9 @@ function resetPlane(){
   // first throttle push past 70% with brakes off.
   state.takeoffClearArmed = true;
   state.takeoffClearFired = false;
+  // Parking-brake-before-start hint: fresh sortie re-arms the one-shot
+  // amber nag so cold-starts with the brake off get the teaching moment.
+  state.parkingBrakeHintFired = false;
   // Hold-short call: fresh sortie re-arms the hold-short detector so the
   // first taxi out gets the "hold short" / "line up and wait" call.
   state.holdShortArmed = true;
@@ -10844,6 +10856,27 @@ function beginIgnition(){
   // No fuel = no fire. Bail with a helpful nudge instead of silently faking it.
   if (state.fuel <= 0){
     showStatus('NO FUEL', state.onGround ? 'taxi onto the apron to refuel' : 'glide her in', 'hard');
+    return;
+  }
+  // Parking-brake-before-start discipline. First crank attempt on the ground
+  // during cold-start with the brake OFF fires a one-shot amber banner + soft
+  // PILOT ATC line, and silently swallows the crank (no starter SFX, no
+  // ignition) so real pilots get the teaching moment without rewriting the
+  // ritual. Latched per session via state.parkingBrakeHintFired so a stubborn
+  // pilot can still crank without the brake after acknowledging once;
+  // re-arms on resetPlane() and after a full-stop on the ground.
+  if (state.coldStart
+      && state.onGround
+      && !state.parkingBrake
+      && state.primeT < 0
+      && !state.primed
+      && state.ignitionT < 0
+      && !state.parkingBrakeHintFired){
+    state.parkingBrakeHintFired = true;
+    showStatus('\u26A0 SET PARKING BRAKE FIRST', 'Shift+B to set, then I to crank', 'hard');
+    if (typeof pushATC === 'function'){
+      pushATC('Parking brake before start.', { tag:'PILOT', now:true });
+    }
     return;
   }
   // Engine prime / mixture cycle. Ground cold-start only — in-air deadstick
@@ -15629,6 +15662,12 @@ function maybeFireTakeoffClearance(){
   if (state.takeoffClearFired && gs < 0.8){
     state.takeoffClearFired = false;
     state.takeoffClearArmed = true;
+  }
+  // Same full-stop window also re-arms the parking-brake-before-start nag
+  // so a fresh sortie (or an apron full-stop after a touch-and-go) can
+  // teach the lesson again on the next cold-start crank attempt.
+  if (state.parkingBrakeHintFired && gs < 0.8){
+    state.parkingBrakeHintFired = false;
   }
   if (!state.takeoffClearArmed || state.takeoffClearFired) return;
   if (state.brakes) return;
