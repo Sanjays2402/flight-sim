@@ -593,6 +593,7 @@
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
   <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
@@ -7251,6 +7252,19 @@ const state = {
   // Stored in world units (m/s). +x = wind FROM west, +z = wind FROM north.
   windTarget: new THREE.Vector3(2, 0, 1.2),
   windNextChangeMs: 0,
+  // Winds aloft: a separate, persistent upper-level wind that blends in
+  // linearly between WIND_ALOFT_BLEND_LO and WIND_ALOFT_BLEND_HI metres AGL.
+  // Surface wind keeps drifting/shearing as before for sock/cloud/particle
+  // consumers; only the plane's airVel switches to the blended vector via
+  // effectiveWind() so the cockpit actually feels the layer transition.
+  // windAloftTarget is re-rolled on resetPlane so each sortie sees a fresh
+  // upper-air pattern; windAloft eases toward it on the same tick as the
+  // surface wind so abrupt swaps don't snap.
+  windAloft: new THREE.Vector3(0, 0, 0),
+  windAloftTarget: new THREE.Vector3(0, 0, 0),
+  // Scratch vector for effectiveWind() reads inside per-frame physics — avoids
+  // allocating a Vector3 each step.
+  windEff: new THREE.Vector3(0, 0, 0),
   // Wind shear on short final: rare 4-6s burst that flips wind direction
   // and bumps speed below 60m AGL within 1 km of a runway threshold. Tests
   // the pilot's ability to actually crab + flare on the fly instead of
@@ -9263,6 +9277,11 @@ function resetPlane(){
   // Seed a fresh wind on reset so reps feel different.
   pickWindTarget();
   state.wind.copy(state.windTarget);
+  // Re-roll the upper-level layer too so a new sortie sees a fresh winds-
+  // aloft pattern; otherwise a multi-flight session would feel locked into
+  // the first roll.
+  pickWindAloftTarget();
+  state.windAloft.copy(state.windAloftTarget);
   // Clear any in-flight wind shear so a reset doesn't keep the burst pill lit
   // and re-arms the trigger so the next approach gets a fresh roll.
   if (state.shear){
@@ -10941,6 +10960,59 @@ function pickWindTarget(){
 pickWindTarget();
 state.wind.copy(state.windTarget);
 
+// ====== WINDS ALOFT ======
+// A second, stronger wind that takes over above ~1800 m AGL. Picked once per
+// session (and re-rolled on resetPlane) so each sortie has its own upper-air
+// pattern — surface wind keeps shifting/shearing as before. The blend is a
+// linear ramp from WIND_ALOFT_BLEND_LO (full surface) to WIND_ALOFT_BLEND_HI
+// (full aloft); below LO the aloft layer has zero effect on the plane, above
+// HI the surface vector is ignored entirely. Pairs with the existing
+// crosswind crab indicator + wind shear path: a stiff westerly surface wind
+// with a wildly different upper layer will visibly wobble the approach as
+// the plane descends through the transition band instead of staying glass-
+// smooth all the way down.
+const WIND_ALOFT_BLEND_LO = 600;   // m AGL below which only surface wind is felt
+const WIND_ALOFT_BLEND_HI = 1800;  // m AGL above which only aloft wind is felt
+function pickWindAloftTarget(){
+  // Bias the upper-level direction toward the prevailing surface direction
+  // (within ±70°) so the layer reads like real wind veering with altitude,
+  // not a totally unrelated random vector. Speed is 10..22 m/s so the shift
+  // is unmistakable when the plane climbs into the layer.
+  let baseDir;
+  const surfSpd = Math.hypot(state.windTarget.x, state.windTarget.z);
+  if (surfSpd > 0.5){
+    // Wind is going TO: atan2(x, z) gives the TO bearing in our axis convention.
+    baseDir = Math.atan2(state.windTarget.x, state.windTarget.z);
+  } else {
+    baseDir = Math.random() * Math.PI * 2;
+  }
+  const dir = baseDir + (Math.random() - 0.5) * (Math.PI * 70 / 180) * 2;
+  const spd = 10 + Math.random() * 12;  // 10..22 m/s ≈ 19..43 kt
+  state.windAloftTarget.set(Math.sin(dir) * spd, 0, Math.cos(dir) * spd);
+}
+pickWindAloftTarget();
+state.windAloft.copy(state.windAloftTarget);
+
+// Blend factor 0..1 for a given AGL: 0 = pure surface, 1 = pure aloft.
+function windAloftBlend(agl){
+  if (agl <= WIND_ALOFT_BLEND_LO) return 0;
+  if (agl >= WIND_ALOFT_BLEND_HI) return 1;
+  return (agl - WIND_ALOFT_BLEND_LO) / (WIND_ALOFT_BLEND_HI - WIND_ALOFT_BLEND_LO);
+}
+
+// Write the effective wind vector at the given AGL into `out` and return it.
+// Used by the plane's physics step so the cockpit actually feels the layer
+// transition. Other consumers (particles, cloud drift, windsocks, AI plane,
+// bailout chute) keep using state.wind by design — only the player's airVel
+// switches over.
+function effectiveWind(out, agl){
+  const t = windAloftBlend(agl);
+  out.x = state.wind.x * (1 - t) + state.windAloft.x * t;
+  out.y = 0;
+  out.z = state.wind.z * (1 - t) + state.windAloft.z * t;
+  return out;
+}
+
 // ====== WIND SHEAR (short-final hazard) ======
 // Rare burst that overrides windTarget for 4-6s when the plane crosses
 // below 60m AGL within 1 km of a runway threshold. 15% chance per approach,
@@ -11743,7 +11815,14 @@ function step(dt){
   // Wind effect ramps in once the plane is moving — prevents weird sideforce
   // sitting still on the ramp with a 10 m/s wind blowing.
   const windEffect = state.onGround ? Math.min(1, v.length() / 30) : 1;
-  const airVel = v.clone().addScaledVector(state.wind, -windEffect);
+  // Pull the AGL-blended effective wind (surface below 600 m, full aloft
+  // above 1800 m, linear blend through the transition band) so climbing
+  // through the layer actually shifts the airspeed vector. On-ground the
+  // blend is naturally pinned to surface wind since AGL ≈ 0 there.
+  const _terrY = (typeof terrainHeight === 'function') ? terrainHeight(plane.position.x, plane.position.z) : 0;
+  const _aglForWind = Math.max(0, plane.position.y - Math.max(0, _terrY) - GEAR_H);
+  effectiveWind(state.windEff, _aglForWind);
+  const airVel = v.clone().addScaledVector(state.windEff, -windEffect);
   const speed = airVel.length();
   const vBody = airVel.clone().applyQuaternion(plane.quaternion.clone().invert());
   const vFwd = -vBody.z;
@@ -12498,6 +12577,11 @@ function step(dt){
   const gust = Math.sin(performance.now() * 0.0009) * 0.8 + Math.cos(performance.now() * 0.0017) * 0.5;
   state.wind.x += gust * 0.02;
   state.wind.z += gust * 0.02;
+  // Winds aloft layer drifts toward its own (slower-changing) target on the
+  // same ease so brief surface gusts don't propagate into the upper-level
+  // vector. Re-rolled per session on resetPlane; no per-frame retargeting.
+  state.windAloft.x += (state.windAloftTarget.x - state.windAloft.x) * windEase;
+  state.windAloft.z += (state.windAloftTarget.z - state.windAloft.z) * windEase;
   // Time of day advances every step.
   const _prevTod = state.todHours;
   state.todHours = (state.todHours + TOD_SPEED * dt) % 24;
@@ -12846,6 +12930,34 @@ function step(dt){
   let windFromDeg = Math.atan2(-state.wind.x, -state.wind.z) * 180/Math.PI;
   if (windFromDeg < 0) windFromDeg += 360;
   $('#wind').textContent = String(Math.round(windFromDeg)).padStart(3,'0') + '@' + Math.round(windSpdKt) + 'kt';
+  // Winds aloft row: only shows once the plane has actually climbed into
+  // the blend band, so VFR pilots at pattern altitude don't get a second
+  // wind readout cluttering the panel. Hidden in photo mode along with the
+  // rest of the HUD (the #hud wrapper handles that), and hidden on the
+  // ground / in intro / replay / pause / crash so the row only appears
+  // when the cockpit actually feels the layer.
+  const _waRow = document.getElementById('windAloftRow');
+  if (_waRow){
+    const _terrYHud = (typeof terrainHeight === 'function') ? terrainHeight(plane.position.x, plane.position.z) : 0;
+    const _aglHud = Math.max(0, plane.position.y - Math.max(0, _terrYHud) - GEAR_H);
+    const _blendHud = windAloftBlend(_aglHud);
+    const _waShouldShow = (
+      _blendHud > 0.05 &&
+      !state.onGround && !state.crashed && !state.introOpen &&
+      !state.replayActive && !state.paused
+    );
+    if (_waShouldShow){
+      const _waSpd = Math.hypot(state.windAloft.x, state.windAloft.z);
+      const _waSpdKt = _waSpd * 1.94384;
+      let _waFrom = Math.atan2(-state.windAloft.x, -state.windAloft.z) * 180/Math.PI;
+      if (_waFrom < 0) _waFrom += 360;
+      const _waEl = document.getElementById('windAloft');
+      if (_waEl) _waEl.textContent = String(Math.round(_waFrom)).padStart(3,'0') + '@' + Math.round(_waSpdKt) + 'kt';
+      _waRow.style.display = '';
+    } else {
+      _waRow.style.display = 'none';
+    }
+  }
   // RWY WET pill — pairs with the rain weather toggle so pilots know to expect
   // a longer rollout before they're on the strip. The actual friction drop
   // lives in the on-ground physics block.
@@ -15125,6 +15237,41 @@ function drawWeatherRadar(){
   ctx.fillStyle = 'rgba(255,82,82,0.85)';
   ctx.textAlign = 'center';
   ctx.fillText('N', cx, 2);
+  // Winds-aloft overlay: small light-blue arrow in the top-right corner
+  // showing the upper-level wind direction (TO end at the arrowhead). Pairs
+  // with the mini-map's surface wind badge so a pilot scanning the panels can
+  // see the layer shift before climbing into it. Length scales with aloft
+  // speed; hidden when the aloft layer is calm.
+  const _wxAloftSpd = Math.hypot(state.windAloft.x, state.windAloft.z);
+  if (_wxAloftSpd > 0.4){
+    const _wxux = state.windAloft.x / _wxAloftSpd;
+    const _wxuz = state.windAloft.z / _wxAloftSpd;
+    const _wxLen = Math.min(20, 8 + _wxAloftSpd * 0.9);
+    const _wxcx = W - 14, _wxcy = 14;
+    ctx.fillStyle = 'rgba(8,14,22,0.7)';
+    ctx.beginPath(); ctx.arc(_wxcx, _wxcy, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#9bd0ff';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(_wxcx - _wxux * _wxLen * 0.5, _wxcy - _wxuz * _wxLen * 0.5);
+    ctx.lineTo(_wxcx + _wxux * _wxLen * 0.5, _wxcy + _wxuz * _wxLen * 0.5);
+    ctx.stroke();
+    const _wxhx = _wxcx + _wxux * _wxLen * 0.5;
+    const _wxhy = _wxcy + _wxuz * _wxLen * 0.5;
+    const _wxpx = -_wxuz, _wxpy = _wxux;
+    ctx.fillStyle = '#9bd0ff';
+    ctx.beginPath();
+    ctx.moveTo(_wxhx, _wxhy);
+    ctx.lineTo(_wxhx - _wxux * 4 + _wxpx * 2.5, _wxhy - _wxuz * 4 + _wxpy * 2.5);
+    ctx.lineTo(_wxhx - _wxux * 4 - _wxpx * 2.5, _wxhy - _wxuz * 4 - _wxpy * 2.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(155,208,255,0.85)';
+    ctx.font = 'bold 7px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('AGL HI', _wxcx, _wxcy + 11);
+  }
   ctx.restore();
 }
 
@@ -17856,6 +18003,8 @@ updateCamModeUi();
     state.engineOut = false;
     pickWindTarget();
     state.wind.copy(state.windTarget);
+    pickWindAloftTarget();
+    state.windAloft.copy(state.windAloftTarget);
     for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
     for (const v of aiVortexMeshes){ v.primed = false; v.mesh.visible = false; }
     wakeState.intensity = 0; wakeState.rumbleCooldown = 0; wakeState.wasInWake = false;
