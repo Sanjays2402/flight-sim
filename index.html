@@ -155,6 +155,14 @@
      doesn't nag through rotation. Hidden in photo mode via PHOTO_HIDE_IDS. */
   #xwhint { position:fixed; bottom:62px; left:50%; transform:translateX(-50%); width:180px; height:64px; background:rgba(8,14,22,.78); border:1px solid #e88be8; border-radius:8px; backdrop-filter:blur(8px); padding:4px; display:none; z-index:6; pointer-events:none; box-shadow:0 0 18px rgba(232,139,232,0.25); }
   #xwhint canvas { display:block; width:100%; height:100%; }
+  /* Airport Hop distance-to-go ribbon: thin bottom-center pill that lists
+     the current leg, next airport id, straight-line distance, and ETA off
+     ground speed. Sits at bottom:180px so it clears #papi (18), #xwhint (62),
+     and the cockpit gauge panel (54+~120). Hidden in photo / replay / pause /
+     intro / crash, on the last touchdown of the final leg, and whenever a
+     touchdown card is showing. Pure flavor + nav aid, no input target. */
+  #hopRibbon { position:fixed; bottom:180px; left:50%; transform:translateX(-50%); padding:5px 14px; font-size:11px; letter-spacing:2px; color:#cfe; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:14px; backdrop-filter:blur(8px); display:none; z-index:6; pointer-events:none; font-weight:700; text-shadow:0 1px 2px rgba(0,0,0,.6); white-space:nowrap; }
+  #hopRibbon .km { font-weight:800; }
   /* Approach checklist: small right-side panel that fades in when the pilot
      is within 4 km of any airport with gear up OR flaps still in, and
      descending. Each row (GEAR / FLAPS / FUEL / SPEED) live-ticks green as
@@ -1054,6 +1062,7 @@
 </div>
 <div id="status"></div>
 <div id="missionDone"></div>
+<div id="hopRibbon"></div>
 <div id="shearEscape"></div>
 <div id="aerobox">
   <div class="ttl">🎯 AEROBATIC BOX</div>
@@ -17267,6 +17276,66 @@ function step(dt){
   // Advance ring-chase mission (hit detect, advance index, pulse the active ring).
   updateRingChase(dt);
 
+  // Airport-hop distance-to-go ribbon — bottom-center pill with leg index,
+  // next airport id, straight-line distance to the next threshold, and ETA
+  // off current ground speed. km color codes: green inside 5, amber 5..20,
+  // blue past 20. Auto-hides on the final touchdown (hopDone latches), in
+  // photo/replay/pause/intro/crash, and whenever a touchdown card is up so
+  // the bottom-center area stays uncluttered. Mission already tracks the
+  // next waypoint internally — this just surfaces it.
+  {
+    const hrEl = document.getElementById('hopRibbon');
+    if (hrEl){
+      let hrShow = (state.mode === 'hop') && !state.hopDone
+        && !state.crashed && !state.replayActive && !state.photoMode
+        && !state.introOpen && !state.paused;
+      if (hrShow){
+        // Suppress while a touchdown / crash / bail card is up so the cards
+        // own the bottom-center space cleanly.
+        const _cardUp = (typeof landCardEl !== 'undefined' && landCardEl && landCardEl.style.display && landCardEl.style.display !== 'none')
+          || (typeof crashCardEl !== 'undefined' && crashCardEl && crashCardEl.style.display && crashCardEl.style.display !== 'none')
+          || (typeof bailCardEl !== 'undefined' && bailCardEl && bailCardEl.style.display && bailCardEl.style.display !== 'none');
+        if (_cardUp) hrShow = false;
+      }
+      if (hrShow){
+        const wantId = state.hopOrder && state.hopOrder[state.hopIdx];
+        const wantAp = wantId ? AIRPORTS.find(a => a.id === wantId) : null;
+        if (wantAp){
+          const legNo = state.hopIdx + 1;
+          const legTotal = state.hopOrder.length;
+          const dM = Math.hypot(plane.position.x - wantAp.x, plane.position.z - wantAp.z);
+          const dKm = dM / 1000;
+          // Ground speed off velocity (m/s); ETA only meaningful above a
+          // 5 m/s floor so taxi / hover readings don't print 99:99.
+          const gsMs = Math.hypot(state.vel.x, state.vel.z);
+          let etaTxt;
+          if (gsMs > 5){
+            const etaSec = Math.min(5999, Math.floor(dM / gsMs));
+            const m = Math.floor(etaSec / 60);
+            const s = etaSec % 60;
+            etaTxt = m + ':' + String(s).padStart(2, '0');
+          } else {
+            etaTxt = '—:—';
+          }
+          // km color codes for quick range read.
+          let kmColor;
+          if (dKm < 5)        kmColor = '#7ee787';
+          else if (dKm < 20)  kmColor = '#ffd166';
+          else                kmColor = '#6ad8ff';
+          hrEl.innerHTML = 'LEG ' + legNo + '/' + legTotal
+            + ' · NEXT ' + wantId
+            + ' · <span class="km" style="color:' + kmColor + '">' + dKm.toFixed(1) + ' km</span>'
+            + ' · ETA ' + etaTxt;
+          hrEl.style.display = 'block';
+        } else {
+          hrEl.style.display = 'none';
+        }
+      } else if (hrEl.style.display !== 'none'){
+        hrEl.style.display = 'none';
+      }
+    }
+  }
+
   // PAPI for nearest runway when on approach
   let showPAPI = false, reds = 0;
   if (nearest){
@@ -22534,7 +22603,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
