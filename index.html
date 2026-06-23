@@ -13463,6 +13463,80 @@ function drawMinimap(hdgDeg){
   minimapCtx.moveTo(cx, 4); minimapCtx.lineTo(cx, H-4);
   minimapCtx.moveTo(4, cy); minimapCtx.lineTo(W-4, cy);
   minimapCtx.stroke();
+  // Fuel range ring — dashed circle around the plane showing how far the
+  // current tank + current burn can drag us in straight-line cruise. Mirrors
+  // the cockpit FUEL FLOW gph curve (idle ~2, cruise ~9, full ~16) so the
+  // ring and the gauge agree on what "burn rate" means; game economy says a
+  // full tank = 360s at full throttle, so per-sec drain = gph/5760. Multiplied
+  // by a representative ~210 km/h cruise gives a believable straight-line
+  // range. Colored cyan when we can still reach the nearest field, amber when
+  // we're inside the "closer than half my range" cushion (need to plan now),
+  // red when we literally can't make it. Hidden when the engine is dead and
+  // fuel is gone (deadstick: glide ring is a different problem) or in photo
+  // mode (the whole minimap is hidden in photo mode already via
+  // PHOTO_HIDE_IDS, so this is a belt-and-braces guard).
+  if (!state.photoMode && state.fuel > 0.001 && !(state.engineOut && state.fuel <= 0.001)){
+    // gph proxy that matches drawCockpitFf(): cold-start sips up to ~2 gph as
+    // the starter spools, live engine ramps 2 -> 16 along a mild quadratic,
+    // engine-out with fuel left (windmilling but not burning) reads 0.
+    let gphProxy;
+    if (state.coldStart){
+      gphProxy = state.ignitionT >= 0
+        ? Math.min(2, state.ignitionT / COLD_START_SPOOL_S * 2.4)
+        : 0;
+    } else if (!state.engineOut && state.fuel > 0){
+      const tt = Math.max(0, Math.min(1, state.throttle));
+      gphProxy = 2 + 14 * (0.7 * tt + 0.3 * tt * tt);
+    } else {
+      gphProxy = 0;
+    }
+    // Only draw the ring when we're actually burning fuel — otherwise the
+    // "range" is undefined (engine off, no burn, infinite glide-time on this
+    // tank). Floor stops div-by-zero.
+    if (gphProxy > 0.05){
+      // game per-sec drain at this gph (calibrated so gph=16 hits the
+      // existing 1/360 per-sec full-throttle drain).
+      const perSec = gphProxy / 5760;
+      const secLeft = state.fuel / perSec;
+      const CRUISE_KMH = 210;             // representative cruise speed
+      const rangeM = secLeft * (CRUISE_KMH / 3.6);
+      const ringPx = rangeM * scale;
+      // Find nearest real airport so we can color-code reachability. Carrier
+      // deck included so an offshore approach also flips the ring color.
+      let nearD = 1e9;
+      for (const a of AIRPORTS){
+        const d = Math.hypot(a.x - plane.position.x, a.z - plane.position.z);
+        if (d < nearD) nearD = d;
+      }
+      {
+        const cd = Math.hypot(CARRIER.x - plane.position.x, CARRIER.z - plane.position.z);
+        if (cd < nearD) nearD = cd;
+      }
+      // Color: cyan = comfortable cushion, amber = tight, red = can't make it.
+      let ringColor;
+      if (rangeM < nearD)              ringColor = 'rgba(255,82,82,0.85)';   // red
+      else if (rangeM < nearD * 2)     ringColor = 'rgba(255,209,102,0.85)'; // amber
+      else                             ringColor = 'rgba(80,220,235,0.75)';  // cyan
+      // Only draw the ring while it's actually visible on the minimap or just
+      // off the edge. A huge cushion ring (e.g. full tank + idle) would crawl
+      // out to ~hundreds of km on screen — clamp to the visible radius so we
+      // skip the draw instead of asking canvas for a 5000 px arc.
+      const minVisibleR = R + 4;
+      if (ringPx >= 6 && ringPx <= minVisibleR * 60){
+        minimapCtx.save();
+        minimapCtx.strokeStyle = ringColor;
+        minimapCtx.lineWidth = 1.4;
+        if (typeof minimapCtx.setLineDash === 'function'){
+          minimapCtx.setLineDash([5, 4]);
+        }
+        minimapCtx.beginPath();
+        minimapCtx.arc(cx, cy, Math.min(ringPx, minVisibleR), 0, Math.PI*2);
+        minimapCtx.stroke();
+        if (typeof minimapCtx.setLineDash === 'function') minimapCtx.setLineDash([]);
+        minimapCtx.restore();
+      }
+    }
+  }
   // Airports: small square + label. World +z is south (down on screen).
   for (const a of AIRPORTS){
     const dx = a.x - plane.position.x;
