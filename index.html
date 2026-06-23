@@ -4479,6 +4479,68 @@ yokeGroup.visible = false;
 const YOKE_PITCH_MAX_RAD = 0.32;  // ~18° forward/back travel
 const YOKE_ROLL_MAX_RAD  = 0.55;  // ~31° left/right wheel twist
 
+// ====== COCKPIT THROTTLE QUADRANT ======
+// Companion to the cockpit yoke. A small grey quadrant base mounted to the
+// pilot's right with a black throttle lever that pivots forward (idle) ↔
+// back (full) on the player's throttle 0..1. Visual only — no flight model
+// change — but every W/S keypress or mobile-slider drag finally has a
+// physical echo in the cockpit so the throttle setting doesn't feel
+// disembodied. Same gating as the yoke: cockpit cam only, hidden in
+// photo/pause/replay/intro so saved PNGs and frozen frames stay clean.
+// Hidden by default; the per-frame tick flips it on in cockpit cam, and the
+// airframe-hide loop in updateCamModeUi skips it via the exception list so
+// the loop doesn't override our visibility decision.
+const throttleGroup = new THREE.Group();
+const throttlePivot = new THREE.Group();
+// Sit just to the right of the yoke (yoke pivot is at x=0, this lives at
+// x=+0.12) and slightly lower so the quadrant doesn't crowd the wheel. The
+// pivot point itself is the base of the lever's arc so a throttle change
+// swings the lever around its own mounting axis instead of around the floor.
+throttlePivot.position.set(0.12, 0.16, 0.05);
+// Base: a small flat grey plate that reads as a side-mounted throttle
+// quadrant. Slim profile so it doesn't visually fight the yoke next to it.
+const throttleBase = new THREE.Mesh(
+  new THREE.BoxGeometry(0.06, 0.10, 0.12),
+  new THREE.MeshLambertMaterial({ color: 0x4a4f55 })
+);
+throttleBase.position.y = 0.05;
+throttlePivot.add(throttleBase);
+// Lever: thin black shaft with a small rounded knob on top. The lever is
+// parented to throttleLeverPivot so the rotation happens around the base of
+// the lever (not its midpoint), giving the classic "throttle pulled back"
+// look. Default orientation = pointing straight up = idle (throttle=0); the
+// per-frame tick rotates it backward as throttle increases.
+const throttleLeverPivot = new THREE.Group();
+throttleLeverPivot.position.set(0, 0.10, 0);
+const throttleLever = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.012, 0.012, 0.16, 12),
+  new THREE.MeshLambertMaterial({ color: 0x1a1a1c })
+);
+throttleLever.position.y = 0.08;
+throttleLeverPivot.add(throttleLever);
+const throttleKnob = new THREE.Mesh(
+  new THREE.SphereGeometry(0.022, 12, 10),
+  new THREE.MeshLambertMaterial({ color: 0x202024 })
+);
+throttleKnob.position.y = 0.165;
+throttleLeverPivot.add(throttleKnob);
+throttlePivot.add(throttleLeverPivot);
+throttleGroup.add(throttlePivot);
+plane.add(throttleGroup);
+throttleGroup.visible = false;
+// Max lever swing: forward (idle) is ~+0.35 rad (lever tips toward the
+// instrument panel), back (full power) is ~-0.85 rad (lever pulled back
+// toward the pilot). Asymmetric because real throttle quadrants have more
+// travel toward the pilot than toward the firewall. Mapped from throttle
+// 0..1 below.
+const THROTTLE_FWD_MAX_RAD = 0.35;
+const THROTTLE_BACK_MAX_RAD = 0.85;
+// Smoothed lever position so a throttle slam doesn't make the lever twitch.
+// Eased toward target each frame using the same SURFACE_RATE the yoke uses
+// (defined further down), so the lever and yoke share the same "snappy but
+// not twitchy" feel.
+let throttleLeverAnim = 0;        // 0..1, smoothed throttle for the lever
+
 // Smoothed surface deflection state. Eased toward target each frame so a
 // stick snap doesn't make the surfaces visibly twitch. Max deflection picked
 // to read like real-world max travel (~22° aileron/elevator, ~28° rudder)
@@ -14012,6 +14074,30 @@ function step(dt){
         yokePivot.rotation.z = -aileronAnim  * YOKE_ROLL_MAX_RAD;
       }
     }
+    // Cockpit throttle quadrant: mirror the smoothed throttle setting onto
+    // the visual lever. Same gating as the yoke (cockpit cam only, hidden
+    // in photo/pause/replay/intro). Lever swings from forward (idle) at
+    // throttle=0 to backward (full power) at throttle=1, matching real
+    // throttle-quadrant convention where pulling back gives more power.
+    if (throttleGroup){
+      const tqVisible = state.cam === 1
+        && !state.photoMode && !state.paused
+        && !state.replayActive && !state.introOpen;
+      throttleGroup.visible = tqVisible;
+      if (tqVisible){
+        // Ease throttleLeverAnim toward state.throttle at SURFACE_RATE so a
+        // sudden W/S slam reads as a smooth lever sweep instead of a snap.
+        const thrTarget = Math.max(0, Math.min(1, state.throttle || 0));
+        const tqStep = SURFACE_RATE * dt;
+        if (throttleLeverAnim < thrTarget) throttleLeverAnim = Math.min(thrTarget, throttleLeverAnim + tqStep);
+        else if (throttleLeverAnim > thrTarget) throttleLeverAnim = Math.max(thrTarget, throttleLeverAnim - tqStep);
+        // Lerp from +THROTTLE_FWD_MAX_RAD (idle) at thr=0 to
+        // -THROTTLE_BACK_MAX_RAD (full) at thr=1. Negative X-rotation tips
+        // the lever top toward -Z = toward the pilot's seat.
+        throttleLeverPivot.rotation.x = THROTTLE_FWD_MAX_RAD
+          - throttleLeverAnim * (THROTTLE_FWD_MAX_RAD + THROTTLE_BACK_MAX_RAD);
+      }
+    }
   }
 
   // Wing flex: bend the wingtip pivots upward proportional to the live G-load
@@ -18100,6 +18186,10 @@ function updateCamModeUi(){
     // visibility based on cockpit + photo/replay/pause/intro gates. Skip
     // here so the airframe-hide loop doesn't fight that decision.
     if (typeof yokeGroup !== 'undefined' && child === yokeGroup) continue;
+    // throttleGroup is owned by the per-frame cockpit-throttle tick for the
+    // exact same reason as the yoke — skip here so the airframe-hide loop
+    // doesn't override that visibility decision.
+    if (typeof throttleGroup !== 'undefined' && child === throttleGroup) continue;
     child.visible = !cockpit;
   }
   // Cockpit instrument panel only shows in cockpit cam. Photo mode hides it via
