@@ -948,6 +948,10 @@
       <div class="hint">Master volume (stall horn, future engine sound).</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">MAG VAR</span><span class="val" id="setMagVarV">+15°E</span></div>
+      <div class="hint">HUD compass strip, whiskey card, and heading bug all read MAGNETIC — about 15° less than true heading here, matching the Pacific Northwest. Runway designators and ATIS stay on the legacy true-heading math, so the two-digit RWY number won't match the magnetic course exactly.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">LIVERY</span><span class="val" id="setLivV">CLASSIC</span></div>
       <div id="setLiveries"></div>
       <div class="hint">Paint scheme for your plane. Saved between flights.</div>
@@ -1503,6 +1507,20 @@ function onTakeoff(){
     }
   }
 }
+// Magnetic variation: real-world headings the pilot sees on the compass
+// strip + whiskey card + HUD HDG readout + heading bug are MAGNETIC, while
+// the physics + autopilot continue to think in TRUE world-frame headings.
+// East variation is conventionally entered as a positive number; magnetic
+// = true - east_variation ("east is least"). A fixed +15°E offset lines up
+// roughly with the Pacific Northwest where the rest of the sim is anchored,
+// so the strip reads a believable ~15° below the underlying true heading.
+// Runway designators / kneeboard / ATIS stay on the existing true-heading
+// math (changing them would ripple through every mission + ATC line) — the
+// settings panel hint documents the discrepancy so it doesn't surprise.
+const MAG_VAR_DEG = 15;
+function trueToMagDeg(trueDeg){ return ((trueDeg - MAG_VAR_DEG) % 360 + 360) % 360; }
+function magToTrueDeg(magDeg){ return ((magDeg + MAG_VAR_DEG) % 360 + 360) % 360; }
+function magToTrueRad(magDeg){ return magToTrueDeg(magDeg) * Math.PI / 180; }
 // Convert runway heading (radians) to a two-digit designator ("27", "09").
 // At takeoff the plane is rolling along the runway in one of two directions;
 // pass the live plane so we can pick the threshold that actually matches the
@@ -9856,10 +9874,13 @@ addEventListener('keydown', e=>{
       const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
       state.ap.hdgRad = Math.atan2(fwdN.x, -fwdN.z);
       const hdgDeg = ((state.ap.hdgRad * 180/Math.PI) % 360 + 360) % 360;
-      state.ap.hdgBug = Math.round(hdgDeg);
+      // Bug + readout are MAGNETIC so they match what the compass strip and
+      // whiskey card show; AP fly target stays TRUE via state.ap.hdgRad.
+      state.ap.hdgBug = Math.round(trueToMagDeg(hdgDeg));
+      const apHdgMag = ((state.ap.hdgBug % 360) + 360) % 360;
       state.ap.on = true;
       state.ap.cruiseLatch = false;
-      showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(Math.round(hdgDeg)).padStart(3,'0'), 'good');
+      showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(apHdgMag).padStart(3,'0'), 'good');
       pushATC('Autopilot engaged, holding ' + Math.round(state.ap.alt - GEAR_H) + 'm.', { tag:'PILOT' });
     }
   }
@@ -9873,8 +9894,8 @@ addEventListener('keydown', e=>{
     const dir  = (e.code === 'BracketLeft') ? -1 : 1;
     state.ap.hdgBug = ((state.ap.hdgBug + dir*step) % 360 + 360) % 360;
     if (state.ap.on){
-      // Update the locked heading immediately so the AP tracks the new bug.
-      state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
+      // Bug is MAGNETIC; AP flies TRUE, so convert once on the way down.
+      state.ap.hdgRad = magToTrueRad(state.ap.hdgBug);
     }
     // Manual bug nudges break the waypoint-follow lock — pilot is taking aim.
     state.ap.wpFollow = false;
@@ -15669,13 +15690,15 @@ function step(dt){
         const wdz = state.waypoint.z - plane.position.z;
         const brgRad = Math.atan2(wdx, -wdz);
         const brgDeg = ((brgRad * 180/Math.PI) % 360 + 360) % 360;
-        state.ap.hdgBug = brgDeg;
+        // Bearing is TRUE; bug is MAGNETIC so the strip stays consistent
+        // when the AP captures the pin.
+        state.ap.hdgBug = trueToMagDeg(brgDeg);
       }
       // ---- Heading hold: bug-driven target. The bug (set with [ / ]) is the
       // authoritative heading; we mirror it into hdgRad so existing readouts
       // stay consistent. Then shortest-arc error, command roll proportional
       // to it, null out yaw drift with a tiny rudder term. Bank limited to ~25°.
-      state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
+      state.ap.hdgRad = magToTrueRad(state.ap.hdgBug);
       const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
       const curHdg = Math.atan2(fwdN.x, -fwdN.z);
       let hdgErr = state.ap.hdgRad - curHdg;
@@ -17022,7 +17045,7 @@ function step(dt){
   } else if (divertRow.style.display !== 'none'){
     divertRow.style.display = 'none';
   }
-  $('#hdg').textContent  = String(Math.round(hdg)).padStart(3,'0');
+  $('#hdg').textContent  = String(Math.round(trueToMagDeg(hdg))).padStart(3,'0');
   $('#vs').textContent   = vs.toFixed(1);
   $('#thr').textContent  = Math.round(state.throttle*100);
   $('#flp').textContent  = flapDeg;
@@ -18052,7 +18075,10 @@ function step(dt){
   updateAeroBox(dt);
 
   drawAttitude(plane.quaternion);
-  drawCompass(hdg, state.ap.hdgBug);
+  // Compass strip + cockpit whiskey card both read MAGNETIC; AP heading bug
+  // is also stored in magnetic so drawCompass receives matched values.
+  const hdgMag = trueToMagDeg(hdg);
+  drawCompass(hdgMag, state.ap.hdgBug);
   drawVSI(vs);
   drawGlideslope(hdg);
   drawILSNeedles(hdg);
@@ -18065,7 +18091,7 @@ function step(dt){
   drawChecklist(indicatedKmh);
   drawMinimap(hdg);
   drawWeatherRadar();
-  drawCockpitPanel(indicatedKmh, altMDisp, hdg, dt, speedKmh);
+  drawCockpitPanel(indicatedKmh, altMDisp, hdgMag, dt, speedKmh);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -18282,10 +18308,13 @@ function drawCompass(hdgDeg, bugDeg){
     const cx = compassCv.width / 2;
     const PX_PER_DEG = 6; // matches drawCompass
     const offsetDeg = (sx - cx) / PX_PER_DEG;
-    const newBug = ((liveHdgDeg() + offsetDeg) % 360 + 360) % 360;
+    // Strip ticks are MAGNETIC, so the pilot clicks on a magnetic bearing;
+    // bug rides in magnetic too, and the AP target gets converted to TRUE.
+    const liveMag = trueToMagDeg(liveHdgDeg());
+    const newBug = ((liveMag + offsetDeg) % 360 + 360) % 360;
     state.ap.hdgBug = Math.round(newBug);
     if (state.ap.on){
-      state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
+      state.ap.hdgRad = magToTrueRad(state.ap.hdgBug);
     }
     state.ap.wpFollow = false;
   });
@@ -24219,6 +24248,15 @@ addEventListener('keydown', e => {
     sensV.textContent = settings.sensitivity.toFixed(2) + '×';
     fovV.textContent = Math.round(settings.fov) + '°';
     volV.textContent = Math.round(settings.volume * 100) + '%';
+    // MAG VAR pill: derived from the MAG_VAR_DEG constant so the docs stay
+    // glued to the actual offset baked into trueToMagDeg / magToTrueDeg.
+    const _magVarPill = document.getElementById('setMagVarV');
+    if (_magVarPill){
+      const v = Math.round(MAG_VAR_DEG);
+      _magVarPill.textContent = (v === 0)
+        ? '0°'
+        : (v > 0 ? '+' + v + '°E' : (-v) + '°W');
+    }
     if (livRow){
       for (const c of livRow.children){
         c.classList.toggle('sel', +c.dataset.idx === settings.livery);
