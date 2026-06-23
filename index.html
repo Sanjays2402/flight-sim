@@ -797,7 +797,7 @@
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
-  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
+  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
   <div class="row" id="emrRow" style="display:none"><span class="lbl">EMR</span><span class="val" id="emrReadout" style="color:#ff6cf7;font-weight:700">—</span></div>
@@ -18033,6 +18033,51 @@ function step(dt){
     fuelEl.style.animation = '';
   }
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
+  // Time-to-empty pill: live mm:ss remaining at the current gph proxy. Reuses
+  // the same burn-rate math drawCockpitFuelFlow() + the mini-map fuel range
+  // ring already trust (gph -> per-sec drain = gph/5760) so all three readouts
+  // tell the same story. Amber under 20 min, red under 10 min. Reads `T/E ∞`
+  // when there's no burn (engine out / fuel cut / pre-crank cold start) so the
+  // deadstick glide picture stays clean.
+  {
+    const teEl    = document.getElementById('fuelTe');
+    const teValEl = document.getElementById('fuelTeVal');
+    if (teEl && teValEl){
+      // gph proxy — keep this in lockstep with drawCockpitFuelFlow() and the
+      // mini-map range ring. Don't apply the mixture / air-restart tweaks here:
+      // the goal is a stable cruise estimate, not a frame-perfect needle echo.
+      let gphProxy;
+      const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+      if (state.coldStart){
+        gphProxy = state.ignitionT >= 0
+          ? Math.min(2, state.ignitionT / COLD_START_SPOOL_S * 2.4)
+          : 0;
+      } else if (engineLive){
+        const tt = Math.max(0, Math.min(1, state.throttle));
+        gphProxy = 2 + 14 * (0.7 * tt + 0.3 * tt * tt);
+      } else {
+        gphProxy = 0;
+      }
+      const noBurn = state.fuel <= 0.001 || state.engineOut || gphProxy < 0.05;
+      if (noBurn){
+        teValEl.textContent = '∞';
+        teEl.style.color = '#7ad0ff';
+      } else {
+        const perSec  = gphProxy / 5760;            // matches range-ring + burn path
+        const secLeft = Math.max(0, state.fuel / perSec);
+        const mm = Math.floor(secLeft / 60);
+        const ss = Math.floor(secLeft % 60);
+        // Cap the display at 99:59 so a freshly-fueled idle (~96 min) doesn't
+        // blow the layout, but keep the underlying maths honest.
+        const mmShow = Math.min(mm, 99);
+        teValEl.textContent = String(mmShow).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+        teEl.style.color = secLeft < 600 ? '#ff5252'
+                         : secLeft < 1200 ? '#ffb020'
+                                          : '#7ee787';
+      }
+      teEl.style.display = 'inline';
+    }
+  }
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
   // Engine-out best-glide HUD coach. When the engine is dead (mixture-killed,
   // fuel-out, or starved out by the fire) and we're airborne above ~50 m AGL,
