@@ -179,10 +179,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Touch-and-go counter on the HUD — small `T&G ×N` streak row added to the existing TOUCH & GO score panel (hidden until streak ≥ 2 so it doesn't shout on the first land of a session). Every good runway touchdown that follows a prior touchdown within 12s — and only counts after a lift-off, so you can't double-tick a single bounce — increments the streak. Full-stop landings (rollout latch fires below ~0.8 m/s ground speed) and crashes both reset it to 0; resetPlane, the J quick-jump, and a fresh mission also wipe it. Lifetime peak goes to a new `BEST T&G STREAK` row in the PILOT STATS panel, persisted to localStorage via the existing `pilotStats` save path. Pure scorekeeping — no new physics, no new audio — that finally rewards the touch-and-go practice loop.
 
+- [x] Distance-to-runway readout on the HUD — new `RWY` row added right under ALT in the main HUD panel showing straight-line distance to the nearest runway threshold (either end of any runway, including the carrier deck since it lives in `runwayInfos`). Reads as metres under 1 km (e.g. `820 m`) and kilometres above (`1.4 km`). A small light-blue arrow next to the number rotates to point toward that threshold relative to the plane's current heading (up = dead ahead, right = 3 o'clock, etc.). Hidden on the ground and beyond 5 km so it never shouts in cruise; auto-hides in photo mode via the existing `#hud` PHOTO_HIDE_IDS sweep. Pure derived readout off the existing runway-info plumbing — no new physics, no new audio — turns the mini-map's eyeballed distance into a hard number pilots can call out on downwind to base.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Distance-to-runway readout on the HUD — small `RWY 1.4km` pill under the AGL readout that shows straight-line distance to the nearest runway threshold (whichever end you're closer to), with a small arrow next to it pointing toward the threshold. Updates live as you maneuver, hides above 5 km or when on the ground. Reuses the same `landingProj` / nearest-runway plumbing the glideslope indicator already runs every frame so it's basically a free derived readout — but turns the existing mini-map distance estimate into an actual hard number pilots can call out on downwind to base.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

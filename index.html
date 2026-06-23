@@ -458,6 +458,7 @@
   <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h<span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
   <div class="row"><span class="lbl">G</span><span class="val"><span id="gnow">1.0</span> <span id="gpk" style="color:#6aa;font-weight:500">pk 1.0</span></span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
+  <div class="row" id="rwyDistRow" style="display:none"><span class="lbl">RWY</span><span class="val"><span id="rwyDist">0.0 km</span><span id="rwyArrow" style="display:inline-block;margin-left:6px;color:#9ad8ff;font-weight:700;transform:rotate(0deg);transform-origin:50% 50%">↑</span></span></div>
   <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%</span></div>
   <div class="row"><span class="lbl">FLP</span><span class="val"><span id="flp">0</span>°</span></div>
   <div class="row"><span class="lbl">GEAR</span><span class="val" id="gear">DOWN</span></div>
@@ -9117,6 +9118,42 @@ function step(dt){
 
   $('#spd').textContent  = Math.round(indicatedKmh);
   $('#alt').textContent  = Math.round(altM);
+  // RWY distance pill: straight-line distance to the nearest runway threshold
+  // (either end of any runway, including the carrier deck since it lives in
+  // runwayInfos). Reuses the same per-frame plumbing as the glideslope
+  // strip — derived readout, no new scene work. Hidden on the ground or
+  // beyond 5 km so it never shouts in cruise. Arrow rotates around its own
+  // center to point at the threshold relative to the plane's current nose.
+  const rwyDistRow = document.getElementById('rwyDistRow');
+  let _bestThrDist = 1e9, _bestThrBrg = 0;
+  if (!state.onGround){
+    for (const ri of runwayInfos){
+      const halfLen = ri.ap.len/2;
+      const sx = Math.sin(ri.ap.hdg), cz = Math.cos(ri.ap.hdg);
+      for (const sgn of [1, -1]){
+        const tx = ri.ap.x + sx * halfLen * sgn;
+        const tz = ri.ap.z + cz * halfLen * sgn;
+        const d = Math.hypot(plane.position.x - tx, plane.position.z - tz);
+        if (d < _bestThrDist){
+          _bestThrDist = d;
+          _bestThrBrg = Math.atan2(tx - plane.position.x, -(tz - plane.position.z)) * 180/Math.PI;
+        }
+      }
+    }
+  }
+  if (!state.onGround && _bestThrDist < 5000){
+    if (rwyDistRow.style.display !== 'flex') rwyDistRow.style.display = 'flex';
+    document.getElementById('rwyDist').textContent =
+      _bestThrDist < 1000
+        ? Math.round(_bestThrDist) + ' m'
+        : (_bestThrDist/1000).toFixed(1) + ' km';
+    let _arrowDeg = _bestThrBrg - hdg;
+    while (_arrowDeg > 180) _arrowDeg -= 360;
+    while (_arrowDeg < -180) _arrowDeg += 360;
+    document.getElementById('rwyArrow').style.transform = 'rotate(' + _arrowDeg.toFixed(0) + 'deg)';
+  } else if (rwyDistRow.style.display !== 'none'){
+    rwyDistRow.style.display = 'none';
+  }
   $('#hdg').textContent  = String(Math.round(hdg)).padStart(3,'0');
   $('#vs').textContent   = vs.toFixed(1);
   $('#thr').textContent  = Math.round(state.throttle*100);
