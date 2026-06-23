@@ -3089,6 +3089,112 @@ function makeAirport(a){
       }
     }
   })();
+  // Runway distance-remaining markers — small ICAO-style white-on-black
+  // sign posts every 300 m down each runway, one pair per station on either
+  // edge of the strip. Each sign has TWO faces (front + back) showing the
+  // distance remaining in thousands of feet to the threshold the pilot is
+  // rolling TOWARD on that side: the face visible to a pilot rolling in the
+  // +z direction shows the distance to the +z threshold (in 300m-as-1000ft
+  // units, since 300m ≈ 985ft is the sim's chosen step), the opposite face
+  // shows the distance to the -z threshold. So as you roll down the runway
+  // you see the standard descending count (e.g. 4, 3, 2, 1) regardless of
+  // direction. Pairs with the painted runway numbers + PAPI bars + TDZ
+  // markings so a long rollout finally has visual milestones instead of
+  // eyeballing the runway end. Carrier deck doesn't get these (no fixed
+  // threshold posts on a moving 240 m deck — that's what the meatball is
+  // for). Pure scenery: no physics, no collisions, no per-frame tick.
+  (function paintDistanceRemaining(){
+    const STEP = 300;       // metres between sign stations (≈ 1000 ft)
+    const MIN_LEN = 600;    // need room for at least one mid station before the next threshold
+    if (a.len < MIN_LEN) return;
+    const SIGN_W = 1.5;     // metres wide (along runway-perpendicular axis)
+    const SIGN_H = 0.9;     // metres tall
+    const SIGN_Y = 0.55;    // centre height above the runway
+    const POST_H = 0.5;     // mount post height
+    const EDGE_OFFSET = 3;  // metres off the edge stripe so we don't clip the runway plane
+    const x = a.w / 2 + EDGE_OFFSET;
+    // Tiny mount post under each sign so the panel reads as mounted, not
+    // floating. Cheap grey box shared via a single material.
+    const postMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
+    const postGeo = new THREE.BoxGeometry(0.18, POST_H, 0.18);
+    // Cache sign textures per digit (0..9) so multiple stations sharing the
+    // same digit reuse one CanvasTexture rather than rebuilding the canvas.
+    const digitTexCache = new Map();
+    function digitTex(d){
+      const key = String(d);
+      const hit = digitTexCache.get(key);
+      if (hit) return hit;
+      // 96×64 landscape matches the 1.5 m × 0.9 m sign aspect (1.67:1) so the
+      // digit lands cleanly inside the painted panel without distortion.
+      const cv = document.createElement('canvas');
+      cv.width = 96; cv.height = 64;
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#000000';
+      cx.fillRect(0, 0, cv.width, cv.height);
+      cx.fillStyle = '#ffffff';
+      cx.font = 'bold 52px ui-monospace, "SF Mono", Menlo, monospace';
+      cx.textAlign = 'center';
+      cx.textBaseline = 'middle';
+      cx.fillText(key, cv.width / 2, cv.height / 2 + 2);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 4;
+      digitTexCache.set(key, tex);
+      return tex;
+    }
+    function signMat(d){
+      return new THREE.MeshBasicMaterial({
+        map: digitTex(d), transparent: false,
+        polygonOffset: true, polygonOffsetFactor: -1
+      });
+    }
+    const panelGeo = new THREE.PlaneGeometry(SIGN_W, SIGN_H);
+    // Walk every 300 m inboard from the +z threshold; each station carries
+    // signs on both edges, and each sign has two faces with different digits
+    // (one per runway direction).
+    for (let d = STEP; d <= a.len - STEP + 0.5; d += STEP){
+      const z = a.len / 2 - d;
+      // Distance remaining to +z threshold (visible to pilots rolling +z) =
+      // d itself. Distance remaining to -z threshold = a.len - d.
+      const digitPlusZ = Math.round(d / STEP);             // shown on the face visible to pilots rolling +z
+      const digitMinusZ = Math.round((a.len - d) / STEP);  // shown on the face visible to pilots rolling -z
+      // Skip stations that would round to 0 on either face (means the sign
+      // is too close to a threshold to be useful).
+      if (digitPlusZ < 1 || digitMinusZ < 1) continue;
+      // Skip digits past single-digit max so the canvas-cached single-char
+      // texture stays valid (none of the current runways hit this, but it
+      // future-proofs the loop if the world ever ships a long international
+      // strip).
+      if (digitPlusZ > 9 || digitMinusZ > 9) continue;
+      for (const side of [-1, 1]){
+        // Mount post.
+        const post = new THREE.Mesh(postGeo, postMat);
+        post.position.set(side * x, POST_H / 2, z);
+        grp.add(post);
+        // Two panels back-to-back. Each panel's local +z normal faces away
+        // from the runway centerline by default (PlaneGeometry's default
+        // normal is +z). We yaw the panels around their vertical axis so
+        // each face looks along the runway axis (parallel to the strip),
+        // visible to pilots rolling that direction.
+        //
+        // Panel A: face visible to pilots rolling in the +z direction. The
+        // pilot looks toward +z, so we want the panel's textured face to
+        // look back at them — i.e. point in the -z direction. Rotate y by
+        // π so the +z normal flips to -z.
+        const panelA = new THREE.Mesh(panelGeo, signMat(digitPlusZ));
+        panelA.position.set(side * x, SIGN_Y, z);
+        panelA.rotation.y = Math.PI;
+        grp.add(panelA);
+        // Panel B: face visible to pilots rolling in the -z direction. The
+        // pilot looks toward -z, so the textured face must point in the +z
+        // direction. Default normal is already +z, no yaw needed. Sit it a
+        // hair behind panel A so the two don't z-fight.
+        const panelB = new THREE.Mesh(panelGeo, signMat(digitMinusZ));
+        panelB.position.set(side * x, SIGN_Y, z + 0.01 * side); // tiny offset along runway-z so the two never share a coplanar surface
+        grp.add(panelB);
+      }
+    }
+  })();
   const edgeGeo = new THREE.PlaneGeometry(0.5, a.len);
   for (const side of [-1, 1]){
     const e = new THREE.Mesh(edgeGeo, wMat);
