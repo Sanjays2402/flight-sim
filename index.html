@@ -3021,6 +3021,122 @@ aiProp.position.set(0, 0, -3.6);
 aiPlane.add(aiProp);
 scene.add(aiPlane);
 
+// ====== AIRCRAFT NAV + STROBE LIGHTS ======
+// Real-world position lights: solid red on the left wingtip, solid green on
+// the right, solid white on the tail, plus a pair of bright white strobes on
+// the wingtips that double-flash every ~1.4s. Gated to the same dusk window
+// as the runway edge lights so they're off at noon and dazzling at night.
+// Each light is a tiny emissive sphere plus an additive sprite that does the
+// long-range glow (the sphere alone is sub-pixel from 5+ km out).
+//
+// Hidden on the player plane in cockpit cam by the existing plane.children
+// airframe-hide loop in updateCamModeUi (these are direct children of
+// `plane`, not `propGroup`, so the loop catches them automatically).
+// Always on for the AI plane regardless of camera, because we're never
+// sitting in its cockpit.
+const NAV_STROBE_PERIOD = 1.4;   // seconds between double-flash cycles
+const NAV_STROBE_GAP    = 0.09;  // seconds between the two pops in a cycle
+const NAV_STROBE_PULSE  = 0.07;  // half-width of a single pulse window
+const NAV_NIGHT_FALLOFF = 0.35;  // matches AIRPORT_BEACON_NIGHT_FALLOFF
+const navLightRigs = [];         // [{ rig, parts:[{mat, base, kind, sprMat?, sprBase?, glareScale?}] }]
+const _navGlareTex = (() => {
+  // Soft additive disc — same shape as the airport-beacon glare so the nav
+  // lights blend the same way against sky and clouds. Reused across all
+  // 5 lights x 2 airframes so we pay the texture cost once.
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const cx = cv.getContext('2d');
+  const g = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  cx.fillStyle = g; cx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+function _mkNavLight(parent, pos, colorHex, glareColorHex, glareScale, kind){
+  // Bulb: tiny sphere with a dim base color + emissive. Material is unique
+  // per bulb so tickNavLights can lerp emissive intensity per frame.
+  const base = new THREE.Color(colorHex);
+  const mat = new THREE.MeshLambertMaterial({ color: 0x222222, emissive: base.clone().multiplyScalar(0.12) });
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.10, 8, 6), mat);
+  bulb.position.set(pos[0], pos[1], pos[2]);
+  parent.add(bulb);
+  // Additive glare so the light reads from 5+ km out where the bulb is
+  // sub-pixel. Sprite parented to the bulb so it tracks airframe motion.
+  const sprMat = new THREE.SpriteMaterial({
+    map: _navGlareTex, transparent: true, depthWrite: false,
+    opacity: 0, color: glareColorHex, blending: THREE.AdditiveBlending, fog: false
+  });
+  const spr = new THREE.Sprite(sprMat);
+  spr.scale.setScalar(glareScale);
+  bulb.add(spr);
+  return { mat, base, kind, sprMat, sprBase: glareScale };
+}
+function addNavLights(group){
+  // Wingtip positions match the existing wingtip-tip mesh centers at
+  // x=±4.3, y≈0.06, z=-0.2; tail-tip emissive sits just aft of the fin TE
+  // at z≈3.95 and the fin's mid-height y=0.7 so the white reads as the
+  // classic tail beacon. Strobes share the wingtip x but sit slightly
+  // outboard + above so the glare doesn't fully overlap the red/green.
+  const parts = [
+    _mkNavLight(group, [-4.30, 0.06, -0.20], 0xff1010, 0xff4040,  4.5, 'red'),
+    _mkNavLight(group, [ 4.30, 0.06, -0.20], 0x10ff20, 0x40ff60,  4.5, 'green'),
+    _mkNavLight(group, [ 0.00, 0.70,  3.95], 0xffffff, 0xfff4d0,  4.0, 'tail'),
+    _mkNavLight(group, [-4.42, 0.18, -0.20], 0xffffff, 0xffffff, 11.0, 'strobe'),
+    _mkNavLight(group, [ 4.42, 0.18, -0.20], 0xffffff, 0xffffff, 11.0, 'strobe')
+  ];
+  navLightRigs.push({ group, parts });
+}
+addNavLights(plane);
+addNavLights(aiPlane);
+let navStrobePhase = 0;
+function tickNavLights(dt){
+  // Reuse the same dusk gate as runway edge lights / airport beacons so the
+  // nav lights fade in together with the rest of the night lighting. One
+  // sunDirFor() call per frame, not per light.
+  const dir = sunDirFor(state.todHours);
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / NAV_NIGHT_FALLOFF));
+  navStrobePhase = (navStrobePhase + dt) % NAV_STROBE_PERIOD;
+  // Double-flash strobe — two short pulses per cycle, ~NAV_STROBE_GAP apart.
+  // Smooth Gaussian-ish pulse so the strobe doesn't look like a hard square.
+  const _pulse = (t) => {
+    const x = t / NAV_STROBE_PULSE;
+    return Math.max(0, 1 - x * x);
+  };
+  const sp1 = _pulse(navStrobePhase - 0.00);
+  const sp2 = _pulse(navStrobePhase - NAV_STROBE_GAP);
+  // Wrap-aware: also fire pulses near the cycle boundary so the cadence is
+  // continuous even right after the modulo wrap.
+  const sp1w = _pulse(navStrobePhase - NAV_STROBE_PERIOD);
+  const strobeAmp = Math.max(sp1, sp2, sp1w);
+  for (const rig of navLightRigs){
+    for (const p of rig.parts){
+      if (p.kind === 'strobe'){
+        // Strobes are punchy: ~5x the base emissive on a pulse and a glare
+        // sprite that scales bigger so the flash reads from 6 km out.
+        const pulse = strobeAmp;
+        const emitK = 0.05 + 5.5 * pulse * Math.max(0.25, nightT);
+        p.mat.emissive.copy(p.base).multiplyScalar(emitK);
+        if (p.sprMat){
+          p.sprMat.opacity = Math.min(1, 1.1 * pulse * (0.35 + 0.65 * nightT));
+        }
+      } else {
+        // Steady nav lights: base glow always on (real planes leave nav lights
+        // burning day and night) but the dusk gate dramatically brightens
+        // them at night so they actually carry across the sky. Faint daytime
+        // emissive keeps the colored bulb visible if you look up close.
+        const emitK = 0.15 + 1.45 * nightT;
+        p.mat.emissive.copy(p.base).multiplyScalar(emitK);
+        if (p.sprMat){
+          p.sprMat.opacity = 0.05 + 0.7 * nightT;
+        }
+      }
+    }
+  }
+}
+tickNavLights(0); // prime so first frame doesn't ship un-lit nav lights
+
 // Pattern geometry — left-hand circuit at MAIN_AP. Lengths in metres along
 // the runway's local axes (lz = along runway, lx = across, +lx is the
 // pattern side). Altitudes are AGL above MAIN_AP.elev.
@@ -8391,6 +8507,7 @@ function step(dt){
   tickSkidmarks(dt);
   applyTimeOfDay(state.todHours);
   tickAirportBeacons(dt);
+  tickNavLights(dt);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
   // changing mid-flight. Wrap-aware: a midnight wrap (prev > now) only
