@@ -522,6 +522,7 @@
   <div class="gauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
   <div class="gauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
   <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
+  <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
 <button id="airshow" title="Airshow smoke (~)">~</button>
@@ -5289,6 +5290,67 @@ function updateOilPressure(dt){
   if (state.oilLowAtcLatch && state.oilPsi > OIL_PSI_REARM) state.oilLowAtcLatch = false;
 }
 
+// ====== Brake temperature ======
+// Brake disc thermal model. Heating is driven by the work the brakes are
+// actually doing each frame (ground speed * brake-applied flag * dt); cooling
+// is faster when the wheels are rolling (airflow) and slower when stopped on
+// the apron, but stays continuous so a hot pit stop always cools down. Past
+// BRAKE_TEMP_REDLINE the gauge needle hits the red arc, a one-shot ATC call
+// fires, and `brakeOverheatLatch` arms a 50% friction penalty for
+// BRAKE_FADE_SECS so dragging brakes down a long rollout has a real
+// consequence. The penalty rides on a fade timer so the punishment ends even
+// if the disc stays slightly above redline (consistent with real brake fade
+// recovering once the pilot eases off and lets the disc reseat).
+const BRAKE_TEMP_AMBIENT      = 30;   // °C — cold-disc ambient (matches a chilly morning ramp)
+const BRAKE_TEMP_MAX          = 400;  // °C — gauge upper limit
+const BRAKE_TEMP_GREEN_LO     = 30;   // °C — healthy band low end
+const BRAKE_TEMP_GREEN_HI     = 180;  // °C — healthy band high end (still safe to apply hard)
+const BRAKE_TEMP_REDLINE      = 320;  // °C — warning fires, fade arms
+const BRAKE_TEMP_REARM_HYST   = 30;   // °C — below (redline - hyst) clears the latch
+const BRAKE_HEAT_K            = 0.85; // heating coefficient per (m/s * dt) while brakes held
+const BRAKE_COOL_ROLL_PER_SEC = 3;    // °C/s passive bleed (free-rolling airflow)
+const BRAKE_COOL_STOP_PER_SEC = 8;    // °C/s when fully stopped on apron (ground crew + airflow window)
+const BRAKE_FADE_SECS         = 6;    // seconds the friction penalty stays armed after redline
+const BRAKE_FADE_FACTOR       = 0.5;  // friction multiplier while faded (50% weaker brakes)
+function updateBrakeTemp(dt, brakesHeld, groundSp, onGround){
+  // Skip while paused / replaying / intro so a hot disc doesn't quietly bleed
+  // off while the player reads menus — mirrors the engine-temp guard.
+  if (state.paused || state.replayActive || state.introOpen) return;
+  // Heating: brakes only do work when they're actually decelerating something,
+  // so gate on brakesHeld + groundSp. Scale by speed so a hot stop from cruise
+  // cooks the disc way faster than gentle taxi nibbles.
+  let dT = 0;
+  if (brakesHeld && onGround && groundSp > 0.5){
+    dT += BRAKE_HEAT_K * groundSp * dt;
+  }
+  // Cooling: passive bleed every frame. Faster when stopped (airflow + apron
+  // dwell) than rolling — in practice the rolling rate covers any flight where
+  // the player isn't touching brakes, the stop rate covers the apron-refuel
+  // hang time so the loop self-balances.
+  const aboveAmbient = state.brakeTempC - BRAKE_TEMP_AMBIENT;
+  if (aboveAmbient > 0){
+    const stopped = onGround && groundSp < 0.5;
+    const coolRate = stopped ? BRAKE_COOL_STOP_PER_SEC : BRAKE_COOL_ROLL_PER_SEC;
+    // Exponential approach toward ambient so the needle eases home instead of
+    // sliding linearly past it.
+    dT -= aboveAmbient * (1 - Math.exp(-coolRate * dt / 60));
+  }
+  state.brakeTempC = Math.max(BRAKE_TEMP_AMBIENT - 5,
+    Math.min(BRAKE_TEMP_MAX, state.brakeTempC + dT));
+  // Fade timer: latch on the first frame past redline, fire the ATC nag once,
+  // and arm BRAKE_FADE_SECS of weakened friction. Latch clears with hysteresis
+  // once the disc is well below redline so brief excursions don't punish.
+  if (!state.brakeOverheatLatch && state.brakeTempC >= BRAKE_TEMP_REDLINE){
+    state.brakeOverheatLatch = true;
+    state.brakeFadeT = BRAKE_FADE_SECS;
+    if (typeof pushATC === 'function') pushATC('Brakes overheated, cool before next stop.', { tag:'ATC', now:true });
+  }
+  if (state.brakeOverheatLatch && state.brakeTempC <= BRAKE_TEMP_REDLINE - BRAKE_TEMP_REARM_HYST){
+    state.brakeOverheatLatch = false;
+  }
+  if (state.brakeFadeT > 0) state.brakeFadeT = Math.max(0, state.brakeFadeT - dt);
+}
+
 // ====== Pitot icing ======
 // Slow-build hazard tied to the existing rain toggle plus the time-of-day
 // cycle: above PITOT_ICE_TRIGGER_ALT in rain or cold-weather TOD (early
@@ -5782,6 +5844,17 @@ const state = {
   // low threshold, and clears with hysteresis once pressure recovers.
   oilPsi: 0,
   oilLowAtcLatch: false,
+  // Brake disc temperature (°C). Starts at ambient, climbs while `B` is held
+  // against ground roll (scaled by speed × brake force × dt), bleeds back to
+  // ambient at a small free-rolling rate and a higher "airflow over a stopped
+  // disc on the apron" rate. Past BRAKE_TEMP_REDLINE the gauge needle hits red
+  // and a one-shot ATC "brakes overheated" call fires; `brakeOverheatLatch`
+  // gates a 50% friction penalty for BRAKE_FADE_SECS so dragging brakes down a
+  // long rollout has a real consequence. Latch clears with hysteresis once the
+  // disc cools back under the redline.
+  brakeTempC: 30,
+  brakeOverheatLatch: false,
+  brakeFadeT: 0,
   // Pitot icing (Shift+I toggles `pitotHeatOn`). Above PITOT_ICE_TRIGGER_ALT in
   // rain or cold-weather TOD windows, the pitot tube slowly freezes: the
   // airspeed indicator reading drifts toward 0 over ~25s, the player sees a
@@ -6901,6 +6974,11 @@ function resetPlane(){
   // sortie re-arms the ATC call.
   state.oilPsi = 0;
   state.oilLowAtcLatch = false;
+  // Brake temperature: a fresh sortie starts with cold discs and clears the
+  // overheat latch + fade timer so the next leg re-arms the warning.
+  state.brakeTempC = BRAKE_TEMP_AMBIENT;
+  state.brakeOverheatLatch = false;
+  state.brakeFadeT = 0;
   // Pitot ice clears on reset (a fresh sortie starts with a clear tube) but
   // pitotHeatOn is intentionally preserved — it's a pilot setting, not a
   // per-flight state, so a hot reset keeps the toggle the player chose.
@@ -8557,8 +8635,20 @@ function step(dt){
       // (steel + arrestor wires don't care about a shower).
       const wetRwy = onRunway && !onCarrier && settings.rain;
       const brakeFricRaw = state.brakes ? 4.5 : (onRunway ? 0.35 : 1.8);
-      const brakeFric = wetRwy ? brakeFricRaw * (state.brakes ? 0.55 : 0.7) : brakeFricRaw;
+      let brakeFric = wetRwy ? brakeFricRaw * (state.brakes ? 0.55 : 0.7) : brakeFricRaw;
+      // Brake fade: redline-latched discs grip the wheels ~50% weaker for the
+      // next BRAKE_FADE_SECS so dragging brakes down a long rollout has a real
+      // consequence. Only applies to the brake-applied component (not
+      // free-rolling rolling resistance) so a fade still lets the plane coast.
+      if (state.brakes && state.brakeFadeT > 0){
+        brakeFric *= BRAKE_FADE_FACTOR;
+      }
       const friction = brakeFric + (revActive ? 2.5 : 0) + arrestor;
+      // Hand the per-frame heat-source flags to updateBrakeTemp(): only the
+      // physical work the brakes do (held + actually rolling) cooks the disc.
+      state._brakeHeatHeld = !!state.brakes;
+      state._brakeHeatGroundSp = groundSp;
+      state._brakeHeatOnGround = true;
       const sp = groundSp;
       if (sp > 0.01){
         const newSp = Math.max(0, sp - friction*dt*Math.max(2, sp*0.1));
@@ -8696,6 +8786,16 @@ function step(dt){
   // Pitot icing pairs with rain + TOD as the high-altitude weather hazard.
   // Self-gates on pause/replay/intro and ground/crash to match other systems.
   updatePitotIce(dt);
+  // Brake-disc thermal model. Heating only ticks on the ground inside the
+  // physics branch (which fills brakeHeatGroundSp + brakeHeatHeld below before
+  // the next frame); cooling runs every frame so a hot disc can bleed off
+  // mid-flight too. Self-gates on pause/replay/intro to match the rest.
+  updateBrakeTemp(dt, !!state._brakeHeatHeld, state._brakeHeatGroundSp || 0, !!state._brakeHeatOnGround);
+  // Consume the per-frame heat flags so the next physics tick has to refresh
+  // them (no stale heat ticking after the wheels lift).
+  state._brakeHeatHeld = false;
+  state._brakeHeatGroundSp = 0;
+  state._brakeHeatOnGround = false;
 
   // Animate parts
   // Engine live: prop spins fast with throttle. Engine out: it just windmills,
@@ -11123,6 +11223,7 @@ const cpRpmCv = document.getElementById('cpRpm');
 const cpChtCv = document.getElementById('cpCht');
 const cpOilCv = document.getElementById('cpOil');
 const cpMagCv = document.getElementById('cpMag');
+const cpBrkCv = document.getElementById('cpBrk');
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
@@ -11130,6 +11231,7 @@ const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
 const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
 const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
+const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
 function _cpBezel(ctx, W, H){
   // Gauge background + rim. Faces are dark with a slightly lighter inner disc
   // so the needles read against neutral grey.
@@ -11611,6 +11713,77 @@ function drawCockpitMag(hdgDeg, dt){
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.fillText('MAG', cx, cy - R * 0.35);
 }
+function drawCockpitBrake(tempC){
+  if (!cpBrkCtx) return;
+  const W = cpBrkCv.width, H = cpBrkCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpBrkCtx;
+  _cpBezel(ctx, W, H);
+  // Scale: BRAKE_TEMP_AMBIENT..BRAKE_TEMP_MAX across the same 240° sweep used
+  // by the ASI / RPM / CHT / OIL gauges so the panel reads as a matched set.
+  const T_MIN = BRAKE_TEMP_AMBIENT, T_MAX = BRAKE_TEMP_MAX;
+  const T_SPAN = T_MAX - T_MIN;
+  const sweep = Math.PI * 4/3;
+  const startA = -Math.PI - Math.PI/6;
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  // Major ticks every 100°C with labels; minor every 20°C.
+  for (let v = T_MIN; v <= T_MAX; v += 20){
+    const a = startA + ((v - T_MIN) / T_SPAN) * sweep;
+    const major = (v % 100 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = major ? 2.5 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Green healthy arc (ambient..green-hi) and red redline arc (redline..max).
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((BRAKE_TEMP_GREEN_LO - T_MIN) / T_SPAN) * sweep,
+    startA + ((BRAKE_TEMP_GREEN_HI - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#ff5252';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((BRAKE_TEMP_REDLINE - T_MIN) / T_SPAN) * sweep,
+    startA + ((BRAKE_TEMP_MAX     - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  // "°C" unit hint up top, matching neighboring gauges.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('°C', cx, cy - R*0.35);
+  // Needle.
+  const t = Math.max(T_MIN, Math.min(T_MAX, tempC));
+  const a = startA + ((t - T_MIN) / T_SPAN) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout below center. Color mirrors CHT/OIL rules so the panel
+  // uses a consistent color language: red past redline, amber in the warning
+  // band just below it, green when healthy.
+  ctx.fillStyle = (t >= BRAKE_TEMP_REDLINE)
+    ? '#ff5252'
+    : (t >= BRAKE_TEMP_GREEN_HI + 40 ? '#ffb020' : '#7ee787');
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(Math.round(t) + '°', cx, cy + R*0.55);
+  // FADE indicator: a small tag below the digital readout when the fade timer
+  // is still ticking so the pilot sees "brakes weak" before they wonder why
+  // the next stop is sliding.
+  if (state.brakeFadeT > 0){
+    ctx.fillStyle = '#ff5252';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText('FADE', cx, cy + R*0.78);
+  }
+}
 function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -11625,6 +11798,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   drawCockpitCht(state.engineTempC);
   drawCockpitOil(state.oilPsi);
   drawCockpitMag(hdgDeg || 0, dt || 0);
+  drawCockpitBrake(state.brakeTempC);
 }
 
 // ====== Camera ======
