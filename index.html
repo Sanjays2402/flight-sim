@@ -1621,6 +1621,13 @@ function onCrash(){
   if (typeof spawnCrashDebris === 'function' && typeof plane !== 'undefined'){
     spawnCrashDebris(plane.position, state.vel);
   }
+  // Rescue truck — if the wreck is within ~2 km of an airport, spawn a
+  // red fire/rescue truck at that field's apron and drive it toward the
+  // wreck (pure flavor; no collision, no rescue). Silently skipped when no
+  // airport is in range so deep-bush crashes still feel lonely.
+  if (typeof spawnRescueTruck === 'function' && typeof plane !== 'undefined'){
+    spawnRescueTruck(plane.position);
+  }
   appendLogEntry({
     outcome: 'crashed',
     score: 0,
@@ -4142,6 +4149,217 @@ function updateGroundVehicles(dt){
       v.beaconMat.emissiveIntensity = 0.35 + 2.1 * lit;
     }
   }
+}
+
+// ====== RESCUE TRUCK (crash-response flavor) ======
+// When the player crashes within RESCUE_RANGE of any airport, a small red
+// fire/rescue truck with a blinking blue strobe spawns at that airport's
+// apron and drives in a straight line toward the wreck at RESCUE_SPEED.
+// Pure flavor — no collision, no rescue, no physics — but it gives every
+// crash within sight of a field a beat of consequence instead of just the
+// banner popping. Cleared by stopReplay() (player dismissed the post-crash
+// replay) and resetPlane() (R / quick-restart / fresh mission).
+const RESCUE_RANGE      = 2000;   // m — only spawn if crash is within this of any airport
+const RESCUE_SPEED      = 25;     // m/s — straight-line drive speed toward the wreck
+const RESCUE_MAX_TRAVEL = 90;     // s — hard cap so a degenerate spawn can't trundle forever
+const RESCUE_SIREN_R    = 100;    // m — siren chirp fires when truck gets within this of the wreck
+// Single shared truck mesh — there's only ever one wreck in flight at a time,
+// so the pool is exactly 1. Built lazily on first crash to keep startup cheap.
+let rescueTruck = null; // { root, strobeMat, ap, target, dur, t, sirened }
+function makeRescueTruck(){
+  const grp = new THREE.Group();
+  const bodyMat  = new THREE.MeshLambertMaterial({ color: 0xb52f1f });   // fire-engine red
+  const cabMat   = new THREE.MeshLambertMaterial({ color: 0x8c2415 });   // darker red cab
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x223344 });
+  const tireMat  = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const trimMat  = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });   // white reflective stripe
+  // Boxy chassis along local +X so we can rotate.y to face travel direction
+  // (same convention as makeTug / makeFuelTruck above).
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.8, 1.8), bodyMat);
+  chassis.position.y = 0.65; grp.add(chassis);
+  // Boxy crew cab at -X end.
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.2, 1.75), cabMat);
+  cab.position.set(-1.1, 1.45, 0); grp.add(cab);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.55, 1.77), glassMat);
+  win.position.set(-1.1, 1.7, 0); grp.add(win);
+  // Rear pump-box / tank at +X end — slightly taller than the chassis so the
+  // silhouette reads as a fire truck rather than a generic pickup.
+  const pump = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.05, 1.75), bodyMat);
+  pump.position.set(0.9, 1.4, 0); grp.add(pump);
+  // White reflective stripe along both sides for the fire-truck look.
+  for (const sz of [-0.92, 0.92]){
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.18, 0.04), trimMat);
+    stripe.position.set(0, 0.95, sz); grp.add(stripe);
+  }
+  // Six wheels — two front under cab, four rear under pump / chassis.
+  const wheelPos = [[-1.3,-0.9],[-1.3,0.9],[0.2,-0.9],[0.2,0.9],[1.5,-0.9],[1.5,0.9]];
+  for (const [wx, wz] of wheelPos){
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.3, 10), tireMat);
+    w.rotation.x = Math.PI/2;
+    w.position.set(wx, 0.34, wz);
+    grp.add(w);
+  }
+  // Blue roof strobe — same shape pattern as addVehicleBeacon but blue and
+  // a touch larger so it reads as emergency-response, not service-vehicle.
+  const housingMat = new THREE.MeshLambertMaterial({ color: 0x081020 });
+  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.14, 10), housingMat);
+  housing.position.set(-1.1, 2.05, 0); grp.add(housing);
+  const strobeMat = new THREE.MeshLambertMaterial({
+    color: 0x6090ff, emissive: 0x2050ff, emissiveIntensity: 0.4
+  });
+  const strobe = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), strobeMat);
+  strobe.position.set(-1.1, 2.16, 0); strobe.scale.set(1, 0.65, 1);
+  grp.add(strobe);
+  grp.visible = false;
+  scene.add(grp);
+  return { root: grp, strobeMat };
+}
+// Low/high two-tone siren chirp (one shot) — sine pair through the shared
+// sfxReady() audio context. Honors the master volume slider.
+function playRescueSiren(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.18 * (settings && settings.volume != null ? settings.volume : 1);
+  if (vol <= 0) return;
+  // Two short sine bleeps: low ~520 Hz then high ~780 Hz, classic fire/rescue
+  // "woo-woo" shorthand. Each note ~0.22s with a small overlap so they read
+  // as a pair rather than two disconnected beeps.
+  const tones = [{ f: 520, t: 0.00 }, { f: 780, t: 0.26 }];
+  const noteDur = 0.22;
+  tones.forEach(({ f, t }) => {
+    const tNote = t0 + t;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f, tNote);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, tNote);
+    g.gain.linearRampToValueAtTime(vol, tNote + 0.02);
+    g.gain.setValueAtTime(vol, tNote + noteDur - 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, tNote + noteDur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(tNote);
+    osc.stop(tNote + noteDur + 0.02);
+  });
+}
+// Spawn the rescue truck at the nearest airport's apron and aim it at the
+// crash point. Called from onCrash() — silently skips when no airport is
+// within RESCUE_RANGE or when state.crashed is somehow not set yet.
+function spawnRescueTruck(crashWorld){
+  if (!crashWorld) return;
+  // Find the nearest airport to the wreck. Carrier deck is intentionally
+  // skipped (no fire department at sea, and the rescue mesh doesn't float).
+  let near = null, nearD2 = Infinity;
+  for (const a of AIRPORTS){
+    const dx = crashWorld.x - a.x, dz = crashWorld.z - a.z;
+    const d2 = dx*dx + dz*dz;
+    if (d2 < nearD2){ nearD2 = d2; near = a; }
+  }
+  if (!near) return;
+  const dist = Math.sqrt(nearD2);
+  if (dist > RESCUE_RANGE) return;          // crashed too far from any field
+  // Lazy build on first spawn — keeps startup cheap when no one ever crashes
+  // (which is, statistically, never).
+  if (!rescueTruck){
+    const built = makeRescueTruck();
+    rescueTruck = { root: built.root, strobeMat: built.strobeMat,
+                    ap: null, target: new THREE.Vector3(), dur: 0, t: 0, sirened: false };
+  }
+  rescueTruck.ap = near;
+  rescueTruck.target.set(crashWorld.x, crashWorld.y, crashWorld.z);
+  // Apron spawn point: same shoulder used by the tug + fuel truck loop, so
+  // it reads as "came from the service area" rather than out of nowhere.
+  // Build the world-space spawn by rotating the local apron offset into the
+  // airport's heading frame (matches makeGroundVehicles' loop center).
+  const localX = -(near.w/2 + 12);          // 12m off runway edge — see makeGroundVehicles
+  const localZ = 0;
+  const cs = Math.cos(near.hdg), sn = Math.sin(near.hdg);
+  const sx = near.x + localX * cs + localZ * sn;
+  const sz = near.z - localX * sn + localZ * cs;
+  rescueTruck.root.position.set(sx, near.elev, sz);
+  // Heading: face the wreck so the silhouette reads correctly the moment it
+  // pops in. Local +X is the long axis, so yaw = atan2(-dz, dx).
+  const dx = rescueTruck.target.x - sx;
+  const dz = rescueTruck.target.z - sz;
+  rescueTruck.root.rotation.y = Math.atan2(-dz, dx);
+  // Drive time: distance / speed, clamped to a 30–60s sweet spot per the
+  // spec ("arriving 30-60s later"). For wrecks close to the apron we still
+  // want at least ~30s so the player sees it driving across the field; for
+  // wrecks 2 km out we cap at 60s so it doesn't crawl forever at low speed.
+  const driveDist = Math.hypot(dx, dz);
+  rescueTruck.dur = Math.max(30, Math.min(60, driveDist / RESCUE_SPEED));
+  rescueTruck.t = 0;
+  rescueTruck.sirened = false;
+  rescueTruck.root.visible = true;
+}
+// Tear down — called from stopReplay() (player dismissed the post-crash
+// replay) and resetPlane() (R / quick-restart / fresh mission). Cheap no-op
+// when the truck never spawned this session.
+function clearRescueTruck(){
+  if (!rescueTruck) return;
+  rescueTruck.root.visible = false;
+  rescueTruck.ap = null;
+  rescueTruck.t = 0;
+  rescueTruck.sirened = false;
+}
+// Per-frame update — straight-line lerp from spawn point to crash point,
+// strobe pulse on the roof, one-shot siren when the truck gets close. Hidden
+// in photo mode so saved PNGs don't have a red box parked on the runway.
+function updateRescueTruck(dt){
+  if (!rescueTruck || !rescueTruck.ap) return;
+  // Photo mode: hide but keep ticking timers so the same truck reappears in
+  // the right place when photo mode exits. Matches the existing pattern used
+  // by crash debris + engine fire FX.
+  const hidden = !!state.photoMode;
+  if (rescueTruck.root.visible === hidden) rescueTruck.root.visible = !hidden;
+  if (rescueTruck.t >= rescueTruck.dur + RESCUE_MAX_TRAVEL) return;  // safety cap
+  // Advance the drive timer (but freeze while the sim is paused — the truck
+  // shouldn't trundle along during the pause menu).
+  if (!state.paused){
+    rescueTruck.t += dt;
+    const k = Math.min(1, rescueTruck.t / Math.max(0.001, rescueTruck.dur));
+    // Spawn point is captured implicitly by the initial position; recompute it
+    // off the airport apron each frame so we always lerp from a fixed anchor
+    // rather than relative drift.
+    const ap = rescueTruck.ap;
+    const localX = -(ap.w/2 + 12);
+    const localZ = 0;
+    const cs = Math.cos(ap.hdg), sn = Math.sin(ap.hdg);
+    const sx = ap.x + localX * cs + localZ * sn;
+    const sz = ap.z - localX * sn + localZ * cs;
+    const tx = rescueTruck.target.x, tz = rescueTruck.target.z;
+    // Stop a couple meters short of the wreck so the truck doesn't park
+    // inside the debris field. Final position sits on the line at k=1.
+    const stopShort = 4;                    // m
+    const dx0 = tx - sx, dz0 = tz - sz;
+    const totalDist = Math.hypot(dx0, dz0);
+    const adjK = (totalDist > stopShort) ? k * (1 - stopShort / totalDist) : k * 0.9;
+    rescueTruck.root.position.x = sx + dx0 * adjK;
+    rescueTruck.root.position.z = sz + dz0 * adjK;
+    rescueTruck.root.position.y = ap.elev;
+    // Face direction of travel.
+    rescueTruck.root.rotation.y = Math.atan2(-dz0, dx0);
+    // One-shot siren chirp when the truck closes inside RESCUE_SIREN_R of the
+    // wreck. Latch so we only fire once per spawn even if the rear-axle math
+    // bounces in and out of the threshold for a frame.
+    if (!rescueTruck.sirened){
+      const rdx = tx - rescueTruck.root.position.x;
+      const rdz = tz - rescueTruck.root.position.z;
+      if ((rdx*rdx + rdz*rdz) <= RESCUE_SIREN_R*RESCUE_SIREN_R
+          && !state.photoMode && !state.paused && !state.replayActive){
+        playRescueSiren();
+        rescueTruck.sirened = true;
+      }
+    }
+  }
+  // Blue strobe pulse — ~0.6s period, sin² for a fatter flash that reads as
+  // a rotating reflector rather than a soft pulse. Matches the amber beacon
+  // treatment on the apron tug + fuel truck.
+  const period = 0.6;
+  const phase = (rescueTruck.t / period) * Math.PI;
+  const f = Math.sin(phase);
+  const lit = f * f;
+  rescueTruck.strobeMat.emissiveIntensity = 0.35 + 2.4 * lit;
 }
 
 function updateWindSocks(){
@@ -9954,6 +10172,9 @@ function stopReplay(){
     replayScrubEl.classList.remove('scrubbing');
     replayScrubEl.style.display = 'none';
   }
+  // Rescue truck — dismiss it the moment the player walks away from the
+  // post-crash replay. Cheap no-op when no rescue is in flight.
+  if (typeof clearRescueTruck === 'function') clearRescueTruck();
 }
 function replaySnapshotAt(i){
   // i is 0..(replayCount-1) where 0 is the OLDEST sample, replayCount-1 is the NEWEST.
@@ -11789,6 +12010,9 @@ function resetPlane(){
   // starts on a clean slate. clearCrashDebris() is a no-op when nothing is
   // active so a hot reset on the apron pays nothing.
   if (typeof clearCrashDebris === 'function') clearCrashDebris();
+  // Rescue truck — wipe any in-flight crash response so the next sortie
+  // doesn't inherit a strobing red box parked next to the runway.
+  if (typeof clearRescueTruck === 'function') clearRescueTruck();
   // Alternator failure: wipe the per-sortie roll + trip schedule + battery
   // counter so a fresh sortie re-rolls cleanly. Also drop any visual dim/dark
   // classes left on the cockpit panel + HUD from a prior failure (the per-
@@ -18735,6 +18959,10 @@ function step(dt){
   // scenery, gated to on-ground or low-overhead near the field so air views
   // stay clean.
   updateGroundVehicles(dt);
+  // Rescue truck — drives in a straight line from the apron toward the
+  // last crash site. Cheap no-op when no crash is in flight or when the
+  // truck was already cleared by a replay dismiss / quick-restart.
+  if (typeof updateRescueTruck === 'function') updateRescueTruck(dt);
   // Wind socks at each airport tilt with wind speed and point downwind so
   // pilots can read the breeze without staring at the HUD.
   updateWindSocks();
