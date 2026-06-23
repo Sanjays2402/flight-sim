@@ -3625,6 +3625,57 @@ tickAirportBeacons(0); // prime so first frame doesn't show un-rotated heads
 const plane = new THREE.Group();
 scene.add(plane);
 
+// ====== PLANE GROUND SHADOW ======
+// Soft dark elliptical disc painted on the terrain directly below the
+// airframe. Sharp + dense when low (sitting on the runway), fades + grows
+// with altitude, and culls past ~600m AGL so high-altitude flights pay
+// nothing. Not a real shadow map — just a textured plane tracking the
+// player's (x,z) on the ground at terrainHeight + a tiny polygonOffset so
+// it never z-fights the runway, apron, or carrier deck.
+const planeShadowTex = (function(){
+  const SZ = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = SZ;
+  const cx = cv.getContext('2d');
+  // Soft radial gradient: opaque-ish black at the center, fully transparent
+  // at the rim. Texture is monochrome so material color/opacity tinting
+  // controls the final look at runtime.
+  const g = cx.createRadialGradient(SZ/2, SZ/2, 0, SZ/2, SZ/2, SZ/2);
+  g.addColorStop(0.00, 'rgba(0,0,0,0.85)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.45)');
+  g.addColorStop(0.85, 'rgba(0,0,0,0.10)');
+  g.addColorStop(1.00, 'rgba(0,0,0,0.00)');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, SZ, SZ);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+})();
+const planeShadowMat = new THREE.MeshBasicMaterial({
+  map: planeShadowTex,
+  transparent: true,
+  opacity: 0.55,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -1,
+  // Multiply-style darken: actual shadows aren't additive. NormalBlending
+  // with a black texture reads as a soft dark patch on grass/asphalt/deck
+  // alike without going pure black on dark surfaces.
+  blending: THREE.NormalBlending,
+});
+// Base footprint roughly matches the airframe (wing 8.6 m × fuselage ~7 m).
+// Geometry stays at 1×1 so scale.x/scale.y can drive both the size *and*
+// the aspect (wider when banked overhead) cheaply.
+const planeShadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), planeShadowMat);
+planeShadow.rotation.x = -Math.PI / 2; // lie flat on the ground
+planeShadow.renderOrder = 2;           // paint after runway markings
+planeShadow.visible = false;           // updatePlaneShadow flips this on
+scene.add(planeShadow);
+const PLANE_SHADOW_MAX_AGL = 600;      // fade out completely past here
+const PLANE_SHADOW_BASE_SX = 9.0;      // base width along wingspan, meters
+const PLANE_SHADOW_BASE_SZ = 7.0;      // base length along fuselage, meters
+
 // matFuse / matAccent are shared across every airframe part, so swapping their
 // color repaints the whole plane in one shot. applyLivery() does the swap and
 // is called once at startup plus whenever the player picks a new scheme.
@@ -15950,6 +16001,55 @@ const _glareSunWorld = new THREE.Vector3();
 const _glareSunNdc   = new THREE.Vector3();
 const _glareCamFwd   = new THREE.Vector3();
 const _glareSunDirN  = new THREE.Vector3();
+// Plane ground shadow: tracks the player's (x,z) every frame, lerps size +
+// opacity from AGL, and stretches with bank/pitch so the disc reads as the
+// airframe's silhouette projected straight down. Skipped in photo mode so
+// the saved PNG inherits whatever the renderer actually had on the ground
+// (which is exactly what the screenshot should show), and in intro so the
+// menu world stays clean. Cheap: one setPosition + one setScale per frame.
+function updatePlaneShadow(dt){
+  if (!planeShadow) return;
+  // Intro = world is decorative; replay flyby = old camera angles may catch
+  // the shadow under a different plane pose; both look cleaner with it off.
+  if (state.introOpen || state.replayActive){
+    if (planeShadow.visible) planeShadow.visible = false;
+    return;
+  }
+  const px = plane.position.x, pz = plane.position.z;
+  const groundY = (typeof terrainHeight === 'function')
+    ? terrainHeight(px, pz)
+    : 0;
+  const agl = Math.max(0, plane.position.y - groundY);
+  if (agl > PLANE_SHADOW_MAX_AGL){
+    if (planeShadow.visible) planeShadow.visible = false;
+    return;
+  }
+  // Opacity: dense + sharp on the ground, fading linearly to ~0 at the AGL
+  // cap. Multiplied by a soft fade-out window so the disc doesn't pop off.
+  const k = 1 - (agl / PLANE_SHADOW_MAX_AGL);     // 1 on ground -> 0 at cap
+  const opacity = 0.10 + 0.55 * k;                // 0.65 grounded, ~0.10 at cap
+  // Size: grows with altitude (real-world cone of light) so the shadow stays
+  // visually proportional to the silhouette getting smaller in the frame.
+  // 1.0x on the deck, ~2.4x at 600m.
+  const sizeK = 1.0 + 1.4 * (agl / PLANE_SHADOW_MAX_AGL);
+  // Bank/pitch stretch: a banked airframe projects a wider disc along its
+  // current roll axis. Reuse the Euler we already track on `plane` (Y is
+  // heading). Clamp so a knife-edge doesn't blow the disc to infinity.
+  const roll  = plane.rotation.z || 0;
+  const pitch = plane.rotation.x || 0;
+  const rollK  = 1 / Math.max(0.35, Math.abs(Math.cos(roll)));
+  const pitchK = 1 / Math.max(0.55, Math.abs(Math.cos(pitch)));
+  const sx = PLANE_SHADOW_BASE_SX * sizeK * rollK;
+  const sz = PLANE_SHADOW_BASE_SZ * sizeK * pitchK;
+  planeShadow.position.set(px, groundY, pz);
+  // Yaw the disc to match the plane's heading so the elliptical footprint
+  // points the right way. PlaneGeometry was rotated -PI/2 around X at
+  // creation; rotation.z on this already-flat mesh acts as a yaw spin.
+  planeShadow.rotation.z = plane.rotation.y || 0;
+  planeShadow.scale.set(sx, sz, 1);
+  planeShadowMat.opacity = opacity;
+  if (!planeShadow.visible) planeShadow.visible = true;
+}
 function updateSunGlare(dt){
   if (!sunGlareCanvas || !sunGlareCtx) return;
   // Skip overlay entirely in photo mode / intro so screenshots and the menu stay clean.
@@ -16222,6 +16322,7 @@ function loop(now){
   updateWipers(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
+  updatePlaneShadow(dt);
   updateGVision(dt);
   renderer.render(scene, camera);
 }
