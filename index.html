@@ -198,6 +198,25 @@
   #kneeboard canvas.plan { display:block; width:100%; height:120px; margin-top:4px; background:#f6efdb; border:1px solid #b3a577; border-radius:3px; }
   #kneeboard .foot { margin-top:8px; padding-top:5px; border-top:1px solid #8a7d56; color:#5a4e2e; font-size:9px; letter-spacing:1px; text-align:center; }
   #kneeboard .nodata { padding:18px 0 22px; text-align:center; color:#7a6b3f; font-size:11px; letter-spacing:1px; }
+  /* ATIS broadcast strip (#atisStrip) — Shift+A. Left-side ivory-paper
+     card mirroring the #kneeboard chrome so the briefing reads like the
+     same printed shop. Pure HUD overlay: pointer-events off, hidden in
+     photo mode via PHOTO_HIDE_IDS, auto-closes on intro/replay/photo/
+     pause/crash via updateAtisStrip(). Sits at top:50% on the LEFT so
+     it doesn't collide with the approach plate on the right. */
+  #atisStrip { position:fixed; top:50%; left:12px; transform:translateY(-50%); width:222px; padding:11px 13px 10px; font-size:11px; color:#1c2733; background:#f1e8d3; border:1px solid #c2b48a; border-radius:6px; box-shadow:0 6px 22px rgba(0,0,0,.55), inset 0 0 0 2px #efe2c2; display:none; z-index:8; pointer-events:none; font-family:ui-monospace, 'SF Mono', Menlo, Consolas, monospace; line-height:1.4; }
+  #atisStrip.show { display:block; }
+  #atisStrip .hdr { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:5px; margin-bottom:6px; border-bottom:1px solid #8a7d56; }
+  #atisStrip .hdr .id { color:#1c2733; font-weight:800; font-size:14px; letter-spacing:2px; }
+  #atisStrip .hdr .nm { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; }
+  #atisStrip .sub  { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:5px; }
+  #atisStrip .row  { display:flex; justify-content:space-between; gap:8px; padding:1px 0; font-size:11px; }
+  #atisStrip .row .lbl { color:#5a4e2e; }
+  #atisStrip .row .val { color:#1c2733; font-weight:700; }
+  #atisStrip .sect { margin-top:7px; padding-top:5px; border-top:1px dashed #b3a577; }
+  #atisStrip .sect .ttl { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; margin-bottom:3px; text-transform:uppercase; }
+  #atisStrip .foot { margin-top:8px; padding-top:5px; border-top:1px solid #8a7d56; color:#5a4e2e; font-size:9px; letter-spacing:1px; text-align:center; }
+  #atisStrip .nodata { padding:18px 0 22px; text-align:center; color:#7a6b3f; font-size:11px; letter-spacing:1px; }
   #preflight.show { display:block; }
   #preflight .ttl { color:#ffd166; font-weight:800; letter-spacing:2px; font-size:11px; margin-bottom:2px; }
   #preflight .sub { color:#9bb; font-size:10px; letter-spacing:1px; margin-bottom:7px; }
@@ -776,6 +795,23 @@
   </div>
   <div class="foot"><kbd>Shift</kbd>+<kbd>N</kbd> close · <kbd>Esc</kbd> dismiss</div>
   <div class="nodata" id="kbNoData" style="display:none">No airport in range.<br>Fly within 12 km of a field.</div>
+</div>
+<div id="atisStrip">
+  <div class="hdr"><span class="id" id="atisStripId">—</span><span class="nm" id="atisStripInfo">info —</span></div>
+  <div class="sub" id="atisStripSub">automatic terminal information</div>
+  <div class="row"><span class="lbl">RWY</span><span class="val" id="atisStripRwy">—</span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val" id="atisStripWind">—</span></div>
+  <div class="row"><span class="lbl">ALTIM</span><span class="val" id="atisStripAltim">—</span></div>
+  <div class="sect">
+    <div class="ttl">weather</div>
+    <div class="row"><span class="lbl">CEILING</span><span class="val" id="atisStripCeil">—</span></div>
+    <div class="row"><span class="lbl">VIS</span><span class="val" id="atisStripVis">—</span></div>
+    <div class="row"><span class="lbl">TEMP</span><span class="val" id="atisStripTemp">—</span></div>
+    <div class="row"><span class="lbl">TIME</span><span class="val" id="atisStripTime">—</span></div>
+    <div class="row"><span class="lbl">RANGE</span><span class="val" id="atisStripRange">—</span></div>
+  </div>
+  <div class="foot"><kbd>Shift</kbd>+<kbd>A</kbd> close · <kbd>Esc</kbd> dismiss</div>
+  <div class="nodata" id="atisStripNoData" style="display:none">No ATIS in range.<br>Fly within 25 km of a field.</div>
 </div>
 <div id="preflight">
   <div class="ttl">PRE-FLIGHT</div>
@@ -8844,6 +8880,10 @@ const state = {
   // fire-spam the ATC strip / chime; cleared on resetPlane() so a hot reset
   // re-arms the call immediately.
   atisCooldownUntil: 0,
+  // ATIS strip overlay (Shift+A). Toggles the ivory-paper #atisStrip card
+  // on the left side. Independent of atisCooldownUntil so the strip can
+  // open / close without re-firing the audio broadcast.
+  atisStripOpen: false,
   // Trip / Hobbs timer. Auto-starts the first frame ground speed crosses
   // 5 m/s and pauses on full-stop (<0.5 m/s) or crash. Pause-menu freeze is
   // handled for free by step() not running. Shift+M zeros it; resetPlane()
@@ -9343,15 +9383,24 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='KeyT' && !e.shiftKey) state.todHours = (state.todHours + 1) % 24;
-  // Shift+A fires an ATIS broadcast for the nearest airport. Plain A is
-  // already mapped to roll-left via the global `keys` map, so we gate strictly
-  // on `e.shiftKey` here and clear the bucket entry so the keys map doesn't
-  // also see the press as a roll input on the same frame. Gating + range check
-  // (8 km of any field) lives inside triggerAtis(), so this handler stays thin.
+  // Shift+A fires an ATIS broadcast for the nearest airport and toggles
+  // the visual ATIS strip on the left side. Plain A is already mapped to
+  // roll-left via the global `keys` map, so we gate strictly on
+  // `e.shiftKey` here and clear the bucket entry so the keys map doesn't
+  // also see the press as a roll input on the same frame. Toggling the
+  // strip is independent of the audio cooldown so a held key opens once
+  // and stays put; the audio broadcast still self-rate-limits via the
+  // 4.5s atisCooldownUntil latch inside triggerAtis(). Range gating (8 km
+  // audio, 25 km visual) lives inside the helpers so this handler stays thin.
   if (e.code==='KeyA' && e.shiftKey){
     e.preventDefault();
     keys['KeyA'] = false;
-    triggerAtis();
+    if (state.atisStripOpen){
+      setAtisStripOpen(false);
+    } else {
+      toggleAtisStrip();
+      triggerAtis();
+    }
     return;
   }
   // Shift+K toggles the pre-flight checklist overlay. Plain K opens the
@@ -10261,7 +10310,14 @@ function _nearestApId(){
 // existing `_windCall()` + `runwayDesignator()` + `state.todHours` drive every
 // number in the line so the broadcast can't drift from what the HUD shows.
 const ATIS_PHONETIC = ['ALFA','BRAVO','CHARLIE','DELTA','ECHO','FOXTROT','GOLF','HOTEL','INDIA','JULIETT','KILO','LIMA','MIKE','NOVEMBER','OSCAR','PAPA','QUEBEC','ROMEO','SIERRA','TANGO','UNIFORM','VICTOR','WHISKEY','XRAY','YANKEE','ZULU'];
-let _atisInfoId = ATIS_PHONETIC[Math.floor(Math.random() * ATIS_PHONETIC.length)];
+// INFO letter cycles hourly off state.todHours so the broadcast and the
+// visual ATIS strip always agree on the same identifier. ALFA at 00:00,
+// BRAVO at 01:00, ..., XRAY at 23:00 — 24 of the 26 phonetic letters cover
+// the day cleanly without wrapping mid-hour.
+function _atisInfoLetter(){
+  const h = ((state.todHours % 24) + 24) % 24;
+  return ATIS_PHONETIC[Math.floor(h) % ATIS_PHONETIC.length];
+}
 let _atisAltimeterInHg = (29.92 + Math.random() * 0.28); // 29.92..30.20, stable per session
 function _atisNearestAp(){
   let best = null, bestD = 1e9;
@@ -10364,7 +10420,7 @@ function triggerAtis(){
     return;
   }
   const ap = found.ap;
-  const info = _atisInfoId;
+  const info = _atisInfoLetter();
   const windStr = (function(){
     const spd = Math.hypot(state.wind.x, state.wind.z);
     const kt = Math.round(spd * 1.94384);
@@ -10404,6 +10460,113 @@ function triggerAtis(){
     state.baroSetMsgFired = true;
     pushATC('SET BARO ' + _atisAltimeterInHg.toFixed(2), { tag:'TWR' });
   }
+}
+// ====== ATIS broadcast strip (Shift+A) ======
+// Left-side ivory-paper overlay mirroring the kneeboard chrome. Reads as the
+// pilot's tuned ATIS frequency: info letter (hour-cycled), recommended
+// runway, wind, altimeter, ceiling, visibility, OAT, Zulu time, and slant
+// range to the field. All values derive from existing wind / weather / fog /
+// rain / todHours plumbing so the strip can never disagree with the rest of
+// the HUD. Auto-closes outside 25 km or on any unsafe screen state.
+const ATIS_STRIP_RANGE_M = 25000;
+function setAtisStripOpen(open){
+  open = !!open;
+  if (state.atisStripOpen === open) return;
+  state.atisStripOpen = open;
+  const panel = document.getElementById('atisStrip');
+  if (panel) panel.classList.toggle('show', open);
+  if (open) updateAtisStrip(true);
+}
+function toggleAtisStrip(){
+  if (state.atisStripOpen){ setAtisStripOpen(false); return; }
+  if (state.introOpen || state.replayActive || state.photoMode || state.paused) return;
+  if (state.crashed) return;
+  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen) return;
+  setAtisStripOpen(true);
+}
+function _atisStripNearestAp(){
+  let best = null, bestD = Infinity;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < bestD){ bestD = d; best = a; }
+  }
+  return best ? { ap: best, dist: bestD } : null;
+}
+function _atisStripWindStr(){
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const spd = Math.hypot(wx, wz);
+  const kt = Math.round(spd * 1.94384);
+  if (kt < 3) return 'CALM';
+  let from = Math.atan2(-wx, -wz) * 180/Math.PI;
+  if (from < 0) from += 360;
+  const dir = String(Math.round(from / 10) * 10 % 360).padStart(3,'0');
+  return dir + '° @ ' + kt + ' kt';
+}
+// Ceiling derived from rain + fog flags. Pure derived readout — no new
+// scene-level cloud-cover state, just the existing weather toggles.
+function _atisStripCeilingStr(){
+  if (settings.rain) return 'OVC 008';            // overcast at ~800 ft when rain
+  if (settings.fog === 'heavy') return 'BKN 005'; // broken low when fog heavy
+  if (settings.fog === 'light') return 'SCT 020'; // scattered when fog light
+  return 'CLEAR';
+}
+// Visibility derived from fog level (matches FOG_LEVELS far-plane intent)
+// with rain knocking another 25% off so a rainy light-fog day reads worse.
+function _atisStripVisStr(){
+  let km = 30;
+  if (settings.fog === 'heavy') km = 1;
+  else if (settings.fog === 'light') km = 3;
+  if (settings.rain) km *= 0.75;
+  if (km >= 10) return Math.round(km) + '+ km';
+  return km.toFixed(1) + ' km';
+}
+function _atisStripTimeStr(){
+  const h = ((state.todHours % 24) + 24) % 24;
+  const hh = Math.floor(h);
+  const mm = Math.floor((h - hh) * 60);
+  return String(hh).padStart(2,'0') + String(mm).padStart(2,'0') + 'Z';
+}
+function updateAtisStrip(force){
+  const panel = document.getElementById('atisStrip');
+  if (!panel) return;
+  // Auto-close on unsafe modes so the panel never lingers across photo
+  // captures, replays, menu, crash, or a keypad modal opened later.
+  if (state.atisStripOpen && (state.introOpen || state.replayActive
+        || state.photoMode || state.paused || state.crashed
+        || state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen)){
+    setAtisStripOpen(false);
+    return;
+  }
+  if (!state.atisStripOpen && !force) return;
+  const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const found = _atisStripNearestAp();
+  const noDataEl = document.getElementById('atisStripNoData');
+  if (!found || found.dist > ATIS_STRIP_RANGE_M){
+    if (noDataEl) noDataEl.style.display = '';
+    setT('atisStripId', '—');
+    setT('atisStripInfo', 'no signal');
+    setT('atisStripSub', 'tune within 25 km of an airport');
+    ['atisStripRwy','atisStripWind','atisStripAltim','atisStripCeil','atisStripVis','atisStripTemp','atisStripTime','atisStripRange'].forEach(id => setT(id, '—'));
+    return;
+  }
+  if (noDataEl) noDataEl.style.display = 'none';
+  const ap = found.ap;
+  const info = _atisInfoLetter();
+  setT('atisStripId', ap.id);
+  setT('atisStripInfo', 'INFO ' + info);
+  setT('atisStripSub', (ap.name || 'automatic terminal information') + ' · ATIS');
+  setT('atisStripRwy', _atisRunwayInUse(ap));
+  setT('atisStripWind', _atisStripWindStr());
+  const altim = (typeof _atisAltimeterInHg === 'number') ? _atisAltimeterInHg : 30.06;
+  setT('atisStripAltim', altim.toFixed(2) + ' inHg');
+  setT('atisStripCeil', _atisStripCeilingStr());
+  setT('atisStripVis', _atisStripVisStr());
+  setT('atisStripTemp', Math.round(_atisTempC()) + '°C');
+  setT('atisStripTime', _atisStripTimeStr());
+  setT('atisStripRange', (found.dist >= 1000)
+    ? (found.dist / 1000).toFixed(1) + ' km from field'
+    : Math.round(found.dist) + ' m from field');
 }
 function atcIdleLines(){
   // Pool of filler lines, biased toward current state. Each entry is just a
@@ -10710,6 +10873,12 @@ function resetPlane(){
   // ATIS cooldown: a hot reset re-arms the Shift+A broadcast immediately so
   // the player can grab a fresh weather read the moment the new sortie starts.
   state.atisCooldownUntil = 0;
+  // ATIS strip: hot reset always closes the overlay so the new sortie
+  // starts clean and the next Shift+A tunes the field the plane actually
+  // sits at instead of stale data from the previous mission.
+  state.atisStripOpen = false;
+  const _atisStripPanel = document.getElementById('atisStrip');
+  if (_atisStripPanel) _atisStripPanel.classList.remove('show');
   // Trip / Hobbs timer: a fresh sortie always starts at 00:00:00 and not
   // running. The auto-arm path inside step() lights it back up the first
   // frame ground speed crosses 5 m/s.
@@ -21329,6 +21498,10 @@ function loop(now){
       // is false, so closed-panel frames don't pay for the DOM writes or the
       // canvas redraw.
       updateKneeboard(false);
+      // ATIS strip (Shift+A) repaint. Cheap early-return when closed,
+      // matches the kneeboard pattern. Lives outside the kneeboard call so
+      // both panels can be open at once (left + right ivory cards).
+      updateAtisStrip(false);
       // Record after the physics step so the buffered frame matches what was just rendered.
       recordReplayFrame(now);
       // Ring-chase ghost: sample the live run after physics, then place the
@@ -21452,7 +21625,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','shearEscape','preflight','kneeboard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','shearEscape','preflight','kneeboard','atisStrip'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -22413,6 +22586,13 @@ updateCamModeUi();
     if (state.kneeboardOpen && !state.paused){
       e.preventDefault();
       setKneeboardOpen(false);
+      return;
+    }
+    // Same treatment for the ATIS strip — Esc closes the overlay before
+    // it can flip the pause menu open over the top of it.
+    if (state.atisStripOpen && !state.paused){
+      e.preventDefault();
+      setAtisStripOpen(false);
       return;
     }
     e.preventDefault();
