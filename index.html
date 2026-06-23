@@ -793,7 +793,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -11834,6 +11834,12 @@ function resetPlane(){
   if (typeof _chopResetLatches === 'function') _chopResetLatches();
   const _chopPillReset = document.getElementById('chopPill');
   if (_chopPillReset) _chopPillReset.style.display = 'none';
+  // Ridge-lift: clear per-direction ATC latches + hide the pill so the next
+  // sortie can re-fire the "updraft / sink" calls when the player climbs back
+  // through a ridge zone. Pool stays so a hot reset doesn't dump the world.
+  if (typeof _ridgeResetLatches === 'function') _ridgeResetLatches();
+  const _ridgePillReset = document.getElementById('ridgePill');
+  if (_ridgePillReset) _ridgePillReset.style.display = 'none';
   for (const v of vortexMeshes){ v.primed = false; v.mesh.visible = false; }
   for (const v of aiVortexMeshes){ v.primed = false; v.mesh.visible = false; }
   wakeState.intensity = 0; wakeState.rumbleCooldown = 0; wakeState.wasInWake = false;
@@ -14857,6 +14863,192 @@ function tickTurbulence(dt){
   }
 }
 
+// ====== MOUNTAIN WAVE / RIDGE LIFT ======
+// Invisible vertical-air pockets anchored to the distant mountain peaks that
+// inject a smooth +/-5 m/s vertical velocity into state.vel.y while the plane
+// is inside. The pool is built once from the same deterministic hash2() that
+// places the peaks themselves, so each pocket sits on a fixed offset from a
+// known peak. The SIGN of the vertical kick is decided by dotting the
+// pocket's offset direction against the live wind direction: pockets on the
+// windward side of a peak (offset opposite the wind) get an UPDRAFT, pockets
+// on the lee side (offset aligned with the wind) get SINK. Calm wind = both
+// sides nearly zero, so the system is silent on glassy days and bites on
+// blowy ones — mirroring the chop + wind-shear systems for a complete
+// weather story. No new mesh, no new audio. The vertical kick is applied
+// directly to state.vel.y (smooth, not jitter), and the HUD pill + one-shot
+// PILOT ATC call mirror the chop pill/ATC pattern.
+const RIDGE_POOL_N        = 8;     // active pockets
+const RIDGE_R_HORIZ_M     = 800;   // horizontal radius of each pocket
+const RIDGE_R_VERT_M      = 1400;  // vertical half-extent (peak crowns sit high)
+const RIDGE_OFFSET_MIN_M  = 600;   // metres off the peak centre
+const RIDGE_OFFSET_MAX_M  = 1400;
+const RIDGE_ALT_MSL_MIN   = 1200;  // gating: only fires above 1200m MSL
+const RIDGE_VVEL_PEAK_MS  = 5.0;   // m/s peak vertical velocity at severity=1
+const RIDGE_WIND_REF_MS   = 10;    // m/s steady wind = full coupling
+const RIDGE_STRONG_THRESH = 0.55;  // |severity| above this = pill + ATC fire
+const RIDGE_PILL_HOLD_MS  = 900;   // hold pill briefly so a gap doesn't blink it
+// Pool is allocated lazily on first tick (after the peak geometry seed has
+// run). Each pocket: { px, pz, peakY, ox, oz } where (px,pz) = peak base
+// position, peakY = peak height (so the centre altitude sits near the crown),
+// (ox, oz) = horizontal offset from the peak that decides this pocket's
+// up/down sign against the live wind.
+let ridgePockets = null;
+let ridgePillUntilMs = 0;
+const ridgeAtcLatch = { up: false, down: false };
+function _ridgeInitPool(){
+  if (ridgePockets) return;
+  ridgePockets = new Array(RIDGE_POOL_N);
+  const RING_R = WORLD/2 + 1500; // must match the DISTANT MOUNTAIN RING build above
+  // Re-derive a peak position per pool slot from the same hash2(i, ...)
+  // pattern the mountain ring uses, picking 8 peak slots spread around the
+  // ring so the pool isn't clumped on one side of the world.
+  for (let i = 0; i < RIDGE_POOL_N; i++){
+    const peakIdx = Math.floor((i / RIDGE_POOL_N) * 28); // 28 peaks total
+    const a = (peakIdx / 28) * Math.PI * 2 + (hash2(peakIdx, 3) - 0.5) * 0.12;
+    const r = RING_R + (hash2(peakIdx, 11) - 0.5) * 1800;
+    const peakX = Math.cos(a) * r;
+    const peakZ = Math.sin(a) * r;
+    const peakH = 1300 + hash2(peakIdx, 29) * 900;
+    // Per-pocket horizontal offset from the peak. Random angle + distance
+    // so a single peak can host one updraft and an adjacent peak a sink,
+    // giving the pilot something to discover instead of a uniform ring.
+    const theta = hash2(i, 71) * Math.PI * 2;
+    const off = RIDGE_OFFSET_MIN_M + hash2(i, 89) * (RIDGE_OFFSET_MAX_M - RIDGE_OFFSET_MIN_M);
+    ridgePockets[i] = {
+      px: peakX + Math.sin(theta) * off,
+      pz: peakZ + Math.cos(theta) * off,
+      peakY: peakH,
+      ox: Math.sin(theta),
+      oz: Math.cos(theta)
+    };
+  }
+}
+function _ridgeResetLatches(){
+  ridgeAtcLatch.up = false;
+  ridgeAtcLatch.down = false;
+  ridgePillUntilMs = 0;
+}
+function tickRidgeLift(dt){
+  if (dt <= 0) return;
+  const pillEl = document.getElementById('ridgePill');
+  _ridgeInitPool();
+  // Hard gates: same family as tickTurbulence so paused / replay / photo /
+  // intro / crash / on-ground all freeze the system and hide the pill.
+  if (state.crashed || state.replayActive || state.photoMode || state.introOpen || state.paused || state.onGround){
+    if (pillEl && pillEl.style.display !== 'none' && performance.now() > ridgePillUntilMs){
+      pillEl.style.display = 'none';
+    }
+    return;
+  }
+  const py = plane.position.y;
+  // Altitude gate: ridge lift is a high-altitude phenomenon; below 1200m MSL
+  // we just bail (taxi + low circuits stay clean).
+  if (py < RIDGE_ALT_MSL_MIN){
+    if (pillEl && pillEl.style.display !== 'none' && performance.now() > ridgePillUntilMs){
+      pillEl.style.display = 'none';
+    }
+    return;
+  }
+  // Wind direction normal (unit vector pointing where the wind is BLOWING TO).
+  // Calm wind = zero coupling so the system is silent.
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const windSpd = Math.hypot(wx, wz);
+  const windMul = Math.min(1, windSpd / RIDGE_WIND_REF_MS);
+  if (windMul < 0.05){
+    if (pillEl && pillEl.style.display !== 'none' && performance.now() > ridgePillUntilMs){
+      pillEl.style.display = 'none';
+    }
+    return;
+  }
+  const wxN = wx / windSpd;
+  const wzN = wz / windSpd;
+  // Sum per-pocket contributions while the plane is inside the cylinder.
+  // Smooth horizontal + vertical falloff (linear) so the pocket fades in /
+  // out as the plane crosses the edge instead of latching at the rim.
+  const px = plane.position.x;
+  const pz = plane.position.z;
+  let totalVvel = 0;
+  for (let i = 0; i < RIDGE_POOL_N; i++){
+    const p = ridgePockets[i];
+    const dx = px - p.px;
+    const dz = pz - p.pz;
+    const dh = py - p.peakY;
+    const horizSq = dx*dx + dz*dz;
+    const rSq = RIDGE_R_HORIZ_M * RIDGE_R_HORIZ_M;
+    if (horizSq >= rSq) continue;
+    if (Math.abs(dh) >= RIDGE_R_VERT_M) continue;
+    const horiz = 1 - horizSq / rSq;             // 0 edge .. 1 centre
+    const vert  = 1 - Math.abs(dh) / RIDGE_R_VERT_M;
+    // Sign: offset OPPOSITE the wind (windward side) = UP, offset ALIGNED
+    // with the wind (lee side) = DOWN. Dot product of offset direction and
+    // wind direction gives the sign + magnitude in [-1, 1].
+    const align = p.ox * wxN + p.oz * wzN;       // -1 windward .. +1 lee
+    const sign = -align;                          // flip so windward = positive
+    totalVvel += sign * horiz * vert;
+  }
+  // Final vertical velocity scaled by wind coupling. Capped at a single
+  // pocket's peak (rare bubble overlap doesn't multiply into a microburst).
+  let vvel = totalVvel * windMul * RIDGE_VVEL_PEAK_MS;
+  if (vvel >  RIDGE_VVEL_PEAK_MS) vvel =  RIDGE_VVEL_PEAK_MS;
+  if (vvel < -RIDGE_VVEL_PEAK_MS) vvel = -RIDGE_VVEL_PEAK_MS;
+  // Apply smoothly to vertical velocity. Lerp toward the target so the kick
+  // feels like real air settling into the airframe instead of a step jump.
+  if (Math.abs(vvel) > 0.05){
+    const k = Math.min(1, dt * 1.4);
+    state.vel.y += (vvel - 0) * k;
+  }
+  // HUD pill: amber when any non-trivial vertical air is hitting the plane,
+  // brighter colour and updraft/sink-specific glyph when over the strong
+  // threshold. Held briefly so a gap between adjacent pockets doesn't blink.
+  const sev = Math.abs(vvel) / RIDGE_VVEL_PEAK_MS;
+  if (pillEl){
+    const nowMs = performance.now();
+    if (sev >= 0.2){
+      pillEl.style.display = 'inline';
+      if (sev >= RIDGE_STRONG_THRESH){
+        if (vvel > 0){
+          pillEl.style.color = '#7ee787';
+          pillEl.textContent = '⬆ UPDRAFT';
+        } else {
+          pillEl.style.color = '#ff9e3d';
+          pillEl.textContent = '⬇ SINK';
+        }
+      } else {
+        pillEl.style.color = '#ffd166';
+        pillEl.textContent = '〰 RIDGE LIFT';
+      }
+      ridgePillUntilMs = nowMs + RIDGE_PILL_HOLD_MS;
+    } else if (nowMs > ridgePillUntilMs){
+      pillEl.style.display = 'none';
+    }
+  }
+  // One-shot PILOT ATC call on first entry to a STRONG up- or down-draft per
+  // direction. Re-arms when the plane has left strong-pocket territory for
+  // either direction, so flying through a ridge zone earns one updraft call
+  // and one sink call per crossing instead of spam.
+  if (sev >= RIDGE_STRONG_THRESH){
+    if (vvel > 0 && !ridgeAtcLatch.up){
+      ridgeAtcLatch.up = true;
+      if (typeof pushATC === 'function'){
+        const fpm = Math.round(vvel * 196.85 / 100) * 100; // m/s -> ft/min, rounded to 100
+        pushATC('Updraft, +' + fpm + ' fpm', { tag:'PILOT' });
+      }
+    } else if (vvel < 0 && !ridgeAtcLatch.down){
+      ridgeAtcLatch.down = true;
+      if (typeof pushATC === 'function'){
+        const fpm = Math.round(Math.abs(vvel) * 196.85 / 100) * 100;
+        pushATC('Sink, -' + fpm + ' fpm', { tag:'PILOT' });
+      }
+    }
+  } else if (sev < 0.15){
+    // Drop both latches once we've cleared all the strong pockets so the
+    // next ridge crossing re-arms cleanly.
+    ridgeAtcLatch.up = false;
+    ridgeAtcLatch.down = false;
+  }
+}
+
 // ====== GEAR WARNING HORN ======
 // Classic GA two-tone "gear, gear" pulse + flashing HUD pill when the pilot
 // is low, slow, and descending with the gear still up. Modeled after every
@@ -17165,6 +17357,11 @@ function step(dt){
   // bites. HUD pill + one-shot ATC "chop reported" per altitude band; resets
   // on resetPlane().
   tickTurbulence(dt);
+  // Mountain wave / ridge lift: vertical-air pockets anchored to the distant
+  // mountain peaks that inject smooth +/-5 m/s into vertical velocity above
+  // 1200m MSL. Sign decided per pocket by dotting the pocket's offset against
+  // the live wind direction — windward face = updraft, lee face = sink.
+  tickRidgeLift(dt);
   // Landing-gear warning horn: low + slow + descending with gear up = nag.
   tickGearHorn();
   // Bird flock altitude warning: in the band where a flock is drifting and
