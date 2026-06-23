@@ -399,6 +399,30 @@
   #landcard .reason { font-size:10px; color:#8ab09e; margin-top:8px; text-align:center; font-style:italic; }
   #landcard .hint { font-size:9px; color:#7a8a98; margin-top:8px; text-align:center; letter-spacing:1px; }
   #landcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
+  /* ====== ENGINE START CHECKLIST CARD ======
+     Pops in during the cold-start ritual (after the intro closes, while the
+     engine hasn't caught yet) listing the four pre-crank steps with green ✓
+     ticks as each one is set. Slides in with the ritual, slides out the
+     second the engine catches. Sits above the mini-map at bottom-right so
+     it doesn't fight the crash / land report cards (bottom-center). Pure
+     HUD overlay — pointer-events:none so it can't intercept a stray click
+     on the canvas or mobile buttons during the ritual. */
+  #coldstartcard { position:fixed; right:12px; bottom:220px; width:208px; padding:9px 11px 10px; font-size:12px; color:#cfe; background:rgba(8,14,22,.92); border:1px solid #2a4a6a; border-radius:8px; backdrop-filter:blur(8px); z-index:7; pointer-events:none; box-shadow:0 6px 18px rgba(0,0,0,.45); transform:translateX(140%); opacity:0; visibility:hidden; transition:transform .32s ease-out, opacity .32s ease-out, visibility 0s linear .32s; }
+  #coldstartcard.show { transform:translateX(0); opacity:1; visibility:visible; transition:transform .32s ease-out, opacity .32s ease-out, visibility 0s linear 0s; }
+  #coldstartcard .ttl { color:#ffd166; font-weight:800; letter-spacing:2px; font-size:11px; margin-bottom:2px; }
+  #coldstartcard .sub { color:#9bb; font-size:10px; letter-spacing:1px; margin-bottom:7px; }
+  #coldstartcard .row { display:flex; align-items:center; gap:7px; padding:2px 0; font-family:ui-monospace, monospace; font-size:12px; line-height:1.35; color:#ffb066; transition:color .25s ease; }
+  #coldstartcard .row .box { display:inline-block; width:14px; text-align:center; color:#ffb066; font-weight:700; transition:color .25s ease; }
+  #coldstartcard .row .num { display:inline-block; width:12px; text-align:right; color:#7a8a98; font-size:10px; font-weight:700; }
+  #coldstartcard .row .lbl { flex:1 1 auto; font-size:11px; letter-spacing:.5px; }
+  #coldstartcard .row .state { color:#9bb; font-size:9px; letter-spacing:1px; }
+  #coldstartcard .row.ok { color:#7ee787; }
+  #coldstartcard .row.ok .box { color:#7ee787; }
+  #coldstartcard .row.ok .state { color:#7ee787; }
+  #coldstartcard .foot { margin-top:7px; padding-top:6px; border-top:1px solid #1e3548; color:#9bb; font-size:10px; letter-spacing:1px; text-align:center; }
+  #coldstartcard .foot.ready { color:#7ee787; font-weight:700; animation:csReadyPulse 1.4s ease-in-out infinite; }
+  #coldstartcard kbd { background:#1a2a3a; color:#cfe; padding:1px 4px; border-radius:3px; font-size:9px; border:1px solid #2a4a6a; }
+  @keyframes csReadyPulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
   /* Bailout summary card — twin of the crash card but cyan, fired when the
      pilot punches out instead of riding the plane into the ground. Same layout
      so saved screenshots and the brain wiring stay familiar. */
@@ -1097,6 +1121,15 @@
   </div>
   <div class="reason" id="lcReason"></div>
   <div class="hint">click to dismiss · <kbd>R</kbd> restart</div>
+</div>
+<div id="coldstartcard">
+  <div class="ttl">ENGINE START</div>
+  <div class="sub">PRE-CRANK CHECKLIST</div>
+  <div class="row" id="csCanopy"><span class="num">1.</span><span class="box">☐</span><span class="lbl">CANOPY CLOSED</span><span class="state" id="csCanopyState">OPEN</span></div>
+  <div class="row" id="csBrake"><span class="num">2.</span><span class="box">☐</span><span class="lbl">PARKING BRAKE</span><span class="state" id="csBrakeState">OFF</span></div>
+  <div class="row" id="csMixture"><span class="num">3.</span><span class="box">☐</span><span class="lbl">MIXTURE RICH</span><span class="state" id="csMixtureState">—</span></div>
+  <div class="row" id="csPrime"><span class="num">4.</span><span class="box">☐</span><span class="lbl">PRIME CARB</span><span class="state" id="csPrimeState">DRY</span></div>
+  <div class="foot" id="csFoot">0 / 4 · then press <kbd>I</kbd></div>
 </div>
 <div id="bailcard">
   <h3>🪂 BAILED OUT</h3>
@@ -10228,6 +10261,12 @@ const state = {
   // gets a fresh chime sequence on every panel session, but a row that
   // ticks/unticks/reticks during the same session pips only once.
   preflightPipMask: 0,
+  // Engine start checklist card (#coldstartcard) bookkeeping. PipMask is
+  // the same trick the preflight panel uses — 4-bit mask of which rows
+  // have already chimed this ritual so a parking-brake-on/off/on dance
+  // pips only once. Reset on resetPlane() and on every fresh armColdStart()
+  // so each cold start re-arms the four chimes from scratch.
+  coldStartPipMask: 0,
   // Approach plate kneeboard (#kneeboard) overlay. Shift+N toggles, Esc
   // closes. Pure HUD overlay — does NOT pause the sim and does NOT block
   // input, so it's not listed in isAnyOtherModalOpen(). Auto-closes on
@@ -13744,6 +13783,129 @@ function updatePreflight(force){
     }
   }
 }
+// ====== ENGINE START CHECKLIST CARD (#coldstartcard) ======
+// Bottom-right overlay that lists the four real pre-crank steps with a green
+// ✓ ticking in as each one is set. Slides in the first frame the cold-start
+// ritual is active after the intro closes; slides out the second the engine
+// catches (state.coldStart flips false in finishIgnition()). Pure HUD,
+// pointer-events:none, no physics side effects — just visualizes what the
+// existing nags (canopy / parking-brake / mixture / prime) already teach.
+//
+// Why these four steps: they're the real conditions the cold-start ritual
+// in this sim actually checks before a clean ignition. CANOPY CLOSED is
+// hard-blocked by beginIgnition() with an ATC nudge. PARKING BRAKE fires
+// the one-shot "set parking brake first" nag on first crank. MIXTURE RICH
+// is what beginIgnition() implicitly assumes for the prime/catch path.
+// PRIME CARB (Shift+I 1.5s hold) is the optional-but-encouraged step that
+// guarantees a one-crank catch on a cold engine instead of the 2–3 crank
+// cough cycle a cold start without prime now needs. Hit all four → footer
+// flips to a pulsing green "✓ CLEARED TO CRANK" with the I-key hint.
+//
+// Each row pips once via playCalloutChime() the first time it transitions
+// to OK (state.coldStartPipMask gates re-chiming so a brake on/off/on
+// dance only chimes once per ritual). Mask resets on resetPlane() and on
+// every fresh armColdStart() so the next sortie re-arms the chimes clean.
+const COLD_START_ROWS = [
+  // id, DOM row id, DOM state id, label, evaluator returning { ok, state }
+  { row:'csCanopy', state:'csCanopyState',
+    check: () => ({ ok: !state.canopyOpen, state: state.canopyOpen ? 'OPEN' : 'CLOSED' }) },
+  { row:'csBrake', state:'csBrakeState',
+    check: () => ({ ok: !!state.parkingBrake, state: state.parkingBrake ? 'SET' : 'OFF' }) },
+  { row:'csMixture', state:'csMixtureState',
+    check: () => {
+      // Full-rich for cold-start matches the existing MIX_ATC_FULL_RICH
+      // threshold (0.85). Anything leaner reads as still leaned from the
+      // last cruise — the player needs to push it forward before crank.
+      const m = state.mixture || 0;
+      const pct = Math.round(m * 100);
+      return { ok: m >= 0.85, state: pct + '%' };
+    } },
+  { row:'csPrime', state:'csPrimeState',
+    check: () => {
+      // Primed = the Shift+I 1.5s hold completed AND the 30s shelf life
+      // hasn't expired. While the player is mid-hold (primeHoldT >= 0),
+      // show WET as in-progress amber. After a successful prime the
+      // existing #primedPill in the HUD shows the countdown; this row
+      // just tells you the carb is wet enough to catch in one crank.
+      const primed = !!state.primed && state.primeExpiresAt > 0
+                     && performance.now() < state.primeExpiresAt;
+      let label = 'DRY';
+      if (primed){
+        const sLeft = Math.max(0, Math.ceil((state.primeExpiresAt - performance.now()) / 1000));
+        label = 'WET ' + sLeft + 's';
+      } else if ((state.primeHoldT || 0) > 0){
+        label = 'PRIMING…';
+      }
+      return { ok: primed, state: label };
+    } },
+];
+function updateColdStartCard(){
+  const card = document.getElementById('coldstartcard');
+  if (!card) return;
+  // Only relevant during the ground cold-start ritual, after the intro has
+  // closed and before the engine catches. Air-restart deliberately doesn't
+  // get this card — deadstick restarts are about flying the plane, not
+  // walking a checklist. Hidden in photo / replay / pause / crash so
+  // saved PNGs and frozen frames stay clean.
+  const wantVisible = !!state.coldStart && !state.introOpen && !state.photoMode
+                      && !state.replayActive && !state.paused && !state.crashed
+                      && !!state.onGround;
+  const wasVisible = card.classList.contains('show');
+  if (wantVisible){
+    if (!wasVisible){
+      // Fresh open — wipe the pip mask so the four chimes can fire again
+      // (also reset by armColdStart(), but defensive against any path that
+      // arms cold-start without going through armColdStart).
+      state.coldStartPipMask = 0;
+      card.classList.add('show');
+    }
+  } else {
+    if (wasVisible){
+      // Slide out via CSS transition (visibility delayed by 320 ms so the
+      // transform/opacity transition actually paints before display goes).
+      card.classList.remove('show');
+    }
+    // While hidden, still bail before the row-tick work below.
+    return;
+  }
+  // Tick the four rows. Counts done, flips classes, pips on transitions.
+  let done = 0;
+  for (let i = 0; i < COLD_START_ROWS.length; i++){
+    const def = COLD_START_ROWS[i];
+    const rowEl = document.getElementById(def.row);
+    const stEl  = document.getElementById(def.state);
+    if (!rowEl) continue;
+    let res;
+    try { res = def.check(); } catch(e){ res = { ok:false, state:'—' }; }
+    const ok = !!res.ok;
+    if (ok) done++;
+    const wasOk = rowEl.classList.contains('ok');
+    if (ok !== wasOk){
+      rowEl.classList.toggle('ok', ok);
+      const boxEl = rowEl.querySelector('.box');
+      if (boxEl) boxEl.textContent = ok ? '✓' : '☐';
+      const bit = 1 << i;
+      if (ok && !((state.coldStartPipMask || 0) & bit)){
+        state.coldStartPipMask = (state.coldStartPipMask || 0) | bit;
+        if (typeof playCalloutChime === 'function'){
+          try { playCalloutChime(); } catch(e){ /* audio off / suspended */ }
+        }
+      }
+    }
+    if (stEl) stEl.textContent = res.state || '—';
+  }
+  const foot = document.getElementById('csFoot');
+  if (foot){
+    if (done === COLD_START_ROWS.length){
+      // All four green — nudge the player toward the actual crank.
+      foot.innerHTML = '✓ CLEARED TO CRANK · press <kbd>I<\/kbd>';
+      if (!foot.classList.contains('ready')) foot.classList.add('ready');
+    } else {
+      foot.innerHTML = done + ' / ' + COLD_START_ROWS.length + ' · then press <kbd>I<\/kbd>';
+      if (foot.classList.contains('ready')) foot.classList.remove('ready');
+    }
+  }
+}
 // ====== Approach plate kneeboard (Shift+N) ======
 // Right-side clipboard overlay that pretends to be a real Jeppesen approach
 // plate. Picks the nearest airport in range (12 km cap), auto-selects the
@@ -14227,6 +14389,9 @@ function armColdStart(){
   state.roughIdleT = -1;
   state.coldMorning = false;
   state.throttle = 0;
+  // Fresh checklist chimes for the new ritual — wipe the pip mask so each
+  // of the four rows can pip again as the player walks them.
+  state.coldStartPipMask = 0;
   showStatus('COLD START', 'Shift+I primes · I cranks', 'hard');
 }
 function beginIgnition(){
@@ -25317,6 +25482,12 @@ function loop(now){
       // auto-close gate), so non-checklist frames also pay basically
       // nothing. Called after step() so it sees the latest control state.
       updatePreflight(false);
+      // Engine start checklist card (#coldstartcard) repaint. Cheap
+      // visibility gate inside: bails when not in the ground cold-start
+      // window, so post-takeoff frames pay basically nothing. Called
+      // after step() so the four-row state read matches the latest
+      // canopy / brake / mixture / prime input.
+      updateColdStartCard();
       // Approach plate kneeboard (Shift+N) repaint. Same cheap pattern as
       // updatePreflight: early-returns immediately when state.kneeboardOpen
       // is false, so closed-panel frames don't pay for the DOM writes or the
@@ -25451,7 +25622,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
