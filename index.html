@@ -171,6 +171,33 @@
      the sim is paused / in photo / replay / intro / crashed. Pure HUD
      overlay — does not pause the sim, does not steal pointer events. */
   #preflight { position:fixed; top:160px; left:12px; width:228px; padding:10px 12px 11px; font-size:12px; color:#cfe; background:rgba(8,14,22,.92); border:1px solid #2a4a6a; border-radius:8px; backdrop-filter:blur(8px); display:none; z-index:7; pointer-events:none; box-shadow:0 6px 18px rgba(0,0,0,.45); }
+  /* Approach plate kneeboard (#kneeboard) — Shift+N. Right-side clipboard
+     overlay sized to read like a real Jeppesen plate: ivory paper tint,
+     monospaced briefing numbers, top-down plan canvas with the standard
+     left-hand pattern + live plane dot. Pure HUD overlay: pointer-events
+     off so it never eats clicks, hidden in photo mode via PHOTO_HIDE_IDS
+     and auto-closes on any unsafe screen state (intro / replay / photo /
+     pause / crash). z-index sits a beat above #preflight so an open
+     kneeboard reads above the pre-flight panel without fighting it. */
+  #kneeboard { position:fixed; top:50%; right:12px; transform:translateY(-50%); width:256px; max-height:78vh; padding:11px 13px 10px; font-size:11px; color:#1c2733; background:#f1e8d3; border:1px solid #c2b48a; border-radius:6px; box-shadow:0 6px 22px rgba(0,0,0,.55), inset 0 0 0 2px #efe2c2; display:none; z-index:8; pointer-events:none; font-family:ui-monospace, 'SF Mono', Menlo, Consolas, monospace; line-height:1.4; }
+  #kneeboard.show { display:block; }
+  #kneeboard .hdr { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:5px; margin-bottom:6px; border-bottom:1px solid #8a7d56; }
+  #kneeboard .hdr .id { color:#1c2733; font-weight:800; font-size:14px; letter-spacing:2px; }
+  #kneeboard .hdr .nm { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; }
+  #kneeboard .sub  { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:5px; }
+  #kneeboard .row  { display:flex; justify-content:space-between; gap:8px; padding:1px 0; font-size:11px; }
+  #kneeboard .row .lbl { color:#5a4e2e; }
+  #kneeboard .row .val { color:#1c2733; font-weight:700; }
+  #kneeboard .sect { margin-top:7px; padding-top:5px; border-top:1px dashed #b3a577; }
+  #kneeboard .sect .ttl { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; margin-bottom:3px; text-transform:uppercase; }
+  #kneeboard table.gs { width:100%; border-collapse:collapse; font-size:10px; }
+  #kneeboard table.gs th, #kneeboard table.gs td { padding:1px 4px; text-align:right; }
+  #kneeboard table.gs th { color:#5a4e2e; font-weight:600; letter-spacing:1px; text-transform:uppercase; }
+  #kneeboard table.gs td { color:#1c2733; font-weight:700; font-family:inherit; }
+  #kneeboard table.gs tr td:first-child, #kneeboard table.gs tr th:first-child { text-align:left; }
+  #kneeboard canvas.plan { display:block; width:100%; height:120px; margin-top:4px; background:#f6efdb; border:1px solid #b3a577; border-radius:3px; }
+  #kneeboard .foot { margin-top:8px; padding-top:5px; border-top:1px solid #8a7d56; color:#5a4e2e; font-size:9px; letter-spacing:1px; text-align:center; }
+  #kneeboard .nodata { padding:18px 0 22px; text-align:center; color:#7a6b3f; font-size:11px; letter-spacing:1px; }
   #preflight.show { display:block; }
   #preflight .ttl { color:#ffd166; font-weight:800; letter-spacing:2px; font-size:11px; margin-bottom:2px; }
   #preflight .sub { color:#9bb; font-size:10px; letter-spacing:1px; margin-bottom:7px; }
@@ -724,6 +751,31 @@
   <div class="row" id="clkFuel"><span class="box">☐</span><span>FUEL &gt;10%</span></div>
   <div class="row" id="clkSpd"><span class="box">☐</span><span>SPEED &lt;200 km/h</span></div>
 </div>
+<div id="kneeboard">
+  <div class="hdr"><span class="id" id="kbId">—</span><span class="nm" id="kbName">briefing</span></div>
+  <div class="sub" id="kbSub">approach plate</div>
+  <div class="row"><span class="lbl">RWY</span><span class="val" id="kbRwy">—</span></div>
+  <div class="row"><span class="lbl">HDG</span><span class="val" id="kbHdg">—</span></div>
+  <div class="row"><span class="lbl">THR ELEV</span><span class="val" id="kbElev">—</span></div>
+  <div class="row"><span class="lbl">LEN</span><span class="val" id="kbLen">—</span></div>
+  <div class="sect">
+    <div class="ttl">3° glideslope</div>
+    <table class="gs"><thead><tr><th>DIST</th><th>ALT MSL</th><th>AGL</th></tr></thead><tbody id="kbGsBody"></tbody></table>
+  </div>
+  <div class="sect">
+    <div class="ttl">briefing</div>
+    <div class="row"><span class="lbl">WIND</span><span class="val" id="kbWind">—</span></div>
+    <div class="row"><span class="lbl">ALTIM</span><span class="val" id="kbAltim">—</span></div>
+    <div class="row"><span class="lbl">TIME</span><span class="val" id="kbTime">—</span></div>
+    <div class="row"><span class="lbl">RANGE</span><span class="val" id="kbRange">—</span></div>
+  </div>
+  <div class="sect">
+    <div class="ttl">plan view (left-hand pattern)</div>
+    <canvas class="plan" id="kbPlan" width="460" height="240"></canvas>
+  </div>
+  <div class="foot"><kbd>Shift</kbd>+<kbd>N</kbd> close · <kbd>Esc</kbd> dismiss</div>
+  <div class="nodata" id="kbNoData" style="display:none">No airport in range.<br>Fly within 12 km of a field.</div>
+</div>
 <div id="preflight">
   <div class="ttl">PRE-FLIGHT</div>
   <div class="sub">RUN BEFORE TAKEOFF</div>
@@ -750,7 +802,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -8294,6 +8346,11 @@ const state = {
   // gets a fresh chime sequence on every panel session, but a row that
   // ticks/unticks/reticks during the same session pips only once.
   preflightPipMask: 0,
+  // Approach plate kneeboard (#kneeboard) overlay. Shift+N toggles, Esc
+  // closes. Pure HUD overlay — does NOT pause the sim and does NOT block
+  // input, so it's not listed in isAnyOtherModalOpen(). Auto-closes on
+  // intro/photo/pause/replay/crashed via updateKneeboard().
+  kneeboardOpen: false,
   mode: 'free',
   hopOrder: [],
   hopIdx: 0,
@@ -9066,6 +9123,14 @@ addEventListener('keydown', e=>{
     toggleLandingLight();
   }
   if (e.code==='KeyN'){
+    // Plain N cycles wipers; Shift+N is the approach-plate kneeboard.
+    // Bail on the shifted variant so the kneeboard hotkey doesn't also
+    // step the wiper mode underneath.
+    if (e.shiftKey){
+      e.preventDefault();
+      toggleKneeboard();
+      return;
+    }
     // Windshield wipers cycle: off → slow → fast → off. Auto stays in the
     // settings panel so the hotkey is a predictable three-step manual cycle
     // (no surprise auto re-engagement on a stray press).
@@ -11219,6 +11284,363 @@ function updatePreflight(force){
       foot.innerHTML = done + ' / ' + PREFLIGHT_ROWS.length + ' complete · Shift+K to close';
     }
   }
+}
+// ====== Approach plate kneeboard (Shift+N) ======
+// Right-side clipboard overlay that pretends to be a real Jeppesen approach
+// plate. Picks the nearest airport in range (12 km cap), auto-selects the
+// wind-favoured runway with the same projection math `_atisRunwayInUse`
+// uses, and lays out the briefing numbers + a top-down plan canvas with
+// the standard left-hand pattern outlined and the live plane position.
+// Pure HUD overlay — doesn't pause the sim, doesn't steal pointer events,
+// not listed in isAnyOtherModalOpen() so Esc still goes to the pause menu
+// cleanly. Auto-closes on intro/photo/pause/replay/crashed via
+// updateKneeboard(), and the J / squawk / time keypads block opening so
+// the kneeboard never sprouts on top of an active modal.
+const KB_RANGE_M = 12000;                          // max distance from a field before "out of range"
+const KB_GS_DIST_KM = [1, 2, 3, 5];                // glideslope altitude callouts (km from threshold)
+const KB_GS_TAN_DEG = Math.tan(3 * Math.PI / 180); // 3° standard glideslope
+function setKneeboardOpen(open){
+  open = !!open;
+  if (state.kneeboardOpen === open) return;
+  state.kneeboardOpen = open;
+  const panel = document.getElementById('kneeboard');
+  if (panel) panel.classList.toggle('show', open);
+  if (open){
+    // Paint immediately so the panel doesn't flash a stale frame before the
+    // per-frame updateKneeboard() tick runs.
+    updateKneeboard(true);
+  }
+}
+function toggleKneeboard(){
+  if (state.kneeboardOpen){ setKneeboardOpen(false); return; }
+  // Block opens on screen states that own their own modal flow, and on the
+  // existing keypad modals so the kneeboard doesn't sprout over them. Mirrors
+  // the togglePreflight() gate plus the J / squawk / time keypad checks.
+  if (state.introOpen || state.replayActive || state.photoMode || state.paused) return;
+  if (state.crashed) return;
+  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen) return;
+  setKneeboardOpen(true);
+  if (typeof showStatus === 'function'){
+    showStatus('APPROACH PLATE', 'Shift+N or Esc to close', 'good');
+  }
+}
+// Pick the wind-favoured runway threshold for the given airport, matching
+// _atisRunwayInUse's projection math so the kneeboard and ATIS always agree.
+// Returns the chosen heading (rad), designator string, threshold world coords,
+// and the flip flag (+1 = canonical end, -1 = opposite).
+function _kneeboardPickRunway(ap){
+  if (!ap) return null;
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const spd = Math.hypot(wx, wz);
+  const dotFor = (flip) => {
+    const cs = Math.cos(ap.hdg + (flip < 0 ? Math.PI : 0));
+    const sn = Math.sin(ap.hdg + (flip < 0 ? Math.PI : 0));
+    return -(wx * sn + wz * cs);  // positive = headwind component into landing direction
+  };
+  let useFlip = 1;
+  if (spd >= 1.5){
+    useFlip = (dotFor(1) >= dotFor(-1)) ? 1 : -1;
+  }
+  const useHdg = ap.hdg + (useFlip < 0 ? Math.PI : 0);
+  // Touchdown threshold in local frame is at -ap.len/2 (canonical) or
+  // +ap.len/2 (opposite). Rotate into world by ap.hdg.
+  const halfLen = ap.len / 2;
+  const flipSign = (useFlip < 0) ? -1 : 1;
+  const localThrZ = -flipSign * halfLen;
+  const cs0 = Math.cos(ap.hdg), sn0 = Math.sin(ap.hdg);
+  const thrX = ap.x + 0 * cs0 + localThrZ * sn0;
+  const thrZ = ap.z - 0 * sn0 + localThrZ * cs0;
+  const designator = (typeof runwayDesignator === 'function') ? runwayDesignator(useHdg) : '';
+  return { ap, useHdg, designator, thrX, thrZ, useFlip };
+}
+function _kneeboardNearestAp(){
+  let best = null, bestD = Infinity;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < bestD){ bestD = d; best = a; }
+  }
+  return best ? { ap: best, dist: bestD } : null;
+}
+function _kneeboardWindStr(){
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const spd = Math.hypot(wx, wz);
+  const kt = Math.round(spd * 1.94384);
+  if (kt < 3) return 'CALM';
+  let from = Math.atan2(-wx, -wz) * 180/Math.PI;
+  if (from < 0) from += 360;
+  const dir = String(Math.round(from / 10) * 10 % 360).padStart(3,'0');
+  return dir + '° @ ' + kt + ' kt';
+}
+function _kneeboardTimeStr(){
+  const h = ((state.todHours % 24) + 24) % 24;
+  const hh = Math.floor(h);
+  const mm = Math.floor((h - hh) * 60);
+  return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + 'Z';
+}
+function updateKneeboard(force){
+  const panel = document.getElementById('kneeboard');
+  if (!panel) return;
+  // Auto-close on unsafe modes so the panel never lingers across photo
+  // captures, replays, the menu, a crash, or a keypad modal opened later.
+  if (state.kneeboardOpen && (state.introOpen || state.replayActive
+        || state.photoMode || state.paused || state.crashed
+        || state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen)){
+    setKneeboardOpen(false);
+    return;
+  }
+  if (!state.kneeboardOpen && !force) return;
+  const found = _kneeboardNearestAp();
+  const noDataEl = document.getElementById('kbNoData');
+  const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  if (!found || found.dist > KB_RANGE_M){
+    if (noDataEl) noDataEl.style.display = '';
+    setT('kbId', '—');
+    setT('kbName', 'no field');
+    setT('kbSub', 'fly within 12 km of an airport');
+    ['kbRwy','kbHdg','kbElev','kbLen','kbWind','kbAltim','kbTime','kbRange'].forEach(id => setT(id, '—'));
+    const gsBody = document.getElementById('kbGsBody');
+    if (gsBody) gsBody.innerHTML = '';
+    const planCv = document.getElementById('kbPlan');
+    if (planCv){
+      const ctx = planCv.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, planCv.width, planCv.height);
+    }
+    return;
+  }
+  if (noDataEl) noDataEl.style.display = 'none';
+  const picked = _kneeboardPickRunway(found.ap);
+  if (!picked) return;
+  const ap = picked.ap;
+  const designator = picked.designator;
+  let hdgDeg = ((picked.useHdg * 180/Math.PI) % 360 + 360) % 360;
+  setT('kbId', ap.id);
+  setT('kbName', ap.name || '');
+  setT('kbSub', 'approach plate · RWY ' + designator);
+  setT('kbRwy', designator);
+  setT('kbHdg', Math.round(hdgDeg).toString().padStart(3,'0') + '°');
+  setT('kbElev', Math.round(ap.elev) + ' m');
+  setT('kbLen', Math.round(ap.len) + ' m · ' + Math.round(ap.w) + ' m wide');
+  setT('kbWind', _kneeboardWindStr());
+  const altim = (typeof _atisAltimeterInHg === 'number') ? _atisAltimeterInHg : 30.06;
+  setT('kbAltim', altim.toFixed(2) + ' inHg');
+  setT('kbTime', _kneeboardTimeStr());
+  setT('kbRange', (found.dist >= 1000)
+    ? (found.dist / 1000).toFixed(1) + ' km from field'
+    : Math.round(found.dist) + ' m from field');
+  // Glideslope altitude table. ALT MSL = threshold elev + dist * tan(3°);
+  // AGL = dist * tan(3°). Matches the in-cockpit glideslope meatball math.
+  const gsBody = document.getElementById('kbGsBody');
+  if (gsBody){
+    let html = '';
+    for (let i = 0; i < KB_GS_DIST_KM.length; i++){
+      const km = KB_GS_DIST_KM[i];
+      const agl = Math.round(km * 1000 * KB_GS_TAN_DEG);
+      const msl = Math.round(ap.elev + agl);
+      html += '<tr><td>' + km + ' km</td><td>' + msl + ' m</td><td>' + agl + ' m</td></tr>';
+    }
+    gsBody.innerHTML = html;
+  }
+  // Plan view canvas (top-down, runway pointing UP). Draws the runway,
+  // a standard left-hand VFR pattern, threshold dot, wind arrow, a 1 km
+  // scale bar, a north tick, and the live plane position.
+  const planCv = document.getElementById('kbPlan');
+  if (!planCv) return;
+  const ctx = planCv.getContext('2d');
+  if (!ctx) return;
+  const W = planCv.width, H = planCv.height;
+  ctx.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2;
+  const halfWorldM = 5000;             // half-width of view in metres
+  const sx = (W / 2) / halfWorldM;     // metres → canvas px
+  const ang = picked.useHdg;
+  const cs = Math.cos(ang), sn = Math.sin(ang);
+  // World (x,z) → plate canvas (px). Rotated so the chosen landing
+  // direction reads as UP (-y) and "right of centerline on final" reads
+  // as +x in the plate. Y axis is inverted (canvas y grows downward),
+  // so we flip the local along-track component before mapping to pixels.
+  function w2c(wx, wz){
+    const dx = wx - ap.x;
+    const dz = wz - ap.z;
+    const lx = dx * cs - dz * sn;
+    const lz = -(dx * sn + dz * cs);  // along landing direction; +lz = ahead of threshold
+    return { x: cx + lx * sx, y: cy + lz * sx };
+  }
+  // Subtle 1 km grid so the player can eyeball scale.
+  ctx.strokeStyle = 'rgba(90,78,46,0.18)';
+  ctx.lineWidth = 1;
+  for (let k = -5; k <= 5; k++){
+    if (k === 0) continue;
+    const off = k * 1000 * sx;
+    ctx.beginPath(); ctx.moveTo(cx + off, 0); ctx.lineTo(cx + off, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, cy + off); ctx.lineTo(W, cy + off); ctx.stroke();
+  }
+  // Runway: dark rectangle aligned with up.
+  const halfLenPx = Math.max(8, (ap.len / 2) * sx);
+  const halfWPx   = Math.max(2, (ap.w   / 2) * sx);
+  ctx.fillStyle = '#1c2733';
+  ctx.fillRect(cx - halfWPx, cy - halfLenPx, halfWPx * 2, halfLenPx * 2);
+  // Threshold dot at the landing end (top of canvas).
+  ctx.fillStyle = '#c0392b';
+  ctx.beginPath(); ctx.arc(cx, cy - halfLenPx, 3.2, 0, Math.PI * 2); ctx.fill();
+  // Standard left-hand pattern: downwind ~1500 m offset, parallel to
+  // runway on the LEFT side, base perpendicular, final aligned with the
+  // centerline. The drawn pattern is purely diagrammatic — runway-up
+  // means downwind reads as a dashed line going DOWN the left edge.
+  const downX  = -1500 * sx;
+  const baseY  = -(halfLenPx + 1800 * sx);
+  const downY1 = -halfLenPx + 600 * sx;
+  const downY2 = baseY;
+  ctx.strokeStyle = '#1c5a8a';
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(cx + downX, cy + downY1); ctx.lineTo(cx + downX, cy + downY2); ctx.stroke(); // downwind
+  ctx.beginPath(); ctx.moveTo(cx + downX, cy + baseY);  ctx.lineTo(cx,         cy + baseY);  ctx.stroke(); // base
+  ctx.beginPath(); ctx.moveTo(cx,         cy + baseY);  ctx.lineTo(cx,         cy - halfLenPx); ctx.stroke(); // final
+  const upY1 = halfLenPx;
+  const upY2 = halfLenPx + 1200 * sx;
+  ctx.beginPath(); ctx.moveTo(cx,         cy + upY1);   ctx.lineTo(cx,         cy + upY2);  ctx.stroke();  // upwind
+  ctx.beginPath(); ctx.moveTo(cx,         cy + upY2);   ctx.lineTo(cx + downX, cy + upY2);  ctx.stroke();  // crosswind
+  ctx.setLineDash([]);
+  // Tiny chevron arrows at the midpoint of each leg so the pattern reads
+  // as a flow, not just five disconnected dashed lines.
+  const drawArrow = (x1, y1, x2, y2) => {
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const aang = Math.atan2(y2 - y1, x2 - x1);
+    const sz = 5;
+    ctx.fillStyle = '#1c5a8a';
+    ctx.beginPath();
+    ctx.moveTo(mx + Math.cos(aang) * sz,         my + Math.sin(aang) * sz);
+    ctx.lineTo(mx + Math.cos(aang + 2.6) * sz,   my + Math.sin(aang + 2.6) * sz);
+    ctx.lineTo(mx + Math.cos(aang - 2.6) * sz,   my + Math.sin(aang - 2.6) * sz);
+    ctx.closePath(); ctx.fill();
+  };
+  drawArrow(cx + downX, cy + downY1, cx + downX, cy + downY2);
+  drawArrow(cx + downX, cy + baseY,  cx,         cy + baseY);
+  drawArrow(cx,         cy + baseY,  cx,         cy - halfLenPx);
+  drawArrow(cx,         cy + upY1,   cx,         cy + upY2);
+  drawArrow(cx,         cy + upY2,   cx + downX, cy + upY2);
+  // Player position dot (rotated into plate frame).
+  const pp = w2c(plane.position.x, plane.position.z);
+  // Clamp inside the canvas so a far-out player still gets an indicator.
+  const ppx = Math.max(4, Math.min(W - 4, pp.x));
+  const ppy = Math.max(4, Math.min(H - 4, pp.y));
+  const outOfBox = (pp.x !== ppx || pp.y !== ppy);
+  // Plane's heading relative to plate-up: world yaw vs landing heading.
+  let planeWorldYawDeg = 0;
+  try {
+    if (plane && plane.quaternion){
+      const e = new THREE.Euler().setFromQuaternion(plane.quaternion, 'YXZ');
+      planeWorldYawDeg = (-e.y * 180/Math.PI);
+    }
+  } catch(_e){ /* attitude read failed — leave at 0 */ }
+  const planeOnPlateRad = (planeWorldYawDeg * Math.PI/180) - ang;
+  // Triangle pointing in the plane's nose direction relative to plate-up.
+  ctx.save();
+  ctx.translate(ppx, ppy);
+  ctx.rotate(planeOnPlateRad);
+  ctx.fillStyle = outOfBox ? '#b32d2d' : '#2e7d32';
+  ctx.strokeStyle = '#1c2733';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, -7);
+  ctx.lineTo(5, 6);
+  ctx.lineTo(0, 3);
+  ctx.lineTo(-5, 6);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+  // Wind arrow in the top-right corner: shows direction wind is blowing
+  // TOWARD in plate frame (so a north wind on a runway 36 picks UP-down).
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const wspd = Math.hypot(wx, wz);
+  if (wspd > 0.3){
+    const lwx =  wx * cs - wz * sn;
+    const lwz = -(wx * sn + wz * cs);
+    const wmag = Math.hypot(lwx, lwz);
+    const ux = lwx / wmag, uy = lwz / wmag;
+    const arrowLen = Math.min(30, 8 + wmag * 1.6);
+    const cornerX = W - 28, cornerY = 22;
+    ctx.strokeStyle = '#c0392b';
+    ctx.fillStyle = '#c0392b';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(cornerX - ux * arrowLen / 2, cornerY - uy * arrowLen / 2);
+    ctx.lineTo(cornerX + ux * arrowLen / 2, cornerY + uy * arrowLen / 2);
+    ctx.stroke();
+    const headAng = Math.atan2(uy, ux);
+    const hx = cornerX + ux * arrowLen / 2;
+    const hy = cornerY + uy * arrowLen / 2;
+    const sz = 5;
+    ctx.beginPath();
+    ctx.moveTo(hx, hy);
+    ctx.lineTo(hx - Math.cos(headAng - 0.5) * sz, hy - Math.sin(headAng - 0.5) * sz);
+    ctx.lineTo(hx - Math.cos(headAng + 0.5) * sz, hy - Math.sin(headAng + 0.5) * sz);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillStyle = '#5a4e2e';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText('WIND', cornerX + 16, cornerY + 8);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+  }
+  // Scale bar (1 km) bottom-left.
+  const sbLen = 1000 * sx;
+  const sbX = 8, sbY = H - 10;
+  ctx.strokeStyle = '#1c2733';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(sbX + sbLen, sbY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(sbX, sbY - 3); ctx.lineTo(sbX, sbY + 3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(sbX + sbLen, sbY - 3); ctx.lineTo(sbX + sbLen, sbY + 3); ctx.stroke();
+  ctx.font = '9px ui-monospace, monospace';
+  ctx.fillStyle = '#5a4e2e';
+  ctx.textAlign = 'start'; ctx.textBaseline = 'bottom';
+  ctx.fillText('1 km', sbX + 4, sbY - 4);
+  ctx.textBaseline = 'alphabetic';
+  // North arrow upper-left so the player knows the rotation. The plate is
+  // rotated so the chosen landing direction points UP (-y); north in plate
+  // frame therefore lives at angle (-ang - π/2) measured clockwise from +x.
+  // sin/cos already in scope from above for the world rotation.
+  const nLen = 16;
+  // Direction TOWARD north in plate-canvas frame: rotate world (0, -1) by -ang.
+  // World +z = south (since landing direction = +z local when wind blows that way),
+  // so north is world (0, -1). After our rotation (lx = wx cs - wz sn; lz = -(wx sn + wz cs)),
+  // and the canvas y flip we already do inside w2c(), north works out to
+  // (-(-1)*sn, -(-1)*cs * -1) → (sn, -cs). Use that unit vector.
+  const nx = sn, ny = -cs;
+  const nMagInv = 1 / Math.max(1e-6, Math.hypot(nx, ny));
+  const nux = nx * nMagInv, nuy = ny * nMagInv;
+  const nOriginX = 22, nOriginY = 22;
+  ctx.strokeStyle = '#1c2733';
+  ctx.fillStyle = '#1c2733';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(nOriginX, nOriginY);
+  ctx.lineTo(nOriginX + nux * nLen, nOriginY + nuy * nLen);
+  ctx.stroke();
+  // Tiny arrowhead at the north end.
+  const nHeadAng = Math.atan2(nuy, nux);
+  const nhx = nOriginX + nux * nLen;
+  const nhy = nOriginY + nuy * nLen;
+  const nsz = 4;
+  ctx.beginPath();
+  ctx.moveTo(nhx, nhy);
+  ctx.lineTo(nhx - Math.cos(nHeadAng - 0.45) * nsz, nhy - Math.sin(nHeadAng - 0.45) * nsz);
+  ctx.lineTo(nhx - Math.cos(nHeadAng + 0.45) * nsz, nhy - Math.sin(nHeadAng + 0.45) * nsz);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillStyle = '#1c2733';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Label "N" just past the arrowhead.
+  ctx.fillText('N', nhx + nux * 8, nhy + nuy * 8);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
 }
 // Cabin chime: the iconic two-note seatbelt ding (high → low sine pair) that
 // fires once when the autopilot captures the target altitude in cruise. Uses
@@ -20163,6 +20585,11 @@ function loop(now){
       // auto-close gate), so non-checklist frames also pay basically
       // nothing. Called after step() so it sees the latest control state.
       updatePreflight(false);
+      // Approach plate kneeboard (Shift+N) repaint. Same cheap pattern as
+      // updatePreflight: early-returns immediately when state.kneeboardOpen
+      // is false, so closed-panel frames don't pay for the DOM writes or the
+      // canvas redraw.
+      updateKneeboard(false);
       // Record after the physics step so the buffered frame matches what was just rendered.
       recordReplayFrame(now);
       // Ring-chase ghost: sample the live run after physics, then place the
@@ -20279,7 +20706,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','shearEscape'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','shearEscape','preflight','kneeboard'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -21158,6 +21585,16 @@ updateCamModeUi();
     if (state.sqkeypadOpen) return;
     if (state.timekeypadOpen) return;
     if (!state.paused && isAnyOtherModalOpen()) return;
+    // Kneeboard is a non-modal HUD overlay (doesn't pause, doesn't block
+    // input), but the player's instinct after opening it with Shift+N is
+    // to press Esc to dismiss. Catch that here BEFORE the pause-menu
+    // open/close so a stray Esc doesn't sprout the pause card over a
+    // kneeboard that the player meant to close.
+    if (state.kneeboardOpen && !state.paused){
+      e.preventDefault();
+      setKneeboardOpen(false);
+      return;
+    }
     e.preventDefault();
     if (state.paused) closePause(); else openPause();
   });
