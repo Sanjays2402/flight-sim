@@ -479,6 +479,7 @@
   <div class="row"><span id="landingLight" style="display:none;color:#fff3a8;font-weight:700">💡 LIGHT</span></div>
   <div class="row"><span id="pbrake" style="display:none;color:#ffd166;font-weight:700">🅿 BRK</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
+  <div class="row"><span id="gearWarn" class="warn-amber" style="display:none">⚠ GEAR UP</span></div>
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
   <div class="row"><span id="engfire" class="warn-red" style="display:none">🔥 ENG FIRE — CUT THROTTLE</span></div>
   <div class="row"><span id="engtemp" class="warn" style="display:none">⚠ ENG TEMP</span></div>
@@ -6004,6 +6005,18 @@ const state = {
   // chirps a few times per second instead of every frame. Timestamp in ms
   // (performance.now) of the last beep; 0 means "ready to beep now".
   gpwsBeepAt: 0,
+  // Landing-gear warning horn. Fires the two-tone "gear, gear" beep on a
+  // ~0.8s loop when the plane is low + slow + descending with the gear still
+  // up, exactly like a real GA warning system. `gearHornArmed` is the
+  // engagement latch (true once we're high enough to re-arm); `gearHornActive`
+  // tracks whether the warning is currently firing so we only push the ATC
+  // call + flash the pill while the conditions hold. `gearHornBeepAt` paces
+  // the SFX so a single horn doesn't fire every frame, and `gearHornAtcLatch`
+  // keeps the "Check gear down" call to one shot per arming.
+  gearHornArmed: true,
+  gearHornActive: false,
+  gearHornBeepAt: 0,
+  gearHornAtcLatch: false,
   // Short-final radalt callouts ("500", "300", "MINIMUMS", "100", "50", "30",
   // "20", "10"). `approachLastAGL` tracks the previous frame's AGL so we can
   // detect downward threshold crossings and fire each call exactly once per
@@ -7263,6 +7276,13 @@ function resetPlane(){
   // the last-AGL latch so the first descent through 500ft fires cleanly.
   state.approachLastAGL = 9999;
   state.approachArmed = true;
+  // Gear warning horn: fresh sortie re-arms the latch so the first
+  // low-and-slow gear-up approach in the new flight gets a fresh "gear,
+  // gear" pulse + ATC call. Clear the active flag so the pill drops too.
+  state.gearHornArmed = true;
+  state.gearHornActive = false;
+  state.gearHornBeepAt = 0;
+  state.gearHornAtcLatch = false;
   // Go-around latch — fresh sortie clears it so the first missed approach of
   // the new flight can still fire its toast + ATC call.
   state.goAroundArmed = true;
@@ -7615,6 +7635,36 @@ function playTerrainBeep(){
   osc.connect(g).connect(ctx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.24);
+}
+// Landing-gear warning horn — the classic two-tone "gear, gear" pulse that
+// every GA plane wails when you reduce power below ~1500 RPM with the gear
+// still up on approach. Two short square chirps (~520Hz then ~390Hz) so it
+// reads as a distinct "gear gear" cadence, not just a single beep. Called
+// from tickGearHorn() on a ~0.8s repeat while the warn latch is active. The
+// beep is short enough that the gear stress + radalt callouts can still slot
+// in between pulses without stomping each other.
+function playGearHornBeep(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.30 * settings.volume;
+  if (vol <= 0) return;
+  const tones = [{ f: 520, t: 0.00 }, { f: 390, t: 0.22 }];
+  const noteDur = 0.18;
+  tones.forEach(({ f, t }) => {
+    const tNote = t0 + t;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(f, tNote);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, tNote);
+    g.gain.linearRampToValueAtTime(vol, tNote + 0.01);
+    g.gain.setValueAtTime(vol, tNote + noteDur - 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, tNote + noteDur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(tNote);
+    osc.stop(tNote + noteDur + 0.02);
+  });
 }
 // Short-final callout chime — a soft, single sine "bong" that layers under
 // each radalt callout ("500", "100", "MINIMUMS", etc.) without stomping the
@@ -8187,6 +8237,84 @@ function tickWindShear(){
   if (typeof pushATC === 'function'){
     const tail = sh.rwyDesignator ? (' RWY ' + sh.rwyDesignator) : '';
     pushATC('Wind shear on final,' + tail + '.', { tag:'TWR', now:true });
+  }
+}
+
+// ====== GEAR WARNING HORN ======
+// Classic GA two-tone "gear, gear" pulse + flashing HUD pill when the pilot
+// is low, slow, and descending with the gear still up. Modeled after every
+// real Cessna / Piper retract warning system: throttle reduction below cruise
+// power near the ground with gear up = nag. Pushing throttle back up (go-
+// around) or dropping the gear silences it immediately. Re-arms above 200m
+// AGL or after a full stop on the ground, so a touch-and-go pattern gets a
+// fresh "check gear down" call on every approach. One-shot ATC "Check gear
+// down" the first frame the warning latches per arming so it's read once,
+// not every pulse.
+const GEAR_HORN_AGL_MAX    = 80;     // metres AGL ceiling for the warning
+const GEAR_HORN_THR_MAX    = 0.30;   // throttle below this = power-reduced (approach)
+const GEAR_HORN_THR_SILENT = 0.50;   // throttle above this = go-around, hush the horn
+const GEAR_HORN_REARM_AGL  = 200;    // climb back above this to re-arm a fresh approach
+const GEAR_HORN_BEEP_MS    = 800;    // "gear, gear" cadence between pulses
+function tickGearHorn(){
+  const el = document.getElementById('gearWarn');
+  // Re-arm the latch any time we're high above the airport or fully stopped
+  // on the ground so a touch-and-go (or a full taxi-back) gets a fresh call.
+  if (state.onGround){
+    state.gearHornArmed = true;
+    state.gearHornAtcLatch = false;
+  }
+  // Bail out of any context where the warning shouldn't run.
+  if (state.crashed || state.replayActive || state.photoMode || state.introOpen || state.paused){
+    if (state.gearHornActive){ state.gearHornActive = false; }
+    if (el) el.style.display = 'none';
+    return;
+  }
+  // Re-arming based on AGL needs a runway reference. Use the nearest airport
+  // to compute true AGL since the horn is meaningful even when not strictly
+  // "on final" — a low pass over the home field with gear up should still
+  // nag. Falls back to MSL altitude if no airport is in range.
+  let nearAp = null, nearD = 1e9;
+  for (const a of AIRPORTS){
+    const d = Math.hypot(plane.position.x - a.x, plane.position.z - a.z);
+    if (d < nearD){ nearD = d; nearAp = a; }
+  }
+  const aglRef = nearAp ? (plane.position.y - nearAp.elev - GEAR_H) : (plane.position.y - GEAR_H);
+  if (aglRef > GEAR_HORN_REARM_AGL){
+    state.gearHornArmed = true;
+    state.gearHornAtcLatch = false;
+  }
+  // Trigger conditions: low, slow (power reduced for approach), descending,
+  // gear still up, and the arming latch hasn't been silenced this approach.
+  const sinkNow = -state.vel.y;
+  const trigger = !state.onGround
+               && !state.gearDown
+               && state.gearHornArmed
+               && aglRef < GEAR_HORN_AGL_MAX
+               && state.throttle < GEAR_HORN_THR_MAX
+               && sinkNow > 0.5;
+  // Go-around silence: shoving the throttle past the silent threshold mutes
+  // the horn for this approach. It will re-arm above 200m AGL.
+  if (state.throttle >= GEAR_HORN_THR_SILENT && state.gearHornActive){
+    state.gearHornActive = false;
+    state.gearHornArmed = false;
+  }
+  if (trigger){
+    state.gearHornActive = true;
+    if (el) el.style.display = 'block';
+    const nowMs = performance.now();
+    if (nowMs - state.gearHornBeepAt > GEAR_HORN_BEEP_MS){
+      playGearHornBeep();
+      state.gearHornBeepAt = nowMs;
+    }
+    if (!state.gearHornAtcLatch){
+      state.gearHornAtcLatch = true;
+      if (typeof pushATC === 'function'){
+        pushATC('Check gear down.', { tag: 'TWR', now: true });
+      }
+    }
+  } else {
+    if (state.gearHornActive){ state.gearHornActive = false; }
+    if (el) el.style.display = 'none';
   }
 }
 
@@ -9197,6 +9325,8 @@ function step(dt){
   if (performance.now() > state.windNextChangeMs) pickWindTarget();
   // Wind shear hazard: may override windTarget for a 4-6s burst on short final.
   tickWindShear();
+  // Landing-gear warning horn: low + slow + descending with gear up = nag.
+  tickGearHorn();
   const windEase = 1 - Math.exp(-0.25 * dt);
   state.wind.x += (state.windTarget.x - state.wind.x) * windEase;
   state.wind.z += (state.windTarget.z - state.wind.z) * windEase;
