@@ -15,6 +15,15 @@
      off so it never eats clicks; hidden in photo mode via PHOTO_HIDE_IDS. */
   #rainOverlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #rainOverlay.show { display:block; }
+  /* Lightning flash overlay: full-screen white-blue tint that fades over
+     ~120 ms when a distant storm cell discharges. Sits above the 3D world
+     and other weather overlays but below the HUD chrome (z-index:2) so the
+     player still sees their instruments through the flash. Pointer-events
+     off so it never eats clicks, hidden in photo mode via PHOTO_HIDE_IDS so
+     saved PNGs stay clean. Opacity is driven each frame from state.lightning
+     so we never animate via CSS transitions (would fight the per-frame loop). */
+  #lightning { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; display:none; background:rgba(235,242,255,1); opacity:0; mix-blend-mode:screen; }
+  #lightning.show { display:block; }
   /* Bird-strike splatter: full-screen canvas that draws blood smears on the
      windshield for a few seconds after a bird strike. Only shown in cockpit
      cam (toggled by updateBirdSplat), pointer-events off so it never eats
@@ -779,6 +788,7 @@
 <canvas id="windshieldRain"></canvas>
 <canvas id="wipers"></canvas>
 <canvas id="sunGlare"></canvas>
+<div id="lightning"></div>
 <div id="gvision"><div class="grey"></div><div class="red"></div></div>
 <div id="bino"></div>
 <div id="hud" class="panel">
@@ -9648,6 +9658,20 @@ const state = {
   // latches per approach so we don't multi-fire; clears once AGL climbs
   // back above 200m (matches the approachArmed pattern for radalt callouts).
   shear: { phase: 'idle', endsAt: 0, triggered: false, savedTargetX: 0, savedTargetZ: 0, rwyDesignator: '' },
+  // Lightning + thunder over distant storm cells. Pure scenery — fires only
+  // while settings.rain is on (the rain weather IS the storm). Scheduler
+  // picks a fresh random point 4-8 km from the plane every 3-6 min, lights
+  // a brief full-screen flash that decays over ~120 ms, and queues a
+  // delayed thunder rumble using the real speed-of-sound delay so close
+  // strikes crack and far strikes mumble. nextStrikeMs holds the next
+  // scheduled performance.now() the scheduler should pick a fresh cell.
+  // flashT counts DOWN from the flash duration so the per-frame loop can
+  // ease the overlay opacity without an extra timer node. pendingThunder
+  // is a tiny queue of {playAt, distance} entries the loop pops as their
+  // playAt cutoff passes so the rumble lands seconds after the visible
+  // flash on far cells. Everything resets on resetPlane() so a mission
+  // restart re-rolls the storm timeline cleanly.
+  lightning: { nextStrikeMs: 0, flashT: 0, flashDur: 0, peakAlpha: 0, pendingThunder: [] },
   stall: 0,
   vortex: 0,
   // Crash report card data: peakG and peakSink track the worst values seen
@@ -12400,6 +12424,17 @@ function resetPlane(){
     state.shear.endsAt = 0;
     state.shear.triggered = false;
     state.shear.rwyDesignator = '';
+  }
+  // Lightning scheduler — wipe any pending thunder + flash so a fresh
+  // mission start doesn't inherit a half-played strike from the previous
+  // sortie. nextStrikeMs=0 lets the next tick re-roll the schedule against
+  // the fresh clock.
+  if (state.lightning){
+    state.lightning.nextStrikeMs = 0;
+    state.lightning.flashT = 0;
+    state.lightning.flashDur = 0;
+    state.lightning.peakAlpha = 0;
+    state.lightning.pendingThunder.length = 0;
   }
   // Active-runway change suggestion latches — mission restart wipes the
   // per-airport one-shot map so a fresh sortie re-evaluates wind vs lineup
@@ -24561,6 +24596,170 @@ function updateSunGlare(dt){
   sunGlareCtx.fill();
 }
 
+// ====== LIGHTNING + THUNDER OVER DISTANT STORM CELLS ======
+// Pure scenery effect that only fires while settings.rain is ON — the rain
+// weather IS the storm, so a clear-sky cruise never sees a bolt. Scheduler
+// picks a random world point 4-8 km from the plane every 3-6 min of flight
+// time, fires a brief full-screen white-blue flash that decays over ~120 ms,
+// and queues a delayed thunder rumble with the real speed-of-sound delay
+// (distance / 340 m/s) so close strikes crack within a beat and far strikes
+// mumble in 20-25 s later. Everything is gated against photo/pause/intro so
+// saved PNGs and frozen frames stay clean.
+const LIGHTNING_MIN_GAP_MS    = 180000; // 3 min minimum between strikes
+const LIGHTNING_MAX_GAP_MS    = 360000; // 6 min maximum between strikes
+const LIGHTNING_MIN_DIST_M    = 4000;   // distant cells only
+const LIGHTNING_MAX_DIST_M    = 8000;
+const LIGHTNING_FLASH_DUR_S   = 0.12;   // visible flash decay length
+const LIGHTNING_SPEED_OF_SOUND = 340;   // m/s, real-world thunder delay
+const lightningEl = document.getElementById('lightning');
+
+// Thunder rumble: low-passed noise burst with a sub-bass sine sag underneath.
+// Volume + filter centre frequency scale with distance so close cells crack
+// crisply and far cells reduce to a soft mumble. Reuses the shared sfxReady()
+// WebAudio context — zero new long-lived audio nodes per strike.
+function playThunderRumble(distance){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  // Distance attenuation: 4 km cells ride at ~0.85 of the base volume, 8 km
+  // cells drop to ~0.25 so the perceived loudness matches the visual
+  // distance the player just watched flash a couple seconds ago.
+  const dN = Math.max(0, Math.min(1, (distance - LIGHTNING_MIN_DIST_M) / Math.max(1, (LIGHTNING_MAX_DIST_M - LIGHTNING_MIN_DIST_M))));
+  const distFade = 0.85 - 0.60 * dN;
+  const vol = 0.42 * (settings.volume || 0) * distFade;
+  if (vol <= 0) return;
+  // Longer rolls on far cells, snappier cracks on close cells.
+  const dur = 1.6 + 1.4 * dN;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  // Low-pass cutoff drops as the cell gets farther so far rumbles really
+  // sound like distant pressure waves instead of buffered static.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  const cutHi = 240 - 140 * dN;  // 240 Hz close, ~100 Hz far
+  const cutLo = 90  - 50  * dN;  // 90 Hz close, 40 Hz far
+  lp.frequency.setValueAtTime(cutHi, t0);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(35, cutLo), t0 + dur);
+  lp.Q.value = 0.7;
+  const g = ctx.createGain();
+  // Two-bump envelope: a short initial crack peak, then a longer roll. Far
+  // cells smooth the crack out so you just get the roll.
+  const crackVol = vol * (1 - 0.55 * dN);
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(crackVol, t0 + 0.04);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol * 0.55), t0 + 0.30);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.05);
+  // Sub-bass sag: a slow sine that drops from ~55 → 28 Hz to give the rumble
+  // chest-weight. Close cells get the full sub, far cells get it muted.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(55, t0);
+  osc.frequency.exponentialRampToValueAtTime(28, t0 + dur * 0.8);
+  const og = ctx.createGain();
+  const subVol = vol * (0.55 - 0.30 * dN);
+  og.gain.setValueAtTime(0.0, t0);
+  og.gain.linearRampToValueAtTime(Math.max(0.0002, subVol), t0 + 0.05);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.05);
+}
+
+// Per-frame scheduler + flash overlay updater. Cheap when settings.rain is
+// off (one boolean check). When rain is on it picks a fresh strike every
+// 3-6 min, eases the white overlay alpha down per frame, and pumps any
+// pending delayed thunder rumbles past their playAt cutoff.
+function tickLightning(dt){
+  const L = state.lightning;
+  if (!L || !lightningEl) return;
+  // Frozen-frame gates — same set the rain/sun overlays honor so saved
+  // PNGs and the menu stay clean. We DO still drain the visible flash if
+  // one was mid-fade when the freeze started so it doesn't hang at peak.
+  const frozen = !!(state.photoMode || state.paused || state.introOpen || state.replayActive);
+  // Fade any active visible flash regardless of gates so the overlay never
+  // hangs at peak. Photo/pause keeps the canvas hidden — we just keep
+  // counting down so the next un-frozen frame renders the right opacity.
+  if (L.flashT > 0){
+    L.flashT = Math.max(0, L.flashT - dt);
+    if (frozen){
+      lightningEl.style.opacity = '0';
+      lightningEl.classList.remove('show');
+    } else {
+      // Linear-ish ease from peak → 0 across LIGHTNING_FLASH_DUR_S.
+      const f = L.flashDur > 0 ? (L.flashT / L.flashDur) : 0;
+      const a = (L.peakAlpha || 0) * f;
+      if (a > 0.002){
+        lightningEl.style.opacity = a.toFixed(3);
+        lightningEl.classList.add('show');
+      } else {
+        lightningEl.style.opacity = '0';
+        lightningEl.classList.remove('show');
+      }
+    }
+  } else if (lightningEl.classList.contains('show')){
+    lightningEl.style.opacity = '0';
+    lightningEl.classList.remove('show');
+  }
+  // Pop any pending thunder rumbles whose delayed playAt has elapsed. Honors
+  // the frozen gate so a paused sim doesn't dump queued audio the instant
+  // the player un-pauses (we just discard the still-pending entries on
+  // resetPlane and let the queue keep aging during pause — simpler than
+  // re-anchoring playAt against pause duration). Audio fires through the
+  // shared volume + photo gate inside playThunderRumble.
+  if (L.pendingThunder.length){
+    const now = performance.now();
+    let writeIdx = 0;
+    for (let i = 0; i < L.pendingThunder.length; i++){
+      const ent = L.pendingThunder[i];
+      if (now >= ent.playAt){
+        if (!frozen) playThunderRumble(ent.distance);
+        // dropped either way
+      } else {
+        L.pendingThunder[writeIdx++] = ent;
+      }
+    }
+    L.pendingThunder.length = writeIdx;
+  }
+  // Scheduler gate: storms only happen while it's actually raining. Keep
+  // re-rolling the next strike time forward while rain is off so toggling
+  // rain on doesn't trigger an instant strike from a stale schedule.
+  if (!settings.rain){
+    L.nextStrikeMs = 0;
+    return;
+  }
+  if (frozen) return;
+  const now = performance.now();
+  if (L.nextStrikeMs === 0){
+    L.nextStrikeMs = now + LIGHTNING_MIN_GAP_MS + Math.random() * (LIGHTNING_MAX_GAP_MS - LIGHTNING_MIN_GAP_MS);
+    return;
+  }
+  if (now < L.nextStrikeMs) return;
+  // Fire a fresh strike. Pick a random horizontal bearing + distance from
+  // the plane, then compute thunder delay from real speed-of-sound math.
+  const dist = LIGHTNING_MIN_DIST_M + Math.random() * (LIGHTNING_MAX_DIST_M - LIGHTNING_MIN_DIST_M);
+  // Distance also drives the visible flash strength — close cells flash
+  // brighter than far cells, but cap so the screen never hits a true white
+  // (the player still needs to read instruments through the flash).
+  const distN = (dist - LIGHTNING_MIN_DIST_M) / Math.max(1, (LIGHTNING_MAX_DIST_M - LIGHTNING_MIN_DIST_M));
+  const peak = 0.55 - 0.35 * distN; // 0.55 at 4 km, ~0.20 at 8 km
+  L.flashDur = LIGHTNING_FLASH_DUR_S;
+  L.flashT   = L.flashDur;
+  L.peakAlpha = peak;
+  const delayMs = (dist / LIGHTNING_SPEED_OF_SOUND) * 1000;
+  L.pendingThunder.push({ playAt: now + delayMs, distance: dist });
+  // Cap the pending queue so a long stormy session can't grow unbounded if
+  // the player parked the tab and rumbles never fired through the gate.
+  if (L.pendingThunder.length > 6) L.pendingThunder.splice(0, L.pendingThunder.length - 6);
+  // Re-roll the next strike window.
+  L.nextStrikeMs = now + LIGHTNING_MIN_GAP_MS + Math.random() * (LIGHTNING_MAX_GAP_MS - LIGHTNING_MIN_GAP_MS);
+}
+
 // ====== BINOCULARS ======
 // Spotter zoom: hold B in an external cam (chase / flyby / orbit) while airborne
 // to crank the camera FOV way in and overlay a soft vignette. Designed to spot
@@ -24759,6 +24958,7 @@ function loop(now){
   updateWipers(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
+  tickLightning(dt);
   updatePlaneShadow(dt);
   updateEntityShadows(dt);
   updateGVision(dt);
@@ -24840,7 +25040,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
