@@ -803,6 +803,7 @@
   <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
+  <div class="row"><span id="bestGlide" style="display:none;color:#7ad0ff;font-weight:700" title="Engine out — pitch for best glide IAS">BEST GLIDE <span id="bestGlideTgt">105</span> km/h <span id="bestGlideIas" style="margin-left:6px;color:#7ee787">—</span></span></div>
   <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
   <div class="row"><span id="catapult" style="display:none;color:#ffd166;font-weight:700"></span></div>
   <div class="row"><span id="landingLight" style="display:none;color:#fff3a8;font-weight:700">💡 LIGHT</span></div>
@@ -11217,6 +11218,12 @@ function resetPlane(){
   // respective thresholds (see step()).
   state.fuelWarnLow = false;
   state.fuelWarnCrit = false;
+  // Engine-out best-glide HUD coach latch — one-shot ATC "Establish best glide"
+  // call the first frame the engine quits airborne. Cleared here so a fresh
+  // sortie re-arms; the step() update also clears it the moment the engine is
+  // live again on the ground (refuel / restart on the apron) so a subsequent
+  // mid-flight failure fires the call once more.
+  state.bestGlideAtcLatch = false;
   // Fuel-starvation misfire latches — a fresh sortie always starts on a
   // clean clock so the next time fuel slides under MISFIRE_FUEL_START the
   // scheduler arms again. Clears the active-pop window too so the throttle
@@ -16961,6 +16968,50 @@ function step(dt){
   }
   document.getElementById('refuel').style.display = state.refueling ? 'inline' : 'none';
   document.getElementById('engout').style.display = state.engineOut ? 'block' : 'none';
+  // Engine-out best-glide HUD coach. When the engine is dead (mixture-killed,
+  // fuel-out, or starved out by the fire) and we're airborne above ~50 m AGL,
+  // show a cyan BEST GLIDE pill with the target IAS for max L/D. Current IAS
+  // color-codes green (±5 km/h), amber (±15), red (outside) so the pilot can
+  // pitch to the number instead of guessing. Hidden on the ground / intro /
+  // photo / replay / pause / crash so it can't ghost during cleanup states.
+  // One-shot "Establish best glide" ATC call the first frame the engine quits
+  // airborne; latch clears when the engine is live again on the ground.
+  {
+    const BEST_GLIDE_KMH = 105;     // single fixed target tuned to current model
+    const bgEl = document.getElementById('bestGlide');
+    if (bgEl){
+      const engineDead = !!(state.engineOut || state.engineFire);
+      const showCoach = engineDead && !state.onGround && !state.crashed
+        && !state.introOpen && !state.replayActive && !state.photoMode
+        && !state.paused && altM >= 50;
+      if (showCoach){
+        const delta = indicatedKmh - BEST_GLIDE_KMH;
+        const ad = Math.abs(delta);
+        const ind = document.getElementById('bestGlideIas');
+        if (ind){
+          ind.textContent = Math.round(indicatedKmh) + ' km/h';
+          ind.style.color = ad <= 5 ? '#7ee787'
+                          : ad <= 15 ? '#ffb020'
+                                     : '#ff5252';
+        }
+        bgEl.style.display = 'block';
+        // One-shot ATC nudge the first frame the engine quits airborne.
+        if (!state.bestGlideAtcLatch){
+          state.bestGlideAtcLatch = true;
+          if (typeof pushATC === 'function'){
+            pushATC('Establish best glide.', { tag:'PILOT' });
+          }
+        }
+      } else {
+        bgEl.style.display = 'none';
+      }
+      // Re-arm the one-shot once the engine is live again on the ground so a
+      // subsequent mid-flight failure fires the call once more.
+      if (!engineDead && state.onGround && state.bestGlideAtcLatch){
+        state.bestGlideAtcLatch = false;
+      }
+    }
+  }
   // Engine fire HUD banner: visible only while the fire is actively burning
   // (and we're not in a cleanup state). Mirror the visual gate from
   // updateEngineFire so the banner can't ghost over photo / replay / etc.
