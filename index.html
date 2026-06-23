@@ -910,7 +910,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">❄ CARB ICE <span id="carbIcePct">0%</span></span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -9523,15 +9523,18 @@ function updatePitotIce(dt){
 // air into the intake, which both melts existing ice (~3x build rate) AND
 // costs a small flat thrust penalty from the less-dense warm intake. The
 // thrust path reads state.carbIce and state.carbHeatOn to apply both knobs.
-const CARB_ICE_THROTTLE_MAX  = 0.40; // build only when throttle is at or below this
-const CARB_ICE_BUILD_SECS    = 25;   // seconds 0 -> 1 at idle in cold + damp conditions
-const CARB_ICE_THAW_MULT     = 3.0;  // heat-on melts ice this much faster than passive build
-const CARB_ICE_PASSIVE_THAW  = 18;   // seconds 1 -> 0 passively when out of icing envelope
-const CARB_ICE_THRUST_BLEED  = 0.15; // max thrust fraction stolen at full ice
+const CARB_ICE_THROTTLE_MAX  = 0.50; // build only when throttle is below this (real-world reduced-power descents)
+const CARB_ICE_ALT_MAX_M     = 2000; // MSL ceiling — colder/thinner air above this stops liquid-water carb ice cold
+const CARB_ICE_BUILD_SECS    = 25;   // seconds 0 -> 1 at idle in rain + low power (CARB_ICE_BUILD_RATE = 1/25 = 0.04/sec)
+const CARB_ICE_CLEAR_SECS    = 10;   // seconds 1 -> 0 with carb heat ON (CARB_ICE_CLEAR_RATE = 1/10 = 0.10/sec)
+const CARB_ICE_PASSIVE_THAW  = 18;   // seconds 1 -> 0 passively when out of icing envelope (heat OFF)
+const CARB_ICE_THRUST_BLEED  = 0.18; // max thrust fraction stolen at full ice (graded carb-ice model)
 const CARB_HEAT_THRUST_COST  = 0.03; // flat thrust penalty when heat is on (denser air)
 const CARB_ICE_LATCH         = 0.25; // ice severity that fires the one-shot ATC nag
-const CARB_ICE_SHOW_MIN      = 0.12; // ice severity above this lights the HUD pill
-const CARB_ICE_CLEAR         = 0.05; // ice severity below this re-arms the ATC latch
+const CARB_ICE_SHOW_MIN      = 0.01; // ice severity above this lights the HUD pill (graded readout from ~1%)
+const CARB_ICE_AMBER_MAX     = 0.60; // ice severity at/below this stays amber on the HUD; above goes red
+const CARB_ICE_CLEAR_NAG     = 0.50; // severity that arms the "carb ice clear, engine smooth" recovery callout
+const CARB_ICE_CLEAR         = 0.05; // ice severity below this re-arms the ATC latch + fires recovery if armed
 const CARB_HEAT_RPM_DIP_DECAY = 0.6; // seconds for the RPM-dip kick to fade out
 
 // ====== Engine mixture lever ======
@@ -9580,6 +9583,13 @@ function updateCarbIce(dt){
   if (state.carbHeatRpmDip > 0){
     state.carbHeatRpmDip = Math.max(0, state.carbHeatRpmDip - 80 * dt / CARB_HEAT_RPM_DIP_DECAY);
   }
+  // Track the peak ice severity in the current build cycle so a clean
+  // recovery (heat pulled while severely iced, ice back to ~0) can fire a
+  // dedicated "carb ice clear, engine smooth." callout instead of staying
+  // silent. Reset whenever ice fully clears so each fresh build earns its
+  // own recovery line.
+  const sev = state.carbIce || 0;
+  state.carbIcePeak = Math.max(state.carbIcePeak || 0, sev);
   // Engine off / cold-start / fuel-out: no combustion, no carb ice growth.
   // Existing ice slowly bleeds off (no warm engine to keep things frozen).
   const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
@@ -9587,18 +9597,26 @@ function updateCarbIce(dt){
     if (state.carbIce > 0){
       state.carbIce = Math.max(0, state.carbIce - dt / CARB_ICE_PASSIVE_THAW);
     }
-    if (state.carbIce <= CARB_ICE_CLEAR) state.carbIceAtcLatch = false;
+    if (state.carbIce <= CARB_ICE_CLEAR){
+      state.carbIceAtcLatch = false;
+      state.carbIcePeak = 0;
+      state.carbIceClearArmed = false;
+    }
     return;
   }
-  // Cold-weather window: night + early morning + evening (mirrors pitot ice).
-  const cold = state.todHours < 7 || state.todHours > 19;
-  const damp = settings.rain || cold;
-  const lowPower = state.throttle <= CARB_ICE_THROTTLE_MAX;
-  const icingCond = damp && lowPower;
+  // Icing envelope (real-world): visible moisture + reduced power + lower
+  // altitudes where liquid water is plentiful. Daylight / clear-air rain
+  // still ices the carb because the venturi-driven temp drop is huge; we
+  // tie the envelope to the rain toggle (visible moisture) instead of the
+  // pitot-style "cold TOD" gate so the system is a focused weather-driven
+  // decision rather than a passive nag on every dawn flight.
+  const lowPower = state.throttle < CARB_ICE_THROTTLE_MAX;
+  const lowAlt   = (plane.position.y || 0) < CARB_ICE_ALT_MAX_M;
+  const icingCond = !!settings.rain && lowPower && lowAlt;
   if (state.carbHeatOn){
-    // Heat on: melt fast. Faster than passive thaw so the toggle has visible
-    // bite. Mirrors the pitot-heat-on case.
-    state.carbIce = Math.max(0, state.carbIce - dt * CARB_ICE_THAW_MULT / CARB_ICE_BUILD_SECS);
+    // Heat on: melt fast. Tuned so 1.0 -> 0 takes ~CARB_ICE_CLEAR_SECS so
+    // the pilot has a visible "hold heat for ~10 s" recovery window.
+    state.carbIce = Math.max(0, state.carbIce - dt / CARB_ICE_CLEAR_SECS);
   } else if (icingCond){
     state.carbIce = Math.min(1, state.carbIce + dt / CARB_ICE_BUILD_SECS);
   } else if (state.carbIce > 0){
@@ -9610,7 +9628,16 @@ function updateCarbIce(dt){
     state.carbIceAtcLatch = true;
     if (typeof pushATC === 'function') pushATC('Carb ice — apply heat.', { tag:'ATC', now:true });
   }
+  // Arm the clear-recovery callout once severity climbs past the severe
+  // threshold — fires below on the way down. Pure pilot-side observation
+  // ("engine smooth") so it goes out as a PILOT tag, not ATC.
+  if (!state.carbIceClearArmed && state.carbIce >= CARB_ICE_CLEAR_NAG) state.carbIceClearArmed = true;
   if (state.carbIceAtcLatch && state.carbIce <= CARB_ICE_CLEAR) state.carbIceAtcLatch = false;
+  if (state.carbIceClearArmed && state.carbIce <= CARB_ICE_CLEAR){
+    state.carbIceClearArmed = false;
+    state.carbIcePeak = 0;
+    if (typeof pushATC === 'function') pushATC('Carb ice clear, engine smooth.', { tag:'PILOT', now:true });
+  }
 }
 
 // Flame flicker sprite — single shared sprite that we re-aim at the cowl in
@@ -10964,6 +10991,8 @@ const state = {
   carbHeatOn: !!settings.carbHeat,
   carbIce: 0,
   carbIceAtcLatch: false,
+  carbIcePeak: 0,
+  carbIceClearArmed: false,
   carbHeatRpmDip: 0,
   // Engine mixture lever (Minus = lean, Equal = rich; default 1.0 = full rich).
   // Seeded from settings.lastMixture so the player's last mixture rides across
@@ -13494,6 +13523,8 @@ function resetPlane(){
   // earlier carb-heat choice.
   state.carbIce = 0;
   state.carbIceAtcLatch = false;
+  state.carbIcePeak = 0;
+  state.carbIceClearArmed = false;
   state.carbHeatRpmDip = 0;
   // Mixture mirrors the carb-heat reset pattern: clear the ATC nag latch so a
   // fresh sortie can fire the "lean mixture for altitude" prompt once, but
@@ -20741,11 +20772,20 @@ function step(dt){
   // Hidden in photo mode so saved PNGs stay clean.
   const thrLockPillEl = document.getElementById('thrLockPill');
   if (thrLockPillEl) thrLockPillEl.style.display = (state.frictionLock && !state.photoMode) ? 'inline' : 'none';
-  // Carb ice pill (WIND row) — amber whenever the iced fraction is over the
-  // show floor so brief excursions don't flash on and off. Hidden in photo
-  // mode so saved PNGs stay clean.
+  // Carb ice pill (WIND row) — graded readout: amber 1–60%, red 61–100%,
+  // hidden below the show floor so a clean engine doesn't ever flash on.
+  // Hidden in photo mode so saved PNGs stay clean.
   const carbIcePillEl = document.getElementById('carbIcePill');
-  if (carbIcePillEl) carbIcePillEl.style.display = ((state.carbIce || 0) > CARB_ICE_SHOW_MIN && !state.photoMode) ? 'inline' : 'none';
+  if (carbIcePillEl){
+    const carbSev = state.carbIce || 0;
+    const visible = carbSev > CARB_ICE_SHOW_MIN && !state.photoMode;
+    carbIcePillEl.style.display = visible ? 'inline' : 'none';
+    if (visible){
+      carbIcePillEl.style.color = (carbSev > CARB_ICE_AMBER_MAX) ? '#ff6b6b' : '#ffd166';
+      const carbIcePctEl = document.getElementById('carbIcePct');
+      if (carbIcePctEl) carbIcePctEl.textContent = Math.round(carbSev * 100) + '%';
+    }
+  }
   // Fuel-starvation pill — lit whenever the misfire scheduler is armed
   // (fuel under 5% with a live engine on the ground / in the air), so the
   // player sees the warning even between coughs (otherwise the pill would
