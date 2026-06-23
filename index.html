@@ -21826,6 +21826,125 @@ function drawMinimap(hdgDeg){
       minimapCtx.fillText('\u{1F354}', px + 6, py - 6);
       minimapCtx.restore();
     }
+    // Live wind barb at this airport — standard meteorological notation
+    // (pennant = 50 kt, full bar = 10 kt, half bar = 5 kt). Staff points
+    // FROM the wind direction (i.e. into the wind), per real chart
+    // convention, with the barbs/feathers on the trailing end. Currently
+    // all three fields share the same global state.wind, but the per-airport
+    // primitive is in place so per-field wind can hand each barb its own
+    // (wx, wz) without touching this draw code. Calm (<3 kt) draws a small
+    // open circle around the airport position. Hidden in photo mode is
+    // already enforced by PHOTO_HIDE_IDS on the minimap container.
+    {
+      const wax = state.wind.x, waz = state.wind.z;
+      const wMs = Math.hypot(wax, waz);
+      const wKt = wMs * 1.94384;
+      const barbColor = a.isMain ? '#ffd166' : '#7ee787';
+      minimapCtx.save();
+      minimapCtx.strokeStyle = barbColor;
+      minimapCtx.fillStyle = barbColor;
+      minimapCtx.lineWidth = 1.2;
+      if (wKt < 3){
+        // Calm: small open ring centred on the airport so a flat barb
+        // still reads as "there's a wind reading here, it's just zero".
+        minimapCtx.beginPath();
+        minimapCtx.arc(px, py, 4.5, 0, Math.PI * 2);
+        minimapCtx.stroke();
+      } else {
+        // FROM unit vector — wind blows from -wind toward +wind in screen
+        // space (same +x east / +y south convention drawMinimap uses). The
+        // staff extends in the FROM direction so an observer reads it as
+        // "wind comes from that way".
+        const fx = -wax / wMs;
+        const fz = -waz / wMs;
+        // Staff length: fixed ~14 px so the barb stays compact regardless of
+        // wind strength (strength is encoded in the feathers, not length).
+        const SL = 14;
+        // Offset the staff base a couple pixels off the airport square so
+        // the staff doesn't visually pierce the runway tick.
+        const sx0 = px + fx * 3;
+        const sz0 = py + fz * 3;
+        const sx1 = px + fx * (3 + SL);
+        const sz1 = py + fz * (3 + SL);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(sx0, sz0);
+        minimapCtx.lineTo(sx1, sz1);
+        minimapCtx.stroke();
+        // Decompose wind speed into pennants (50), full bars (10), half bars
+        // (5). Round to nearest 5 kt so the barb count is deterministic and
+        // matches what a real chart would round to.
+        let rem = Math.round(wKt / 5) * 5;
+        const pennants = Math.floor(rem / 50); rem -= pennants * 50;
+        const fulls    = Math.floor(rem / 10); rem -= fulls    * 10;
+        const halves   = rem >= 5 ? 1 : 0;
+        // Perpendicular unit vector — barbs hang off the trailing (away from
+        // station) end of the staff at ~115° from the staff axis. We pick a
+        // consistent side (cross product with vertical) so all airports'
+        // barbs hang the same way regardless of wind heading.
+        // For a staff (fx, fz) in screen space, the right-hand perpendicular
+        // is (-fz, fx). Barb tip = staff point + perp * len, biased back
+        // toward the station by ~25% of the barb length so feathers angle
+        // backward (real-chart look) rather than dead perpendicular.
+        const perpX = -fz;
+        const perpZ =  fx;
+        const FEATHER = 6;       // px — full-bar length
+        const STEP    = 3.5;     // px between successive feathers along staff
+        const BACKLEAN = 0.32;   // 0..1 — how far back the feather leans toward the station
+        // Start at the trailing tip and step inward toward the station so the
+        // tip carries the pennants and the inner positions carry the smaller
+        // half-bars (matches chart-standard barb ordering).
+        let slot = 0;
+        // Helper to compute the (root, tip) for a feather at integer slot N
+        // along the staff, where slot 0 is the very tip.
+        const featherAt = (n, len, leanBack) => {
+          const t = (3 + SL) - n * STEP;             // distance from station along staff
+          const rx = px + fx * t;
+          const rz = py + fz * t;
+          // Tip = root + perp * len, then biased back toward station so the
+          // feather angles backward like a real wind barb.
+          const tx = rx + perpX * len - fx * (len * leanBack);
+          const tz = rz + perpZ * len - fz * (len * leanBack);
+          return [rx, rz, tx, tz];
+        };
+        // Pennants first (filled triangles). Each pennant occupies one slot
+        // plus a small extra gap so the next feather doesn't visually touch
+        // it.
+        for (let p = 0; p < pennants; p++){
+          const [r1x, r1z, t1x, t1z] = featherAt(slot,     FEATHER, BACKLEAN);
+          // Triangle base sits on the staff between this slot and the next,
+          // so a pennant looks like a flag, not a sliver.
+          const [r2x, r2z]           = featherAt(slot + 1, FEATHER, BACKLEAN);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(r1x, r1z);
+          minimapCtx.lineTo(t1x, t1z);
+          minimapCtx.lineTo(r2x, r2z);
+          minimapCtx.closePath();
+          minimapCtx.fill();
+          slot += 1.4; // small gap after each pennant
+        }
+        // Full bars next.
+        for (let f = 0; f < fulls; f++){
+          const [rx, rz, tx, tz] = featherAt(slot, FEATHER, BACKLEAN);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(rx, rz);
+          minimapCtx.lineTo(tx, tz);
+          minimapCtx.stroke();
+          slot += 1;
+        }
+        // Half bars last. If the staff has zero pennants AND zero fulls, a
+        // lone half-bar is drawn one slot inboard from the tip per chart
+        // convention so a 5 kt barb isn't mistaken for a full bar.
+        if (halves > 0){
+          const useSlot = (pennants === 0 && fulls === 0) ? 1 : slot;
+          const [rx, rz, tx, tz] = featherAt(useSlot, FEATHER * 0.5, BACKLEAN);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(rx, rz);
+          minimapCtx.lineTo(tx, tz);
+          minimapCtx.stroke();
+        }
+      }
+      minimapCtx.restore();
+    }
   }
   // NDB beacons: small magenta diamond + 3-letter ident at each fixed-position
   // navigation aid. Dim by default so they don't fight with airport markers;
