@@ -898,6 +898,7 @@
   <div class="row"><span class="lbl">Total</span><span class="val" id="scTotal">0</span></div>
   <div class="row"><span class="lbl">Landings</span><span class="val" id="scN">0</span></div>
   <div class="row" id="scTgRow" style="display:none"><span class="lbl">Streak</span><span class="val last" id="scTg">T&amp;G ×0</span></div>
+  <div class="row" id="scLsRow" style="display:none"><span class="lbl">Run</span><span class="val last" id="scLs">🔥 ×0</span></div>
 </div>
 <div id="papi">
   <div class="light" id="p1"></div><div class="light" id="p2"></div>
@@ -1166,6 +1167,7 @@
     <div class="row"><span class="name">🤝 WINGS WAGGED</span><span class="val" id="stWingsWagged">0</span></div>
     <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
     <div class="row"><span class="name">BEST T&amp;G STREAK</span><span class="val" id="stTg">0</span></div>
+    <div class="row"><span class="name">BEST LANDING STREAK</span><span class="val" id="stLs">0</span></div>
     <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
     <div class="row"><span class="name">🪂 BAILOUTS</span><span class="val" id="stBailouts">0</span></div>
     <div class="row"><span class="name">🎖️ RANK</span><span class="val hi" id="stRank">CADET</span></div>
@@ -1424,6 +1426,7 @@ const STATS_DEFAULT = {
   wingsWagged: 0,          // wing-wave greetings exchanged with the AI plane (lifetime counter)
   burgers: 0,              // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
   bestTgStreak: 0,         // longest touch-and-go streak (touchdown+lift-off within 12s, no full-stop)
+  bestLandStreak: 0,       // longest streak of consecutive successful landings without a crash (any mode, survives full-stops)
   perfectLandings: 0,      // count of landings scored 300+ (used by rank progression)
   bailouts: 0              // total Shift+P pilot ejections that survived to canopy-down
 };
@@ -1579,6 +1582,18 @@ function onCrash(){
   if (typeof state !== 'undefined'){
     state.tgStreak = 0;
     state.tgAirborneAfterTd = false;
+    // Cross-session landing streak (consecutive good touchdowns without a
+    // crash, any mode) also dies here. Lifetime peak already locked in via
+    // the per-touchdown bump in the landing branch. Fire a quick toast so
+    // the pilot actually feels the loss instead of just seeing the pill
+    // vanish — gated to streaks worth losing (≥2) and the usual quiet modes.
+    const _lsLost = state.landStreak || 0;
+    state.landStreak = 0;
+    if (_lsLost >= 2 && typeof showToast === 'function'
+        && !state.photoMode && !state.paused && !state.replayActive
+        && !state.introOpen){
+      showToast('\u{1F494}', 'STREAK BROKEN', 'Lost a run of ' + _lsLost + ' clean landings.');
+    }
   }
   // Crash debris field — scatter dark-grey shards + start a thin black
   // smoke column at the impact point so the wreck has visual punctuation
@@ -9049,6 +9064,14 @@ const state = {
   tgStreak: 0,
   tgLastTdMs: 0,           // wall-clock ms of the most recent good touchdown
   tgAirborneAfterTd: false,// true once we lift off after the last touchdown
+  // Cross-session landing streak: counts every successful runway touchdown
+  // without a crash in between, regardless of mode and regardless of
+  // whether the pilot came to a full stop. Only crashes reset it (the
+  // tgStreak above handles the stricter "no full-stop" variant). HUD pill
+  // below the T&G streak row shows it once it's ≥ 2, color-tiered
+  // white → amber → magenta as it climbs. Lifetime peak persists to
+  // pilotStats.bestLandStreak so the pilot-stats screen reflects it.
+  landStreak: 0,
   // Quick-jump airport selector overlay: open/closed flag. When true, the
   // #jumpsel modal is visible and number keys 1–9 teleport the plane to the
   // matching airport's runway threshold (free-flight only). Other Esc/keyboard
@@ -16212,6 +16235,15 @@ function step(dt){
         }
         state.tgLastTdMs = _tgNow;
         state.tgAirborneAfterTd = false;
+        // Cross-session landing streak — bumps on EVERY successful touchdown
+        // (no 12s window, no "must lift off" gate). Resets only on crash.
+        // Lifetime peak rides along in pilotStats.bestLandStreak so the
+        // PILOT STATS panel reads the all-time record.
+        state.landStreak = (state.landStreak || 0) + 1;
+        if (state.landStreak > (pilotStats.bestLandStreak || 0)){
+          pilotStats.bestLandStreak = state.landStreak;
+          savePilotStats();
+        }
         // Snapshot the prior lifetime peak BEFORE we bump it so the
         // "NEW BEST STREAK" toast fires the first touchdown that ties
         // or beats it, and again on every touchdown that extends the
@@ -17491,6 +17523,22 @@ function step(dt){
       _scTgRow.style.display = '';
     } else {
       _scTgRow.style.display = 'none';
+    }
+  }
+  // Cross-session landing streak pill — same visibility gate (≥ 2) so it
+  // doesn't blink on a single touchdown. Color tier escalates with the
+  // streak so the pilot feels the climb: white → amber (≥ 5) → magenta
+  // (≥ 10). Pure cosmetic, no extra DOM allocations per frame.
+  const _scLsRow = document.getElementById('scLsRow');
+  const _scLs    = document.getElementById('scLs');
+  if (_scLsRow && _scLs){
+    const _ls = state.landStreak || 0;
+    if (_ls >= 2){
+      _scLs.textContent = '\u{1F525} ×' + _ls;
+      _scLs.style.color = _ls >= 10 ? '#ff6ad5' : (_ls >= 5 ? '#ffb020' : '#fff');
+      _scLsRow.style.display = '';
+    } else {
+      _scLsRow.style.display = 'none';
     }
   }
   const stallActive = (Math.abs(aoa) > STALL_AOA*0.85) && speed > 10 && !state.onGround;
@@ -23840,6 +23888,7 @@ addEventListener('keydown', e => {
     wingsWagged: document.getElementById('stWingsWagged'),
     burgers:  document.getElementById('stBurgers'),
     tgStreak: document.getElementById('stTg'),
+    landStreak: document.getElementById('stLs'),
     perfect:  document.getElementById('stPerfect'),
     bailouts: document.getElementById('stBailouts'),
     rank:     document.getElementById('stRank')
@@ -23861,6 +23910,7 @@ addEventListener('keydown', e => {
     if (cells.wingsWagged) cells.wingsWagged.textContent = pilotStats.wingsWagged || 0;
     if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
     if (cells.tgStreak) cells.tgStreak.textContent = pilotStats.bestTgStreak || 0;
+    if (cells.landStreak) cells.landStreak.textContent = pilotStats.bestLandStreak || 0;
     if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
     if (cells.bailouts) cells.bailouts.textContent = pilotStats.bailouts || 0;
     if (cells.rank){
