@@ -503,6 +503,13 @@
   #jumpsel .ap.here { border-color:#7ee787; background:rgba(40,90,55,.55); cursor:default; }
   #jumpsel .ap.here:hover { transform:none; }
   #jumpsel .ap.here .num { color:#7ee787; }
+  /* NOTAM-closed airport: still selectable (taxiway/grass arrival is fine)
+     but greyed + amber-tagged so the player knows the runway is closed
+     before they jump there. Hover keeps the lift so it's clearly clickable. */
+  #jumpsel .ap.notam { opacity:0.55; border-color:#ffd166; background:rgba(60,45,15,.55); }
+  #jumpsel .ap.notam .id { color:#ffd166; }
+  #jumpsel .ap.notam .num { color:#ffd166; }
+  #jumpsel .ap.notam .meta { color:#ffd166; }
   #jumpsel .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
   #jumpsel kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
   /* Transponder squawk keypad: same modal vibe as #jumpsel. Opens with K
@@ -2318,6 +2325,61 @@ function clearSkidmarks(){
 
 for (const a of AIRPORTS) makeAirport(a);
 const MAIN_AP = AIRPORTS[0];
+
+// ====== RUNWAY CLOSED NOTAM ======
+// One random session per ~30% of starts, one airport (never the carrier and
+// never the active mission origin, which is MAIN_AP for every mode) is
+// flagged RWY CLOSED. We paint big yellow X markers at both thresholds, ATIS
+// for that field appends a NOTAM line, the mini-map decorates the closed
+// airport label with a strikethrough + 🚫 prefix, the J quick-jump greys
+// the row, and landing on the closed strip dings the score with a
+// -100 NOTAM VIOLATION on the landing card plus a one-shot pilot ATC call.
+// Pure session-scope flavor: rolled once on page load, persists for the
+// whole session, never serialised to localStorage.
+const notam = (function rollNotam(){
+  const out = { apId: null, rwyDesig: '', markers: [] };
+  // 30% chance per fresh load.
+  if (Math.random() >= 0.30) return out;
+  // Pool: every ground airport except MAIN_AP (the active mission origin).
+  // Carrier is naturally excluded because it's not in AIRPORTS.
+  const pool = AIRPORTS.filter(a => a.id !== MAIN_AP.id);
+  if (!pool.length) return out;
+  const ap = pool[Math.floor(Math.random() * pool.length)];
+  out.apId = ap.id;
+  // Designator string for the ATIS line: "36-18" / "02-20" / "09-27" style.
+  out.rwyDesig = runwayDesignator(ap.hdg) + '-' + runwayDesignator(ap.hdg + Math.PI);
+  // Visual: two crossed PlaneGeometry strips at each runway threshold, laid
+  // flat just above the centerline paint (polygonOffset so we don't z-fight
+  // the runway, dashes, or designator numbers). Bright NOTAM yellow.
+  const xMat = new THREE.MeshBasicMaterial({
+    color: 0xffd24a, transparent: true, opacity: 0.95,
+    polygonOffset: true, polygonOffsetFactor: -2, depthWrite: false
+  });
+  const strip = new THREE.PlaneGeometry(3, 12);
+  for (const end of [-1, 1]){
+    // Each X = two strips rotated ±45° around the runway up-axis. Sit at the
+    // same airport-local inset as the painted runway numbers (~30 m inboard
+    // of the threshold) so the X overlays the touchdown zone where the
+    // pilot's eye lands on final.
+    const inset = 30;
+    for (const rot of [Math.PI/4, -Math.PI/4]){
+      const m = new THREE.Mesh(strip, xMat);
+      m.rotation.x = -Math.PI/2;
+      m.rotation.z = rot;
+      // _skidGrp sits at y=0.05 in airport-local space (already rotated by
+      // ap.hdg) so the same coord works for any field heading.
+      const localZ = end * (ap.len/2 - inset);
+      m.position.set(0, 0.01, localZ);
+      ap._skidGrp.add(m);
+      out.markers.push(m);
+    }
+  }
+  return out;
+})();
+// Convenience: true when (ap) is the NOTAM-closed field. Cheap string compare.
+function isAirportClosed(ap){
+  return !!(ap && notam.apId && ap.id === notam.apId);
+}
 
 // ====== CARRIER DECK ======
 // Anchored flat-top a few km offshore. Built as a hull box + flat deck + deck
@@ -8728,11 +8790,18 @@ function triggerAtis(){
   const rwy = _atisRunwayInUse(ap);
   const tempC = Math.round(_atisTempC());
   const zStr = _atisZuluTimeStr();
-  const line = ap.id + ' information ' + info + ', ' + windStr
+  let line = ap.id + ' information ' + info + ', ' + windStr
              + ', altimeter ' + altSpoken
              + ', runway ' + rwy + ' in use'
              + ', temperature ' + tempC
              + ', time ' + zStr + ' Zulu.';
+  // Active NOTAM gets appended verbatim so the radio + the painted yellow
+  // X markers + the mini-map strikethrough all agree on which strip is
+  // closed. Designator format "36-18" matches what the field gets painted
+  // with at both thresholds.
+  if (typeof notam !== 'undefined' && notam.apId === ap.id && notam.rwyDesig){
+    line += ' NOTAM: RWY ' + notam.rwyDesig + ' closed, expect grass arrival.';
+  }
   pushATC(line, { tag:'ATIS', now:true });
   _playAtisChime();
   // ~6s on-screen pill (matches the typical spoken duration of the line).
@@ -11691,7 +11760,17 @@ function step(dt){
         const speedOff = Math.abs(fwdKmh - targetKmh);
         const speedScore = Math.max(0, 1 - speedOff / 60);            // ±60 km/h off = 0
         const greaseBonus = sinkRate < 2.5 ? 0.25 : 0;                // soft-touch bonus
-        const score = Math.round((sinkScore + centerScore + speedScore + greaseBonus) * 100);
+        let score = Math.round((sinkScore + centerScore + speedScore + greaseBonus) * 100);
+        // NOTAM violation: touching down on the closed runway dings the
+        // score 100 points (clamped at 0 so a sweet touchdown on the wrong
+        // strip still gets credit, just not full credit). The amber HUD
+        // flash + pilot ATC call fire below, after the good-landing banner
+        // posts, so the NOTAM warning is the one the pilot actually sees.
+        let notamViolation = false;
+        if (land && land.ri && typeof isAirportClosed === 'function' && isAirportClosed(land.ri.ap)){
+          notamViolation = true;
+          score = Math.max(0, score - 100);
+        }
         state.scoreLast = score;
         state.scoreTotal += score;
         state.scoreCount += 1;
@@ -11764,6 +11843,16 @@ function step(dt){
         const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
         showStatus(title, sub, 'good');
         pushATC(apid + ', cleared to land confirmed. Welcome in.', { now:true });
+        // NOTAM violation banner + pilot ATC. Fires AFTER the good-landing
+        // banner so the amber RUNWAY CLOSED warning wins the HUD pill. The
+        // pilot call goes through pushATC with { now:true } so it jumps the
+        // queue ahead of the tower's "cleared to land" line.
+        if (notamViolation){
+          const apidClosed = land.ri.ap.id;
+          const rwyDesigClosed = (typeof notam !== 'undefined' && notam.rwyDesig) ? notam.rwyDesig : '';
+          showStatus('RUNWAY CLOSED', apidClosed + ' RWY ' + rwyDesigClosed + ' · NOTAM violation · −100', 'hard');
+          pushATC('Closed runway, RWY ' + rwyDesigClosed + '! Aborting.', { tag:'PILOT', now:true });
+        }
         // Pulse the runway lights bright yellow for ~600ms so the touchdown
         // reads as a moment, not just a score popup.
         if (land && land.ri) flareRunwayLights(land.ri.ap);
@@ -11807,7 +11896,7 @@ function step(dt){
           rollComplete: false,
           hard: false,
           bounced: false,
-          reason: ''
+          reason: notamViolation ? '−100 NOTAM VIOLATION · landed on closed runway' : ''
         });
         startReplay();
       }
@@ -14258,7 +14347,24 @@ function drawMinimap(hdgDeg){
     minimapCtx.font = 'bold 9px ui-monospace, monospace';
     minimapCtx.textAlign = 'left';
     minimapCtx.textBaseline = 'top';
-    minimapCtx.fillText(a.id, px + 5, py + 4);
+    // NOTAM-closed field: 🚫 prefix + a strikethrough across the airport id
+    // so the closed strip pops at a glance even before the player tunes ATIS.
+    const isClosed = (typeof isAirportClosed === 'function') && isAirportClosed(a);
+    const idLabel = (isClosed ? '\u{1F6AB} ' : '') + a.id;
+    minimapCtx.fillText(idLabel, px + 5, py + 4);
+    if (isClosed){
+      // Canvas has no native text-decoration, so paint a 1.5 px strike line
+      // across the measured glyph extent at roughly the text mid-line.
+      const tw = minimapCtx.measureText(idLabel).width;
+      minimapCtx.save();
+      minimapCtx.strokeStyle = '#ff7676';
+      minimapCtx.lineWidth = 1.4;
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(px + 5, py + 4 + 5);
+      minimapCtx.lineTo(px + 5 + tw, py + 4 + 5);
+      minimapCtx.stroke();
+      minimapCtx.restore();
+    }
     if (isBurger){
       // Small 🍔 glyph next to the airport id so the open-for-lunch field
       // pops at a glance. Slight gentle pulse so it doesn't get lost against
@@ -17494,11 +17600,20 @@ updateCamModeUi();
     AIRPORTS.forEach((ap, i) => {
       const n = i + 1;
       const here = (ap.id === hereId);
-      html += '<div class="ap' + (here ? ' here' : '') + '" data-idx="' + i + '">'
+      const closed = (typeof isAirportClosed === 'function') && isAirportClosed(ap);
+      // Closed-airport rows still teleport (taxiway/grass arrival is fine)
+      // but get a distinct greyed style + a 'NOTAM' meta tag so the player
+      // knows they're picking a field with a runway-closed warning before
+      // they commit. 'here' wins styling priority since it's a hard-disabled
+      // row, but the NOTAM tag still appears in the meta column.
+      const clsList = ['ap'];
+      if (here) clsList.push('here');
+      if (closed && !here) clsList.push('notam');
+      html += '<div class="' + clsList.join(' ') + '" data-idx="' + i + '">'
             +   '<span class="num">' + n + '</span>'
             +   '<span class="id">'  + ap.id + '</span>'
-            +   '<span class="nm">'  + ap.name + (here ? ' · here' : '') + '</span>'
-            +   '<span class="meta">' + Math.round(ap.elev) + 'm</span>'
+            +   '<span class="nm">'  + ap.name + (here ? ' · here' : (closed ? ' · NOTAM' : '')) + '</span>'
+            +   '<span class="meta">' + (closed ? '🚫 CLSD' : (Math.round(ap.elev) + 'm')) + '</span>'
             + '</div>';
     });
     listEl.innerHTML = html;
