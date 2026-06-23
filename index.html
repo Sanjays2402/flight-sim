@@ -710,7 +710,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -802,7 +802,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1177,7 +1177,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0 };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1244,6 +1244,7 @@ try {
     if (typeof saved.wipers === 'string' && ['off','slow','fast','auto'].indexOf(saved.wipers) !== -1) settings.wipers = saved.wipers;
     if (typeof saved.pitotHeat === 'boolean') settings.pitotHeat = saved.pitotHeat;
     if (typeof saved.carbHeat === 'boolean') settings.carbHeat = saved.carbHeat;
+    if (typeof saved.lastMixture === 'number' && isFinite(saved.lastMixture)) settings.lastMixture = Math.max(0, Math.min(1, saved.lastMixture));
     if (typeof saved.cowlFlaps === 'boolean') settings.cowlFlaps = saved.cowlFlaps;
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
     if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
@@ -4614,6 +4615,28 @@ throttleKnob.position.y = 0.165;
 throttleLeverPivot.add(throttleKnob);
 throttlePivot.add(throttleLeverPivot);
 throttleGroup.add(throttlePivot);
+// Mixture knob: tiny red knob silhouette beside the throttle lever so the
+// pilot has a visual echo of the mixture setting in cockpit cam. Red is the
+// universal real-world color for mixture (matches a real Cessna quadrant).
+// Lives in its own pivot so the per-frame tick can drive the lever angle
+// independently of the black throttle lever. Same parent group so it inherits
+// the throttleGroup visibility gating (cockpit cam only, hidden in photo /
+// pause / replay / intro).
+const mixturePivot = new THREE.Group();
+mixturePivot.position.set(0.035, 0.10, 0); // right of the throttle lever
+const mixtureLever = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.010, 0.010, 0.13, 12),
+  new THREE.MeshLambertMaterial({ color: 0x1a1a1c })
+);
+mixtureLever.position.y = 0.065;
+mixturePivot.add(mixtureLever);
+const mixtureKnob = new THREE.Mesh(
+  new THREE.SphereGeometry(0.019, 12, 10),
+  new THREE.MeshLambertMaterial({ color: 0xc02828 })
+);
+mixtureKnob.position.y = 0.135;
+mixturePivot.add(mixtureKnob);
+throttlePivot.add(mixturePivot);
 plane.add(throttleGroup);
 throttleGroup.visible = false;
 // Max lever swing: forward (idle) is ~+0.35 rad (lever tips toward the
@@ -6811,6 +6834,22 @@ function toggleCarbHeat(){
   if (state.carbHeatOn) state.carbHeatRpmDip = 80;
   showStatus('CARB HEAT ' + (state.carbHeatOn ? 'ON' : 'OFF'), null, state.carbHeatOn ? 'good' : 'hard');
 }
+// Mixture adjust (Minus = lean, Equal = rich). Mirrors carb-heat in spirit:
+// persistent pilot setting, status toast confirms each press. Steps by
+// MIX_STEP (5%) so a few taps takes the lever from full-rich to a high-alt
+// sweet spot; clamped to [0, 1]. Persists to settings.lastMixture so the
+// pilot's preferred mixture rides across reloads (matches the carb-heat /
+// pitot-heat / cowl-flaps persistence pattern).
+function adjustMixture(delta){
+  const before = state.mixture;
+  state.mixture = Math.max(0, Math.min(1, (state.mixture || 0) + delta));
+  if (state.mixture === before) return;
+  settings.lastMixture = state.mixture;
+  saveSettings();
+  const pct = Math.round(state.mixture * 100);
+  const tone = (delta > 0) ? 'good' : 'hard';
+  showStatus('MIXTURE ' + pct + '%', null, tone);
+}
 // Cowl flaps (Shift+F). Toggleable cooling lever: open biases the engine
 // thermal target down ~25°C at any throttle (CHT runs cooler under load)
 // but adds ~4% parasite drag so cruise speed visibly drops. Closed is the
@@ -7053,6 +7092,22 @@ function updateEngineTemp(dt){
     // settles around 155°C with flaps open — enough to keep a long climb
     // out of the redline if the player remembers to pull the lever.
     if (state.cowlFlapsOpen) target -= COWL_FLAP_CHT_DROP;
+    // Mixture effect on CHT: running rich up high lets unburned fuel cool the
+    // cylinders less efficiently and bumps CHT. Only kicks in above 1500 m
+    // MSL (down low, full-rich is the correct mixture) and scales with how
+    // far past the target the lever is. Properly leaned (on band) reads as
+    // zero bump so a good cruise stays in the green CHT arc.
+    const _altMslCht = plane.position.y;
+    if (_altMslCht > 1500){
+      const tMix = mixtureTargetForAlt(_altMslCht);
+      const overRich = Math.max(0, (state.mixture || 0) - tMix - MIX_BAND_HALF);
+      if (overRich > 0){
+        // Linear ramp: zero at the band edge, full MIX_CHT_BUMP_MAX when the
+        // lever is at full rich (1.0) against the leanest sweet spot (0.40).
+        const altT = Math.min(1, (_altMslCht - 1500) / 2000);
+        target += MIX_CHT_BUMP_MAX * altT * Math.min(1, overRich / (1.0 - 0.40 - MIX_BAND_HALF));
+      }
+    }
   }
   // Cooling is faster than heating so backing off the throttle actually
   // recovers the gauge in a reasonable window. Asymmetric rates feel right
@@ -7298,6 +7353,44 @@ const CARB_ICE_LATCH         = 0.25; // ice severity that fires the one-shot ATC
 const CARB_ICE_SHOW_MIN      = 0.12; // ice severity above this lights the HUD pill
 const CARB_ICE_CLEAR         = 0.05; // ice severity below this re-arms the ATC latch
 const CARB_HEAT_RPM_DIP_DECAY = 0.6; // seconds for the RPM-dip kick to fade out
+
+// ====== Engine mixture lever ======
+// Adjustable fuel/air ratio (state.mixture 0..1, default 1.0 = full rich).
+// Real-world piston engines need leaner mixtures at altitude (thinner air =
+// less oxygen, so a fixed fuel flow drowns the cylinders) and richer down
+// low. This mirrors that asymmetry: each altitude has a sweet-spot mixture
+// derived from a simple ISA-like linear decay; the further the lever is from
+// the sweet spot, the worse thrust + CHT + fuel burn get. Tuned so that
+// leaving the lever full-rich on a long climb actually costs the player
+// thrust + fuel, and that managing the lever during cruise meaningfully
+// extends range — pairs with the fuel-flow gauge and the range ring.
+const MIX_STEP             = 0.05;  // per Minus / Equal press (5%)
+const MIX_BAND_HALF        = 0.18;  // |mixture - target| within this is "on band"
+const MIX_THRUST_BLEED_MAX = 0.15;  // max thrust fraction lost when fully off-band
+const MIX_CHT_BUMP_MAX     = 22;    // peak °C added to CHT target when too rich up high
+const MIX_FUEL_LEAN_BONUS  = 0.25;  // fuel burn fraction trimmed when properly leaned
+const MIX_FUEL_RICH_PENALTY= 0.08;  // extra fuel burn when full-rich at high alt
+const MIX_LEAN_ROUGH_THR   = 0.30;  // lean enough to actually starve combustion below this
+const MIX_HUD_BAD_THRESH   = 0.22;  // |mixture - target| past this turns the HUD pill amber
+const MIX_ATC_ALT_HI       = 2500;  // m MSL: above this with full-rich fires the nag
+const MIX_ATC_ALT_RE_ARM   = 2000;  // m MSL: descend below this to re-arm the nag
+const MIX_ATC_FULL_RICH    = 0.85;  // mixture >= this counts as "still full-rich" for the nag
+// Target mixture for the given altitude (m MSL). Full rich (1.0) at sea
+// level, leans linearly to ~0.55 at 4500 m — close to typical GA mixture
+// charts without dragging in barometric math the rest of the sim doesn't
+// have. Clamped so the sweet spot never goes below 0.40 (full-cutoff is
+// always wrong) or above 1.0 (no point richening past full).
+function mixtureTargetForAlt(altM){
+  const a = Math.max(0, altM || 0);
+  return Math.max(0.40, Math.min(1.0, 1.0 - a * 0.0001));
+}
+// Returns 0..1 "how far off the sweet spot is the current mixture" so the
+// thrust / CHT / fuel paths can scale their penalties off a single number.
+// 0 = perfectly on band, 1 = past MIX_BAND_HALF in either direction.
+function mixtureOffBand(altM){
+  const t = mixtureTargetForAlt(altM);
+  return Math.min(1, Math.abs((state.mixture || 0) - t) / MIX_BAND_HALF);
+}
 function updateCarbIce(dt){
   // Same freeze list as updatePitotIce so the model doesn't drift while the
   // sim is frozen.
@@ -8275,6 +8368,16 @@ const state = {
   carbIce: 0,
   carbIceAtcLatch: false,
   carbHeatRpmDip: 0,
+  // Engine mixture lever (Minus = lean, Equal = rich; default 1.0 = full rich).
+  // Seeded from settings.lastMixture so the player's last mixture rides across
+  // reloads. Biases thrust + CHT + fuel burn with altitude as the wildcard:
+  // up high a full-rich mixture loses thrust + heats the cylinders + burns
+  // extra fuel; properly leaned (0.55..0.75) recovers most of that. Down low,
+  // running lean costs thrust and roughens the idle. `mixtureAtcLatch` is the
+  // one-shot "lean mixture for altitude" auto-suggest that re-arms once the
+  // plane descends back under 2000 m so a future climb can fire it again.
+  mixture: Math.max(0, Math.min(1, settings.lastMixture || 1)),
+  mixtureAtcLatch: false,
   // Cowl flaps (Shift+F). Open = the engine cooling cowl louvers are open,
   // dropping the CHT target ~25°C but costing ~4% parasite drag (visible
   // airspeed dip in cruise). Closed = legacy behavior, no drag, no extra
@@ -8738,7 +8841,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote','Backslash'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote','Backslash','Minus','Equal'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 // Replay scrub controls. Active only while the post-landing replay banner is
@@ -8803,6 +8906,25 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='KeyC' && !e.shiftKey) { state.cam = (state.cam + 1) % CAM_NAMES.length; updateCamModeUi(); }
+  // Engine mixture lever. Minus = lean by MIX_STEP, Equal = rich by MIX_STEP.
+  // Universal sim convention (FSX / X-Plane / MSFS all bind mixture to "-"
+  // and "="); we'd love `,` / `.` here per the roadmap entry, but plain `,`
+  // already opens the settings panel and Shift+`,` is the Kollsman altimeter
+  // knob, so binding mixture to those keys would either eat settings or
+  // collide with baro. Gate against the intro modal so a stray press on the
+  // main menu can't move the lever before the player ever sees the gauge.
+  if (e.code==='Minus' && !e.shiftKey && !e.ctrlKey && !e.metaKey){
+    if (state.introOpen) return;
+    e.preventDefault();
+    adjustMixture(-MIX_STEP);
+    return;
+  }
+  if (e.code==='Equal' && !e.shiftKey && !e.ctrlKey && !e.metaKey){
+    if (state.introOpen) return;
+    e.preventDefault();
+    adjustMixture(+MIX_STEP);
+    return;
+  }
   // Shift+T routes by airborne state. On the ground it fires the
   // cockpit warning-chime self-test (stall horn / gear / GPWS / fire
   // / oil pressure) so the pilot can verify audio settings before
@@ -10247,6 +10369,12 @@ function resetPlane(){
   state.carbIce = 0;
   state.carbIceAtcLatch = false;
   state.carbHeatRpmDip = 0;
+  // Mixture mirrors the carb-heat reset pattern: clear the ATC nag latch so a
+  // fresh sortie can fire the "lean mixture for altitude" prompt once, but
+  // preserve state.mixture itself — it's a pilot setting (same as carbHeatOn /
+  // pitotHeatOn / cowlFlapsOpen), so a hot reset keeps the lever where the
+  // player put it. settings.lastMixture also rides across reloads.
+  state.mixtureAtcLatch = false;
   // Cowl-flap auto-suggest mirrors the carb/pitot latches: re-arm it on
   // every fresh sortie so a future overheat in this flight can fire the
   // "open cowl flaps" prompt once. If the player already had them open at
@@ -14256,7 +14384,30 @@ function step(dt){
   // — long enough to plan a hop, short enough to make fuel a real consideration.
   const FUEL_BURN_RATE = 1 / (6 * 60); // 6 minutes of full throttle empties the tank
   if (!state.engineOut && state.fuel > 0){
-    state.fuel = Math.max(0, state.fuel - state.throttle * FUEL_BURN_RATE * dt);
+    // Mixture effect on fuel burn: a properly leaned cruise (on band) at
+    // altitude trims ~25% off the burn rate; running full-rich up high
+    // wastes fuel by burning richer than the cylinders need. Down low (full
+    // rich is correct), the modifier is neutral so taxi / takeoff burns
+    // exactly as before. Pairs with the GPH gauge so the cockpit number
+    // visibly drops when the player finds the sweet spot.
+    let mixFuelMul = 1;
+    const _altMslFuel = plane.position.y;
+    if (_altMslFuel > 1500){
+      const tMixF = mixtureTargetForAlt(_altMslFuel);
+      const offBand = mixtureOffBand(_altMslFuel);
+      if (offBand < 0.35){
+        // On-band at altitude: lean bonus.
+        const altT = Math.min(1, (_altMslFuel - 1500) / 2000);
+        mixFuelMul *= 1 - MIX_FUEL_LEAN_BONUS * altT * (1 - offBand / 0.35);
+      }
+      // Full-rich penalty: extra burn if running noticeably rich up high.
+      const overRichF = Math.max(0, (state.mixture || 0) - tMixF - MIX_BAND_HALF * 0.5);
+      if (overRichF > 0){
+        const altT = Math.min(1, (_altMslFuel - 1500) / 2000);
+        mixFuelMul *= 1 + MIX_FUEL_RICH_PENALTY * altT * Math.min(1, overRichF / (1.0 - 0.40));
+      }
+    }
+    state.fuel = Math.max(0, state.fuel - state.throttle * FUEL_BURN_RATE * mixFuelMul * dt);
     if (state.fuel <= 0 && !state.engineOut){
       state.engineOut = true;
       state.throttle = 0;
@@ -14415,12 +14566,27 @@ function step(dt){
   // carb heat costs a small flat CARB_HEAT_THRUST_COST penalty from the warmer,
   // less-dense intake — the systems trade-off the pilot is making.
   const carbMul = Math.max(0, 1 - (state.carbIce || 0) * CARB_ICE_THRUST_BLEED - (state.carbHeatOn ? CARB_HEAT_THRUST_COST : 0));
+  // Mixture thrust multiplier: distance from the altitude-target mixture
+  // steals up to MIX_THRUST_BLEED_MAX. On-band reads as 1.0 (no penalty);
+  // full-rich at high altitude or full-lean down low both cap thrust well
+  // below max. A genuinely too-lean mixture (below MIX_LEAN_ROUGH_THR) also
+  // drops thrust further to simulate the engine actually starving for fuel
+  // and threatening to quit on the pilot. Engine-off / fuel-out / cold-start
+  // paths already gate thrust to 0 below, so a stale mixture setting on the
+  // ground doesn't matter.
+  const _altMsl = plane.position.y;
+  const mixOff = mixtureOffBand(_altMsl);
+  let mixMul = 1 - mixOff * MIX_THRUST_BLEED_MAX;
+  if ((state.mixture || 0) < MIX_LEAN_ROUGH_THR){
+    mixMul *= (state.mixture || 0) / MIX_LEAN_ROUGH_THR;
+  }
+  mixMul = Math.max(0, mixMul);
   // Rough-idle thrust bleed after a skipped-primer start: up to ~6% off the
   // top, fading linearly with roughIdleT so the engine smooths out over ~3s.
   // Tiny but enough that the pilot feels the engine isn't quite breathing
   // right yet — pairs with the gauge judder above.
   const roughMul = (state.roughIdleT > 0) ? (1 - 0.06 * (state.roughIdleT / ROUGH_IDLE_S)) : 1;
-  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul : 0;
+  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul * mixMul : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
@@ -15067,6 +15233,15 @@ function step(dt){
         // the lever top toward -Z = toward the pilot's seat.
         throttleLeverPivot.rotation.x = THROTTLE_FWD_MAX_RAD
           - throttleLeverAnim * (THROTTLE_FWD_MAX_RAD + THROTTLE_BACK_MAX_RAD);
+        // Mixture knob lerps from forward (lean cutoff at mix=0) to back
+        // (full rich at mix=1) using the same axis convention as throttle.
+        // No smoothing — mixture changes only on discrete keypress so the
+        // lever already snaps instead of slewing.
+        if (typeof mixturePivot !== 'undefined' && mixturePivot){
+          const mLevel = Math.max(0, Math.min(1, state.mixture || 0));
+          mixturePivot.rotation.x = THROTTLE_FWD_MAX_RAD
+            - mLevel * (THROTTLE_FWD_MAX_RAD + THROTTLE_BACK_MAX_RAD);
+        }
       }
     }
   }
@@ -15611,6 +15786,40 @@ function step(dt){
   // mode so saved PNGs stay clean.
   const carbIcePillEl = document.getElementById('carbIcePill');
   if (carbIcePillEl) carbIcePillEl.style.display = ((state.carbIce || 0) > CARB_ICE_SHOW_MIN && !state.photoMode) ? 'inline' : 'none';
+  // Mixture pill (WIND row) — always shows the live mixture percentage so
+  // the player has a constant readout of the lever position. Color biases
+  // amber the moment the lever drifts far off the altitude sweet spot
+  // (>= MIX_HUD_BAD_THRESH from the on-band target), green otherwise.
+  // Hidden in photo mode so saved PNGs stay clean. We compute the off-band
+  // distance off mixtureTargetForAlt() so the pill reads as "good" on the
+  // ground at full-rich AND in a high-altitude cruise that's been leaned in.
+  const mixPillEl = document.getElementById('mixPill');
+  if (mixPillEl){
+    if (state.photoMode){ mixPillEl.style.display = 'none'; }
+    else {
+      mixPillEl.style.display = 'inline';
+      const mPct = Math.round((state.mixture || 0) * 100);
+      mixPillEl.textContent = 'MIX ' + mPct + '%';
+      const tMix = mixtureTargetForAlt(plane.position.y);
+      const off = Math.abs((state.mixture || 0) - tMix);
+      mixPillEl.style.color = (off >= MIX_HUD_BAD_THRESH) ? '#ff9e3d' : '#7ee787';
+    }
+  }
+  // Mixture ATC nag: first frame the plane climbs past MIX_ATC_ALT_HI with
+  // the mixture still full-rich, fire a one-shot "Lean mixture for altitude"
+  // call. Latched so a long high-altitude cruise at full-rich doesn't spam
+  // the strip; re-arms once the plane descends back under MIX_ATC_ALT_RE_ARM
+  // so the next climb gets a fresh nudge. Skipped on the ground / crashed /
+  // intro / replay / photo / paused so the call doesn't fire stale.
+  if (!state.mixtureAtcLatch
+      && !state.onGround && !state.crashed && !state.introOpen && !state.replayActive && !state.photoMode && !state.paused
+      && plane.position.y >= MIX_ATC_ALT_HI
+      && (state.mixture || 0) >= MIX_ATC_FULL_RICH){
+    state.mixtureAtcLatch = true;
+    if (typeof pushATC === 'function') pushATC('Lean mixture for altitude.', { tag:'PILOT' });
+  } else if (state.mixtureAtcLatch && plane.position.y <= MIX_ATC_ALT_RE_ARM){
+    state.mixtureAtcLatch = false;
+  }
   // Cowl flaps pill (WIND row) — cyan reminder the lever is open. Lit
   // whenever cowlFlapsOpen is true, hidden in photo mode so saved PNGs
   // stay clean.
@@ -19259,6 +19468,26 @@ function drawCockpitFuelFlow(gphOverride){
   } else if (engineLive){
     const t = Math.max(0, Math.min(1, state.throttle));
     gph = 2 + 14 * (0.7 * t + 0.3 * t * t);
+    // Mixture biases the displayed flow the same way it biases real fuel burn
+    // above, so the cockpit gauge can't lie about the savings. Reuses the
+    // exact same maths the fuel-burn path runs so the GPH needle and the
+    // tank percentage are the same source of truth.
+    const _altGph = plane.position.y;
+    if (_altGph > 1500){
+      const tMixG = mixtureTargetForAlt(_altGph);
+      const offBandG = mixtureOffBand(_altGph);
+      let mixFuelMulG = 1;
+      if (offBandG < 0.35){
+        const altT = Math.min(1, (_altGph - 1500) / 2000);
+        mixFuelMulG *= 1 - MIX_FUEL_LEAN_BONUS * altT * (1 - offBandG / 0.35);
+      }
+      const overRichG = Math.max(0, (state.mixture || 0) - tMixG - MIX_BAND_HALF * 0.5);
+      if (overRichG > 0){
+        const altT = Math.min(1, (_altGph - 1500) / 2000);
+        mixFuelMulG *= 1 + MIX_FUEL_RICH_PENALTY * altT * Math.min(1, overRichG / (1.0 - 0.40));
+      }
+      gph *= mixFuelMulG;
+    }
     if (state.airRestart && state.ignitionT >= 0){
       // Mid air-restart, blend the starter spool against the windmilling base
       // so the needle visibly kicks during the 1.6s crank.
