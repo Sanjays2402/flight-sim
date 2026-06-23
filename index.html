@@ -19563,14 +19563,16 @@ function step(dt){
     rudder.rotation.y   = -rudderAnim   * RUDDER_MAX_RAD;
     // Cockpit yoke: mirror the smoothed pitch + roll inputs onto the visual
     // control column. Cockpit cam only, hidden in photo/pause/replay/intro
-    // so saved PNGs and frozen frames stay clean. elevatorAnim<0 = pull back
+    // and frozen-hidden on crash so saved PNGs, frozen frames, and post-impact
+    // wreckage frames stay clean. elevatorAnim<0 = pull back
     // = yoke leans TOWARD the pilot, which is +X rotation around the pivot
     // (top tilts back toward +Z=+rear), so flip the sign. aileronAnim>0 =
     // right roll = wheel twists clockwise from the pilot's seat = +Z rotation.
     if (yokeGroup){
       const yokeVisible = state.cam === 1
         && !state.photoMode && !state.paused
-        && !state.replayActive && !state.introOpen;
+        && !state.replayActive && !state.introOpen
+        && !state.crashed;
       yokeGroup.visible = yokeVisible;
       if (yokeVisible){
         yokePivot.rotation.x = -elevatorAnim * YOKE_PITCH_MAX_RAD;
