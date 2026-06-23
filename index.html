@@ -656,6 +656,32 @@
   #sqkeypad .pr.emerg:hover { border-color:#ff7a7a; }
   #sqkeypad .hint { font-size:10px; color:#9bb; margin-top:4px; letter-spacing:1px; line-height:1.6; }
   #sqkeypad kbd { background:#1a2a3a; color:#cfe; padding:1px 5px; border-radius:3px; font-size:10px; border:1px solid #2a4a6a; }
+  /* ILS lock keypad overlay (Shift+V). Mirrors the #sqkeypad chrome so
+     the modal language stays consistent: dim full-screen backdrop, centered
+     card, preset rows for each runway threshold (one per end of every
+     airport + the carrier deck), plus an AUTO preset that releases the
+     lock so the ILS auto-picks the nearest aligned runway again. The
+     active lock row carries the .cur outline so the player can see at a
+     glance which end is armed. Hidden in photo mode via PHOTO_HIDE_IDS
+     so saved PNGs stay clean. */
+  #ilskeypad { position:fixed; inset:0; background:rgba(4,8,14,.55); backdrop-filter:blur(6px); z-index:26; display:none; align-items:center; justify-content:center; padding:24px; }
+  #ilskeypad.show { display:flex; }
+  #ilskeypad .card { width:320px; max-width:100%; background:rgba(10,16,24,.92); border:1px solid #1e3548; border-radius:10px; padding:14px 16px 12px; color:#eaf2ff; box-shadow:0 18px 60px rgba(0,0,0,.55); font-family:inherit; }
+  #ilskeypad h2 { margin:0 0 2px; font-size:14px; letter-spacing:2px; color:#ff66cc; text-align:center; }
+  #ilskeypad .sub { margin:0 0 10px; font-size:10px; letter-spacing:2px; color:#7a8fa8; text-align:center; }
+  #ilskeypad .now { text-align:center; font-size:18px; letter-spacing:3px; color:#7ee787; font-variant-numeric:tabular-nums; margin:0 0 10px; padding:6px 0; background:rgba(8,14,22,.55); border:1px solid #1e3548; border-radius:6px; }
+  #ilskeypad .now.auto { color:#9bb; letter-spacing:2px; }
+  #ilskeypad .presets { display:flex; flex-direction:column; gap:6px; margin:0 0 10px; max-height:360px; overflow-y:auto; }
+  #ilskeypad .presets .pr { display:flex; align-items:center; gap:10px; padding:8px 10px; background:rgba(20,30,44,.7); border:1px solid #243b54; border-radius:6px; color:#eaf2ff; cursor:pointer; font:inherit; font-size:12px; letter-spacing:1px; text-align:left; transition:background .12s, border-color .12s; }
+  #ilskeypad .presets .pr:hover { background:rgba(34,52,76,.85); border-color:#3a5d80; }
+  #ilskeypad .presets .pr.cur { border-color:#ff66cc; box-shadow:inset 0 0 0 1px rgba(255,102,204,.4); }
+  #ilskeypad .presets .pr.auto .pcode { color:#9bb; }
+  #ilskeypad .presets .pnum { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:4px; background:rgba(255,102,204,.15); border:1px solid rgba(255,102,204,.5); color:#ff66cc; font-size:10px; font-weight:700; }
+  #ilskeypad .presets .pr.auto .pnum { background:rgba(155,187,187,.15); border-color:rgba(155,187,187,.5); color:#9bb; }
+  #ilskeypad .presets .pcode { color:#ff66cc; font-weight:800; letter-spacing:2px; min-width:64px; font-family:'JetBrains Mono','Menlo',monospace; font-size:12px; }
+  #ilskeypad .presets .plabel { flex:1; color:#eaf2ff; font-weight:600; }
+  #ilskeypad .hint { font-size:10px; color:#7a8fa8; letter-spacing:1px; text-align:center; margin-top:4px; line-height:1.55; }
+  #ilskeypad kbd { background:rgba(20,30,44,.9); border:1px solid #243b54; border-radius:3px; padding:1px 4px; color:#eaf2ff; font-size:10px; font-family:inherit; }
   /* Time-of-day quick-set keypad overlay (Shift+T in the air). Mirrors
      the #sqkeypad / #jumpsel chrome: dim full-screen backdrop, single
      centered card, kbd hint row at the bottom. Five preset rows show DAWN
@@ -839,7 +865,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1045,6 +1071,15 @@
     <div class="grid" id="sqGrid"></div>
     <div class="presets" id="sqPresets"></div>
     <div class="hint">type <kbd>0</kbd>–<kbd>7</kbd> · <kbd>Backspace</kbd> erase · <kbd>Enter</kbd> set · <kbd>K</kbd>/<kbd>Esc</kbd> close</div>
+  </div>
+</div>
+<div id="ilskeypad">
+  <div class="card">
+    <h2>ILS LOCK</h2>
+    <div class="sub">PIN COURSE NEEDLES</div>
+    <div class="now" id="ilsNow">AUTO</div>
+    <div class="presets" id="ilsPresets"></div>
+    <div class="hint">tap a row or press <kbd>1</kbd>–9 · <kbd>0</kbd> = AUTO · <kbd>Shift</kbd>+<kbd>V</kbd>/<kbd>Esc</kbd> close</div>
   </div>
 </div>
 <div id="timekeypad">
@@ -8847,6 +8882,17 @@ const state = {
   // without waiting on the slow real-time TOD cycle. Closed via Shift+T
   // or Esc.
   timekeypadOpen: false,
+  // ILS lock keypad (#ilskeypad) overlay visible. Shift+V toggles. Modal
+  // (blocks pause/photo gating + the cockpit quick-look hotkey) while open
+  // so the player can pick a runway end without the camera yawing.
+  ilskeypadOpen: false,
+  // Manual ILS course lock id (e.g. "KSEA36"). Set via the Shift+V keypad
+  // to pin drawILSNeedles() onto a specific runway threshold instead of
+  // the historical auto-pick. null = auto-pick the nearest aligned
+  // runway. Value is a string like "KSEA36" or "CV0109" — the airport id
+  // plus a 2-digit runway designator. Cleared by resetPlane() so each
+  // fresh sortie boots back to auto.
+  ilsLockId: null,
   // Pre-flight checklist (#preflight) overlay visible. Shift+K toggles.
   // Pure HUD panel — does NOT pause the sim and does NOT block input, so
   // it's not listed in isAnyOtherModalOpen(). Auto-closes on takeoff or
@@ -9709,6 +9755,10 @@ addEventListener('keydown', e=>{
     cycleWipers();
   }
   if (e.code==='KeyV'){
+    // Shift+V opens the ILS lock keypad (handled in setupIlsKeypadUi()).
+    // Bail out before the quick-look bookkeeping so a Shift+V press doesn't
+    // also start a head-yaw timer that fires the moment the modal closes.
+    if (e.shiftKey) return;
     // Quick-look check (cockpit only). Record the press time on keydown so
     // keyup can tell a tap from a hold. The actual yaw target is recomputed
     // every frame in updateCamera() from this press flag + lookRightLocked.
@@ -9749,6 +9799,7 @@ function lookAllowed(){
   if (state.cam !== 1) return false;
   if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
   if (state.crashed) return false;
+  if (state.ilskeypadOpen) return false;
   return true;
 }
 
@@ -10481,7 +10532,7 @@ function toggleAtisStrip(){
   if (state.atisStripOpen){ setAtisStripOpen(false); return; }
   if (state.introOpen || state.replayActive || state.photoMode || state.paused) return;
   if (state.crashed) return;
-  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen) return;
+  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen || state.ilskeypadOpen) return;
   setAtisStripOpen(true);
 }
 function _atisStripNearestAp(){
@@ -10534,7 +10585,7 @@ function updateAtisStrip(force){
   // captures, replays, menu, crash, or a keypad modal opened later.
   if (state.atisStripOpen && (state.introOpen || state.replayActive
         || state.photoMode || state.paused || state.crashed
-        || state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen)){
+        || state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen || state.ilskeypadOpen)){
     setAtisStripOpen(false);
     return;
   }
@@ -11092,6 +11143,11 @@ function resetPlane(){
     state.shear.triggered = false;
     state.shear.rwyDesignator = '';
   }
+  // ILS lock (Shift+V manual course override) clears on every reset so a
+  // fresh sortie auto-picks the nearest aligned runway again instead of
+  // chasing the previous flight's locked end. Mission start runs through
+  // resetPlane() so this also covers free flight to hop / T&G transitions.
+  state.ilsLockId = null;
   // Turbulence pockets: clear the per-band ATC latches + hide the pill so
   // every fresh sortie can re-fire the "moderate chop reported" call when the
   // player climbs back into the rough air. The pockets themselves keep
@@ -11825,7 +11881,7 @@ function startWarnTest(){
   if (state.warnTest) return;
   if (state.introOpen || state.paused || state.replayActive || state.photoMode) return;
   if (state.crashed || (state.bailout && state.bailout.phase !== 'idle')) return;
-  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen) return;
+  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen || state.ilskeypadOpen) return;
   if (!state.onGround) return;
   if (!state.parkingBrake){
     showStatus('WARNING TEST', 'set parking brake first', 'hard');
@@ -12026,7 +12082,7 @@ function toggleKneeboard(){
   // the togglePreflight() gate plus the J / squawk / time keypad checks.
   if (state.introOpen || state.replayActive || state.photoMode || state.paused) return;
   if (state.crashed) return;
-  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen) return;
+  if (state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen || state.ilskeypadOpen) return;
   setKneeboardOpen(true);
   if (typeof showStatus === 'function'){
     showStatus('APPROACH PLATE', 'Shift+N or Esc to close', 'good');
@@ -12094,7 +12150,7 @@ function updateKneeboard(force){
   // captures, replays, the menu, a crash, or a keypad modal opened later.
   if (state.kneeboardOpen && (state.introOpen || state.replayActive
         || state.photoMode || state.paused || state.crashed
-        || state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen)){
+        || state.jumpOpen || state.sqkeypadOpen || state.timekeypadOpen || state.ilskeypadOpen)){
     setKneeboardOpen(false);
     return;
   }
@@ -17337,32 +17393,112 @@ const ILS_ALIGN_LAT  = 1100;   // metres laterally off the centerline
 const ILS_ALIGN_HDG  = 45;     // degrees of heading off runway course
 const ILS_LOC_FULL   = 400;    // metres of lateral offset = full needle deflection
 const ILS_GS_FULL    = 1.5;    // degrees of glideslope deviation = full deflection
-function drawILSNeedles(hdgDeg){
-  // Pick the same runway the meatball would, but with the wider range / cone.
-  let best = null, bestScore = 1e9;
+// Locked-mode override: the player picked a specific end via Shift+V, so we
+// want the needles to stay alive even on a wide-cone approach. Distance
+// envelope is generous (the lock survives a wide downwind leg) but we still
+// hide the needles once the plane has rolled past the touchdown zone so
+// they don't read nonsense data on the rollout.
+const ILS_LOCK_MAX_DIST = 16000;  // metres from threshold (twice the auto-pick range)
+// Compute the alignment candidate for one runway threshold. `sign` selects
+// the end of the runway: +1 = +z threshold (landing into +z, the canonical
+// designator from `ri.ap.hdg`), -1 = -z threshold (landing into -z, the
+// opposite designator). Returns null when the plane is on the wrong side
+// of the runway for that end, otherwise an object describing the geometry
+// (horiz distance to aim, lateral offset, heading delta, glideslope angle).
+function _ilsCandidate(ri, hdgDeg, sign){
+  const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
+  const dx = plane.position.x - ri.ap.x;
+  const dz = plane.position.z - ri.ap.z;
+  const lx = dx*cs - dz*sn;            // lateral offset from centerline (m)
+  const lz = dx*sn + dz*cs;            // along-runway (m)
+  // Approach-side check: for the +z end the plane must be past the +z
+  // threshold (lz > +len/2 - 50); for the -z end, past the -z threshold
+  // (lz < -(len/2 - 50)).
+  const onApproach = (sign > 0) ? (lz > ri.ap.len/2 - 50) : (lz < -(ri.ap.len/2 - 50));
+  if (!onApproach) return null;
+  // Aim point: about 300 m inboard from the chosen threshold. Same math the
+  // PAPI build uses so the needles point at the painted touchdown box.
+  const aimX = ri.ap.x + sign * Math.sin(ri.ap.hdg) * (ri.ap.len/2 - 300);
+  const aimZ = ri.ap.z + sign * Math.cos(ri.ap.hdg) * (ri.ap.len/2 - 300);
+  const dxA = plane.position.x - aimX;
+  const dzA = plane.position.z - aimZ;
+  const horiz = Math.hypot(dxA, dzA);
+  if (horiz < 1) return null;
+  if (plane.position.y < ri.ap.elev + 5) return null;
+  // Runway course (the direction a landing plane is flying for this end).
+  // +z end = ri.ap.hdg; -z end = ri.ap.hdg + 180 degrees.
+  const courseRad = ri.ap.hdg + (sign > 0 ? 0 : Math.PI);
+  const rwyHdg = ((courseRad * 180/Math.PI) % 360 + 360) % 360;
+  let dh = ((hdgDeg - rwyHdg) + 540) % 360 - 180;
+  const dyA = plane.position.y - ri.ap.elev;
+  const glideAngle = Math.atan2(dyA, horiz) * 180/Math.PI;
+  // Localizer convention: positive lx (right of centerline) should deflect
+  // the needle LEFT ("fly left to recapture"). For the +z end, lx already
+  // matches that convention; for the -z end, the runway centerline is the
+  // same axis but the pilot is now flying in the opposite direction, so a
+  // positive lx in local frame is to the LEFT of their nose. Flip the sign
+  // so the needle deflects the right way for the pilot's eye.
+  const locLx = (sign > 0) ? lx : -lx;
+  return { ri, horiz, glideAngle, lx: locLx, dh, rwyHdg, sign };
+}
+// Compose the runway designator string for one end ("<APID><DD>") so it can
+// be matched against state.ilsLockId or shown on the lock pill.
+function _ilsLockIdFor(ri, sign){
+  const hdg = ri.ap.hdg + (sign > 0 ? 0 : Math.PI);
+  return ri.ap.id + runwayDesignator(hdg);
+}
+// Resolve a lock id like "KSEA36" into the matching {ri, sign} pair, or
+// null when the id does not correspond to any registered runway end.
+function _ilsResolveLock(lockId){
+  if (!lockId) return null;
   for (const ri of runwayInfos){
-    const cs = Math.cos(-ri.ap.hdg), sn = Math.sin(-ri.ap.hdg);
-    const dx = plane.position.x - ri.ap.x;
-    const dz = plane.position.z - ri.ap.z;
-    const lx = dx*cs - dz*sn;            // lateral offset from centerline (m)
-    const lz = dx*sn + dz*cs;            // along-runway (m), +lz = approach side
-    const beyondSouth = lz > ri.ap.len/2 - 50;
-    if (!beyondSouth) continue;
-    const dxA = plane.position.x - ri.aimX;
-    const dzA = plane.position.z - ri.aimZ;
-    const horiz = Math.hypot(dxA, dzA);
-    if (horiz < 1 || horiz > ILS_MAX_DIST) continue;
-    if (Math.abs(lx) > ILS_ALIGN_LAT) continue;
-    const rwyHdg = ((ri.ap.hdg * 180/Math.PI) % 360 + 360) % 360;
-    let dh = ((hdgDeg - rwyHdg) + 540) % 360 - 180;
-    if (Math.abs(dh) > ILS_ALIGN_HDG) continue;
-    if (plane.position.y < ri.ap.elev + 5) continue;
-    const score = horiz + Math.abs(lx)*1.5 + Math.abs(dh)*40;
-    if (score < bestScore){
-      bestScore = score;
-      const dyA = plane.position.y - ri.ap.elev;
-      const glideAngle = Math.atan2(dyA, horiz) * 180/Math.PI;
-      best = { ri, horiz, glideAngle, lx, dh };
+    if (_ilsLockIdFor(ri, +1) === lockId) return { ri, sign: +1 };
+    if (_ilsLockIdFor(ri, -1) === lockId) return { ri, sign: -1 };
+  }
+  return null;
+}
+function drawILSNeedles(hdgDeg){
+  // Pick the runway+end to chase. With a manual lock (state.ilsLockId), force
+  // the candidate to that specific end and skip the heading/lateral cone
+  // checks so the needles stay alive on the wide downwind / base legs that
+  // a hand-flown ILS practice approach actually flies. Without a lock, the
+  // historical auto-pick math runs across BOTH ends of every runway so the
+  // needles can finally come alive on an opposite-end approach too (the
+  // pre-lock code only ever considered the +z end of each strip).
+  let best = null;
+  let locked = false;
+  if (state.ilsLockId){
+    const m = _ilsResolveLock(state.ilsLockId);
+    if (m){
+      const c = _ilsCandidate(m.ri, hdgDeg, m.sign);
+      // Lock survives a wider distance envelope; we still hide once we have
+      // rolled past the touchdown zone so the needles do not paint nonsense
+      // after landing.
+      if (c && c.horiz <= ILS_LOCK_MAX_DIST){
+        best = c;
+        locked = true;
+      }
+    } else {
+      // Stale lock (id no longer matches any runway, e.g. after a hot
+      // reload). Clear it so subsequent frames go back to auto-pick.
+      state.ilsLockId = null;
+    }
+  }
+  if (!best){
+    let bestScore = 1e9;
+    for (const ri of runwayInfos){
+      for (const sign of [+1, -1]){
+        const c = _ilsCandidate(ri, hdgDeg, sign);
+        if (!c) continue;
+        if (c.horiz > ILS_MAX_DIST) continue;
+        if (Math.abs(c.lx) > ILS_ALIGN_LAT) continue;
+        if (Math.abs(c.dh) > ILS_ALIGN_HDG) continue;
+        const score = c.horiz + Math.abs(c.lx)*1.5 + Math.abs(c.dh)*40;
+        if (score < bestScore){
+          bestScore = score;
+          best = c;
+        }
+      }
     }
   }
   if (!best){
@@ -17378,11 +17514,12 @@ function drawILSNeedles(hdgDeg){
   const half = Math.min(W, H)/2 - pad;
   ilsCtx.clearRect(0,0,W,H);
 
-  // Backplate inside the panel border.
+  // Backplate inside the panel border. Magenta tint when the player has a
+  // manual lock on so the panel reads at a glance as armed.
   ilsCtx.fillStyle = 'rgba(0,0,0,0.35)';
   ilsCtx.fillRect(cx - half - 4, cy - half - 4, (half + 4)*2, (half + 4)*2);
-  ilsCtx.strokeStyle = '#1e3548';
-  ilsCtx.lineWidth = 1;
+  ilsCtx.strokeStyle = locked ? '#ff66cc' : '#1e3548';
+  ilsCtx.lineWidth = locked ? 1.5 : 1;
   ilsCtx.strokeRect(cx - half - 4, cy - half - 4, (half + 4)*2, (half + 4)*2);
 
   // Faint reference cross + dot scale (real ILS shows 2 dots either side of
@@ -17459,14 +17596,29 @@ function drawILSNeedles(hdgDeg){
   }
 
   // Labels: ILS tag and runway id so the pilot knows what they're chasing.
-  ilsCtx.fillStyle = '#6aa';
-  ilsCtx.font = 'bold 9px ui-monospace, monospace';
-  ilsCtx.textAlign = 'left';
-  ilsCtx.textBaseline = 'top';
-  ilsCtx.fillText('ILS', 4, 4);
-  ilsCtx.fillStyle = '#cfe';
-  ilsCtx.textAlign = 'right';
-  ilsCtx.fillText(best.ri.ap.id, W - 4, 4);
+  // When the player has a manual lock active, paint a magenta "LOCK" tag
+  // on the left and the full lock id on the right so the panel reads as a
+  // deliberate course selection, not the auto-pick. The border colour bump
+  // (handled in the backplate stroke above) doubles the visual cue.
+  if (locked){
+    const lockId = _ilsLockIdFor(best.ri, best.sign);
+    ilsCtx.fillStyle = '#ff66cc';
+    ilsCtx.font = 'bold 9px ui-monospace, monospace';
+    ilsCtx.textAlign = 'left';
+    ilsCtx.textBaseline = 'top';
+    ilsCtx.fillText('LOCK', 4, 4);
+    ilsCtx.textAlign = 'right';
+    ilsCtx.fillText(lockId, W - 4, 4);
+  } else {
+    ilsCtx.fillStyle = '#6aa';
+    ilsCtx.font = 'bold 9px ui-monospace, monospace';
+    ilsCtx.textAlign = 'left';
+    ilsCtx.textBaseline = 'top';
+    ilsCtx.fillText('ILS', 4, 4);
+    ilsCtx.fillStyle = '#cfe';
+    ilsCtx.textAlign = 'right';
+    ilsCtx.fillText(best.ri.ap.id, W - 4, 4);
+  }
   // Bottom "L" / "R" hint for the localizer side, matching the magenta bar.
   ilsCtx.fillStyle = '#ff66cc';
   ilsCtx.textAlign = 'left';
@@ -21625,7 +21777,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','shearEscape','preflight','kneeboard','atisStrip'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -22749,6 +22901,7 @@ updateCamModeUi();
     if (state.crashed) return false;
     if (state.sqkeypadOpen) return false;
     if (state.timekeypadOpen) return false;
+    if (state.ilskeypadOpen) return false;
     return true;
   }
   function openPanel(){
@@ -23011,6 +23164,7 @@ updateCamModeUi();
     if (state.crashed) return false;
     if (state.jumpOpen) return false;
     if (state.timekeypadOpen) return false;
+    if (state.ilskeypadOpen) return false;
     return true;
   }
 
@@ -23183,6 +23337,7 @@ updateCamModeUi();
     if (state.crashed) return false;
     if (state.jumpOpen) return false;
     if (state.sqkeypadOpen) return false;
+    if (state.ilskeypadOpen) return false;
     return true;
   }
 
@@ -23237,6 +23392,184 @@ updateCamModeUi();
         if (p) applyPreset(p.h, p.label);
         return;
       }
+    }
+  });
+})();
+
+
+// ====== ILS LOCK KEYPAD ======
+// Shift+V opens a small overlay listing every runway end in the sim plus an
+// AUTO row that clears the lock. Tapping a row (or pressing the matching
+// digit) sets state.ilsLockId so drawILSNeedles() pins the cross-pointer to
+// that specific threshold instead of the auto-pick. Mirrors the squawk +
+// time-keypad modal pattern (same chrome, same gating, same Esc / Shift+V
+// dismiss). Presets are rebuilt on every open from runwayInfos so a future
+// airport addition lights up here without touching this IIFE.
+(function setupIlsKeypadUi(){
+  const panel  = document.getElementById('ilskeypad');
+  const nowEl  = document.getElementById('ilsNow');
+  const listEl = document.getElementById('ilsPresets');
+  if (!panel || !nowEl || !listEl) return;
+
+  // One entry per choice. Index 0 is always AUTO (clears the lock); the
+  // rest are runway ends in runwayInfos push order, both +1 and -1 signs.
+  // Each row gets a 1-9 keyboard shortcut when it fits in the first nine
+  // slots; extra rows are still clickable but won't bind to a digit (the
+  // panel scrolls). All lookups go through _ilsLockIdFor so the lock id
+  // we store matches exactly what drawILSNeedles() compares against.
+  let presets = [];
+
+  function buildPresets(){
+    presets = [{ key:'0', id:null, label:'AUTO', sub:'auto-pick nearest aligned' }];
+    try {
+      if (typeof runwayInfos === 'undefined' || !runwayInfos) return;
+      for (const ri of runwayInfos){
+        for (const sign of [+1, -1]){
+          let lockId = '';
+          try { lockId = _ilsLockIdFor(ri, sign); } catch(e){ continue; }
+          if (!lockId) continue;
+          // Designator = last two chars of the lock id ("KSEA36" -> "36").
+          const dd = lockId.slice(-2);
+          // Friendly label: airport id + runway designator. Sub-line reads
+          // the airport name so unfamiliar ids ("CV01") don't feel cryptic.
+          const name = (ri.ap && ri.ap.name) || ri.ap.id;
+          presets.push({
+            key: '',                  // filled in below if there's room in 1-9
+            id:  lockId,
+            label: ri.ap.id + ' RWY ' + dd,
+            sub:   name,
+          });
+        }
+      }
+    } catch(e){ /* keep AUTO-only if runwayInfos failed to enumerate */ }
+    for (let i = 1; i < presets.length && i <= 9; i++){
+      presets[i].key = String(i);
+    }
+  }
+
+  function fmtNow(){
+    return state.ilsLockId ? state.ilsLockId : 'AUTO';
+  }
+
+  function refreshNow(){
+    nowEl.textContent = fmtNow();
+    nowEl.classList.toggle('auto', !state.ilsLockId);
+    // Mark the row that matches the current lock as 'cur' so the player
+    // sees at a glance what's already armed.
+    for (const btn of listEl.querySelectorAll('.pr')){
+      const id = btn.dataset.id || '';
+      const matches = state.ilsLockId
+        ? (id === state.ilsLockId)
+        : (id === '');
+      btn.classList.toggle('cur', matches);
+    }
+  }
+
+  function buildList(){
+    let html = '';
+    for (const p of presets){
+      const cls  = 'pr' + (p.id ? '' : ' auto');
+      const num  = p.key ? '<span class="pnum">' + p.key + '</span>'
+                         : '<span class="pnum" style="visibility:hidden">·</span>';
+      const code = p.id ? p.id : 'AUTO';
+      html += '<button type="button" class="' + cls + '" data-id="' + (p.id || '') + '" data-key="' + p.key + '">'
+           +   num
+           +   '<span class="pcode">' + code + '</span>'
+           +   '<span class="plabel">' + p.label + (p.sub ? ' — ' + p.sub : '') + '</span>'
+           + '</button>';
+    }
+    listEl.innerHTML = html;
+    for (const btn of listEl.querySelectorAll('button')){
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        applyById(btn.dataset.id || '');
+      });
+    }
+  }
+
+  function applyById(id){
+    if (!state.ilskeypadOpen) return;
+    const next = id ? id : null;
+    state.ilsLockId = next;
+    refreshNow();
+    // ATC feedback so the choice reads in the radio strip the same way
+    // squawk / heading-bug commits do. AUTO clears with a neutral line.
+    if (next){
+      try { pushATC('ILS locked, ' + next + '.', { tag:'PILOT', now:true }); } catch(e){}
+      try { showStatus('ILS LOCK', next, 'good'); } catch(e){}
+    } else {
+      try { pushATC('ILS unlocked, auto.', { tag:'PILOT', now:true }); } catch(e){}
+      try { showStatus('ILS LOCK', 'AUTO', 'neutral'); } catch(e){}
+    }
+    // Brief feedback hold so the player can confirm the active row was
+    // marked before the modal closes. Matches the squawk preset timing.
+    setTimeout(closePanel, 450);
+  }
+
+  function canOpen(){
+    // Same conservative gate as the other keypads: never on top of
+    // intro / replay / photo / pause / a crash, and never while another
+    // modal is up.
+    if (state.introOpen) return false;
+    if (state.replayActive) return false;
+    if (state.photoMode) return false;
+    if (state.paused) return false;
+    if (state.crashed) return false;
+    if (state.jumpOpen) return false;
+    if (state.sqkeypadOpen) return false;
+    if (state.timekeypadOpen) return false;
+    return true;
+  }
+
+  function openPanel(){
+    if (state.ilskeypadOpen) return;
+    if (!canOpen()) return;
+    state.ilskeypadOpen = true;
+    buildPresets();
+    buildList();
+    refreshNow();
+    panel.classList.add('show');
+    // V is the cockpit quick-look hotkey. Clear any held entry so the
+    // camera doesn't keep yawing while the modal sits open (the player
+    // tapped Shift+V to lock ILS, not to look out the wing).
+    try { if (typeof keys === 'object') keys['KeyV'] = false; } catch(e){}
+  }
+  function closePanel(){
+    if (!state.ilskeypadOpen) return;
+    state.ilskeypadOpen = false;
+    panel.classList.remove('show');
+    try { if (typeof keys === 'object') keys['KeyV'] = false; } catch(e){}
+  }
+
+  // Click background to dismiss; row clicks set the lock (handled above).
+  panel.addEventListener('click', e => {
+    if (e.target === panel) closePanel();
+  });
+
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    // Shift+V toggles the panel. Plain V is the cockpit quick-look bind
+    // owned by the main keydown listener — bail without touching it.
+    if (e.code === 'KeyV' && e.shiftKey){
+      e.preventDefault();
+      if (state.ilskeypadOpen) closePanel();
+      else openPanel();
+      return;
+    }
+    if (!state.ilskeypadOpen) return;
+    if (e.code === 'Escape'){ e.preventDefault(); closePanel(); return; }
+    // Digit0..Digit9 (and Numpad0..Numpad9) select a row. 0 = AUTO,
+    // 1-9 map to the first nine runway ends. Extra rows are still
+    // clickable via the scrolling list.
+    let n = -1;
+    if (e.code.startsWith('Digit'))  n = parseInt(e.code.slice(5), 10);
+    if (e.code.startsWith('Numpad')) n = parseInt(e.code.slice(6), 10);
+    if (Number.isFinite(n) && n >= 0 && n <= 9){
+      e.preventDefault();
+      if (n === 0){ applyById(''); return; }
+      const p = presets[n];
+      if (p && p.id) applyById(p.id);
+      return;
     }
   });
 })();
