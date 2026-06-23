@@ -224,6 +224,16 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
+- [ ] Pre-flight checklist overlay (`Shift+K`) — pop a compact left-side panel with a 6-item checklist (Canopy CLOSED, Parking Brake SET, Fuel CHECK, Trim NEUTRAL, Flaps SET, Pitot/Mixture READY) that auto-checks each row in green as the player satisfies it on the ground; pending items stay amber. Each tick fires a soft sine pip. Pairs with the cold-start ritual + chime test as the third pre-flight beat. Closes with `Shift+K` again, auto-hides on takeoff, hidden in photo mode.
+
+- [ ] Fuel range ring on the mini-map — dashed cyan circle around the plane on the mini-map showing remaining straight-line range at the current GPH burn (radius scales with `fuelL / (gph * 3.785) * cruiseKmh / 3.6`). Bright cyan when you can still reach the nearest airport, fades amber when range < distance to the closest field, red when you literally can't make it. Pairs with the new fuel-flow gauge so the cockpit number turns into a spatial "can I make it?" answer at a glance. Hidden in photo mode.
+
+- [ ] ATIS info loop (`Shift+A`) — pressing `Shift+A` near an airport reads the current automated weather: "<id> information ALFA, winds <DDD> at <NN>, altimeter <inHg>, runway <DD> in use, temperature <TT>, time <HHMM> Zulu." Uses the existing TTS / synth ATC sine call path with letters spelled out ("alfa"). The single-letter info ID rotates per session (ALFA, BRAVO, CHARLIE…), so re-broadcasts within a session match. Toast pill `📻 ATIS · <id> ALFA` flashes for the duration of the call. One-shot per Shift+A press (no looping), hidden in photo/pause/replay/intro.
+
+- [ ] Random emergency landing site finder (`Shift+E`) — when engine is dead or fire is active and you're above 200m AGL, `Shift+E` highlights the nearest landable surface within glide range: nearest airport runway, a flat patch of terrain (sampled via raycasts on a 7×7 grid 1–3 km out), or the carrier deck. Magenta diamond marker drops on the mini-map + a magenta arrow on the HUD points the bearing, with distance + altitude needed for best-glide. Auto-clears when engine restarts or you touch down. Pairs with the deadstick / engine-fire emergencies as the survival hook those scenarios are missing.
+
+- [ ] Taxiway signs at intersections — small black-on-yellow taxiway ID signs (A1, B1, B2) and matching mandatory-instruction red-on-white runway-holding-point signs (HOLD 09-27) on low posts at every taxiway/runway intersection at each ground airport. Pure scenery + immersion bump that finally makes the apron-to-runway taxi feel like a real airport instead of an unmarked strip of asphalt; pairs naturally with the existing taxi guidance arrows and the marshaller. ~50 LOC since signs are just `PlaneGeometry` + canvas-texture letters reusing the runway-number painting helper.
+
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:
 1. Reads this ROADMAP.
