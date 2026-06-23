@@ -581,6 +581,7 @@
   <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
+  <div class="row" id="emrRow" style="display:none"><span class="lbl">EMR</span><span class="val" id="emrReadout" style="color:#ff6cf7;font-weight:700">—</span></div>
   <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
@@ -636,7 +637,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -7317,6 +7318,14 @@ const state = {
   // when the plane passes within 300 m so the pin doesn't stick around after
   // arrival. Free-flight only — scored missions own their own goals.
   waypoint: null,
+  // Emergency landing site finder (Shift+E). When the engine is dead or on
+  // fire and the plane is above 200m AGL, the pilot can ping the nearest
+  // landable surface inside best-glide range: nearest airport runway, the
+  // carrier deck, or a flat patch of terrain sampled on a 7x7 grid 1-3 km out.
+  // Stored as { x, z, elev, id, kind:'airport'|'carrier'|'field' } or null.
+  // Auto-clears when the engine restarts, on touchdown, or on reset. Drawn as
+  // a magenta diamond on the mini-map and a bearing pill on the HUD.
+  emerSite: null,
   // Pitch trim wheel: -1..+1, where +1 = full nose-up bias. Applied to pIn as
   // a constant offset so the pilot can fly hands-off in cruise. Adjust with
   // `;` (nose down) and `'` (nose up); Shift = 1% fine, plain = 5% coarse.
@@ -7735,6 +7744,20 @@ addEventListener('keydown', e=>{
       pushATC('Direct to waypoint, ' + distKm.toFixed(1) + ' km.', { tag:'PILOT' });
     }
   }
+  if (e.code==='KeyE' && e.shiftKey){
+    // Shift+E: emergency landing site finder. Only useful when the engine is
+    // dead or on fire AND we're high enough to glide somewhere (>200m AGL),
+    // so we gate on that here and toast the pilot if conditions aren't met.
+    // KeyE is also yaw-right in the global `keys` map; clear it on the same
+    // frame so a Shift+E ping doesn't fire a stray yaw input (mirrors the
+    // Shift+A ATIS handler's pattern with KeyA).
+    e.preventDefault();
+    keys['KeyE'] = false;
+    if (state.introOpen || state.replayActive || state.photoMode || state.paused) return;
+    if (state.crashed || state.onGround) return;
+    findEmergencyLandingSite();
+    return;
+  }
   if (e.code==='Semicolon' || e.code==='Quote'){
     // Pitch trim wheel. `;` = nose down, `'` = nose up. Plain = 5% coarse,
     // Shift = 1% fine. Skip while the intro modal is up (no flight yet) and
@@ -7834,6 +7857,163 @@ function lookAllowed(){
   if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
   if (state.crashed) return false;
   return true;
+}
+
+// ====== EMERGENCY LANDING SITE FINDER (Shift+E) ======
+// When the engine is dead or on fire and the plane is above ~200m AGL, the
+// pilot pings Shift+E to highlight the nearest landable surface inside
+// best-glide range. Considers every real airport runway, the carrier deck,
+// and a 7x7 grid of terrain samples 1-3 km out (so a flat patch of grass
+// can be the answer when no runway is reachable). Picks the closest viable
+// candidate, drops it into state.emerSite so the mini-map + HUD pill light
+// up, and toasts the pilot with bearing/distance/altitude-needed. Auto-clear
+// is owned by the per-frame block that updates emrRow (engine restart /
+// touchdown / out of glide range / mode change / reset).
+//
+// Best-glide model: simple still-air glide ratio. A clean dirty-prop
+// windmilling airframe at idle stretches ~10:1 in this sim (matches the
+// existing engine-out tuning where you've got real time to find a strip).
+// We use 9:1 as a slightly pessimistic cushion so the picker doesn't pick
+// a runway you'd have to slam into at zero margin.
+const EMER_GLIDE_RATIO = 9;     // metres horizontal per metre vertical (still air)
+const EMER_MIN_AGL = 200;       // m AGL — below this, a finder is theatre, not help
+const EMER_FIELD_SCAN_MIN = 1000;   // m — inner radius of terrain scan
+const EMER_FIELD_SCAN_MAX = 3000;   // m — outer radius of terrain scan
+const EMER_FIELD_GRID = 7;          // 7x7 sample grid (49 samples + cheap)
+const EMER_FIELD_FLATNESS_M = 4;    // peak-trough delta over 4 neighbour offsets to call it "flat"
+const EMER_FIELD_MAX_SLOPE = 0.07;  // ~4° max tilt to count as landable
+
+// True when the engine is currently in a bad-enough state that the finder
+// should be allowed to fire. Engine-out OR engine-fire both qualify; a
+// healthy engine has no business calling 'mayday'.
+function emerEligibleEngine(){
+  return !!(state.engineOut || state.engineFire);
+}
+
+// Cheap flatness check at (x,z): sample terrain at 4 cardinal offsets +/-30m
+// and at the centre. Reject if any sample is over water (negative elev),
+// over the carrier deck, or if the peak-trough spread crosses our flatness
+// threshold, or if any single sample's slope from centre is too steep.
+function emerFieldFlatness(x, z){
+  const c = terrainHeight(x, z);
+  if (c < 1.0) return null;                 // ocean / lake — not landable
+  if (carrierDeckHeight(x, z) !== null) return null; // deck is a separate kind
+  const off = 30;
+  const samples = [
+    terrainHeight(x + off, z),
+    terrainHeight(x - off, z),
+    terrainHeight(x, z + off),
+    terrainHeight(x, z - off),
+  ];
+  let lo = c, hi = c;
+  for (const s of samples){
+    if (s < 1.0) return null;
+    if (Math.abs(s - c) / off > EMER_FIELD_MAX_SLOPE) return null;
+    if (s < lo) lo = s;
+    if (s > hi) hi = s;
+  }
+  if (hi - lo > EMER_FIELD_FLATNESS_M) return null;
+  return c;
+}
+
+function findEmergencyLandingSite(){
+  if (!emerEligibleEngine()){
+    showStatus('EMERGENCY FINDER', 'engine is fine — nothing to do', 'hard');
+    return;
+  }
+  // AGL gate. Below 200m AGL there's not enough glide energy for the finder
+  // to mean anything — pilot needs to commit straight ahead, not chase a pin.
+  const terr = terrainHeight(plane.position.x, plane.position.z);
+  const agl = plane.position.y - Math.max(0, terr) - GEAR_H;
+  if (agl < EMER_MIN_AGL){
+    showStatus('TOO LOW FOR FINDER', '< ' + EMER_MIN_AGL + ' m AGL — commit ahead', 'hard');
+    return;
+  }
+
+  // Best-glide reach from current MSL altitude. We don't care about
+  // headwind/tailwind tuning here; pilot reads bearing/distance and decides.
+  const altMsl = plane.position.y;
+  const reach = Math.max(0, altMsl) * EMER_GLIDE_RATIO;
+
+  const candidates = [];
+
+  // Real airports: distance to each airport centre. The runway itself is
+  // long enough that "centre" is a fair stand-in for "a strip you can touch
+  // down on" without needing to project onto the runway line.
+  for (const a of AIRPORTS){
+    const dx = a.x - plane.position.x;
+    const dz = a.z - plane.position.z;
+    const d  = Math.hypot(dx, dz);
+    candidates.push({ kind:'airport', id:a.id, x:a.x, z:a.z, elev:a.elev, d });
+  }
+  // Carrier deck — count as an airport-class surface (it's literally a
+  // designated runway in this sim).
+  {
+    const dx = CARRIER.x - plane.position.x;
+    const dz = CARRIER.z - plane.position.z;
+    const d  = Math.hypot(dx, dz);
+    candidates.push({ kind:'carrier', id:CARRIER.id, x:CARRIER.x, z:CARRIER.z, elev:CARRIER.elev, d });
+  }
+  // Terrain field scan: 7x7 grid of (x,z) sample points spread over an
+  // annulus 1-3 km around the plane, oriented along world axes (cheap and
+  // deterministic). Pick the flattest reachable patch as the field option.
+  const span = EMER_FIELD_SCAN_MAX * 2;
+  const step = span / (EMER_FIELD_GRID - 1);
+  let bestField = null, bestFieldD = 1e9;
+  for (let i = 0; i < EMER_FIELD_GRID; i++){
+    for (let j = 0; j < EMER_FIELD_GRID; j++){
+      const fx = plane.position.x + (-EMER_FIELD_SCAN_MAX + i * step);
+      const fz = plane.position.z + (-EMER_FIELD_SCAN_MAX + j * step);
+      const d = Math.hypot(fx - plane.position.x, fz - plane.position.z);
+      if (d < EMER_FIELD_SCAN_MIN || d > EMER_FIELD_SCAN_MAX) continue;
+      const flatElev = emerFieldFlatness(fx, fz);
+      if (flatElev === null) continue;
+      if (d < bestFieldD){ bestFieldD = d; bestField = { kind:'field', id:'FIELD', x:fx, z:fz, elev:flatElev, d }; }
+    }
+  }
+  if (bestField) candidates.push(bestField);
+
+  if (candidates.length === 0){
+    showStatus('NO LANDING SITE', 'commit straight ahead', 'hard');
+    return;
+  }
+
+  // Score: prefer reachable runway-class surfaces over fields, then by
+  // shortest distance inside the glide cone. Out-of-glide candidates only
+  // win if nothing inside glide is available (gives the pilot SOMETHING to
+  // aim at instead of "nope").
+  candidates.sort((a, b) => {
+    const aRunway = (a.kind !== 'field') ? 0 : 1;
+    const bRunway = (b.kind !== 'field') ? 0 : 1;
+    const aReach = (a.d <= reach) ? 0 : 1;
+    const bReach = (b.d <= reach) ? 0 : 1;
+    // First key: reachable beats out-of-glide.
+    if (aReach !== bReach) return aReach - bReach;
+    // Second key: runway/carrier beats field when both are reachable.
+    if (aRunway !== bRunway) return aRunway - bRunway;
+    // Third: nearest wins.
+    return a.d - b.d;
+  });
+
+  const pick = candidates[0];
+  state.emerSite = { x: pick.x, z: pick.z, elev: pick.elev, id: pick.id, kind: pick.kind };
+  const distKm = (pick.d / 1000).toFixed(pick.d < 5000 ? 2 : 1);
+  const altNeededM = Math.max(0, Math.round((pick.d / EMER_GLIDE_RATIO) - (altMsl - pick.elev)));
+  const reachable = (pick.d <= reach);
+  const detail =
+    pick.kind === 'airport'  ? pick.id + ' · ' + distKm + ' km' :
+    pick.kind === 'carrier'  ? 'CARRIER · ' + distKm + ' km' :
+                               'OPEN FIELD · ' + distKm + ' km';
+  const tone = reachable ? 'good' : 'hard';
+  showStatus(reachable ? 'EMERGENCY SITE' : 'BEYOND GLIDE',
+             reachable ? detail : detail + ' (need +' + altNeededM + ' m)',
+             tone);
+  pushATC('Mayday, mayday, divert to ' +
+          (pick.kind === 'airport' ? pick.id :
+           pick.kind === 'carrier' ? CARRIER.id :
+                                     'open field') +
+          ', ' + distKm + ' kilometres.',
+          { tag:'PILOT', now:true });
 }
 
 // ====== MOBILE TOUCH CONTROLS ======
@@ -8686,6 +8866,10 @@ function resetPlane(){
   // Mini-map waypoint is a per-flight target — reset clears the pin so the
   // next sortie starts with a clean map (matches trim, which also resets).
   state.waypoint = null;
+  // Emergency landing site — same lifecycle as the waypoint pin: a per-flight
+  // pointer that should not survive a reset, otherwise the magenta diamond
+  // would hover on the new sortie's map for no reason.
+  state.emerSite = null;
   // Trim is a per-flight setting — a fresh reset wipes it back to neutral
   // so the next takeoff doesn't have the elevator pre-loaded from last cruise.
   state.trim = 0;
@@ -11958,6 +12142,47 @@ function step(dt){
     wpRow.style.display = 'none';
   }
 
+  // Emergency landing site HUD row + auto-clear. Lit while state.emerSite is
+  // set; auto-clears on touchdown, reset, mode change, when the engine comes
+  // back, or when we glide past the site (within 250m). Shows bearing,
+  // distance, and (if still reachable) the altitude margin in metres above
+  // a 9:1 best-glide cone so the pilot can verify they still have the energy.
+  // Out-of-glide picks light up as red so the player can see they need to
+  // stretch a different way or commit to a closer field.
+  const emrRow = document.getElementById('emrRow');
+  if (state.emerSite){
+    const edx = state.emerSite.x - plane.position.x;
+    const edz = state.emerSite.z - plane.position.z;
+    const eDist = Math.hypot(edx, edz);
+    const engineBack = !emerEligibleEngine();
+    if (state.onGround || state.crashed || engineBack || eDist < 250){
+      // engineBack covers a deadstick restart / fire put-out;
+      // onGround/crashed cover touchdown / reset; eDist<250 means the pilot
+      // glided right over the spot so there's nothing more to point at.
+      state.emerSite = null;
+      emrRow.style.display = 'none';
+    } else {
+      emrRow.style.display = 'flex';
+      const brgRad = Math.atan2(edx, -edz);
+      const brgDeg = ((Math.round(brgRad * 180/Math.PI) % 360) + 360) % 360;
+      const altMargin = Math.round((plane.position.y - state.emerSite.elev) - (eDist / EMER_GLIDE_RATIO));
+      const reachable = altMargin >= 0;
+      const lbl =
+        state.emerSite.kind === 'airport' ? state.emerSite.id :
+        state.emerSite.kind === 'carrier' ? 'CV' :
+                                            'FLD';
+      const marginStr = reachable
+        ? ' · +' + altMargin + ' m'
+        : ' · −' + Math.abs(altMargin) + ' m';
+      const readoutEl = document.getElementById('emrReadout');
+      readoutEl.textContent =
+        lbl + ' ' + String(brgDeg).padStart(3,'0') + '° / ' + (eDist/1000).toFixed(1) + ' km' + marginStr;
+      readoutEl.style.color = reachable ? '#ff6cf7' : '#ff5252';
+    }
+  } else {
+    emrRow.style.display = 'none';
+  }
+
   // Trim HUD row: hidden when neutral so the panel stays tidy on a fresh
   // takeoff. Arrow points the way the trim is biasing the nose (▲ = nose up,
   // ▼ = nose down), and the percentage shows how far the wheel is wound off
@@ -13897,6 +14122,56 @@ function drawMinimap(hdgDeg){
       minimapCtx.closePath();
       minimapCtx.fill();
       minimapCtx.restore();
+    }
+    minimapCtx.restore();
+  }
+  // Emergency landing site marker — flashing magenta diamond at the site, or
+  // a flashing tick on the rim if the site is off-map. Sits above the
+  // waypoint pin layer so when both are dropped on the same field the
+  // emergency target wins the eye. Pulses ~3 Hz so it reads as a warning,
+  // not just a second pin. Pure HUD overlay; the per-frame block above
+  // owns lifecycle (auto-clear, etc.).
+  if (state.emerSite){
+    const edx = state.emerSite.x - plane.position.x;
+    const edz = state.emerSite.z - plane.position.z;
+    const epx = cx + edx * scale;
+    const epy = cy + edz * scale;
+    const insideE = (epx >= 4 && epx <= W-4 && epy >= 4 && epy <= H-4);
+    const pulseE = 0.55 + 0.45 * Math.abs(Math.sin(performance.now() * 0.009));
+    minimapCtx.save();
+    minimapCtx.globalAlpha = pulseE;
+    if (insideE){
+      // Larger diamond than the waypoint pin (8 px vs 5 px) with an extra
+      // pulsing halo so it's unmistakable even on a busy approach map.
+      minimapCtx.fillStyle = '#ff6cf7';
+      minimapCtx.strokeStyle = '#ffffff';
+      minimapCtx.lineWidth = 1.5;
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(epx, epy - 8);
+      minimapCtx.lineTo(epx + 8, epy);
+      minimapCtx.lineTo(epx, epy + 8);
+      minimapCtx.lineTo(epx - 8, epy);
+      minimapCtx.closePath();
+      minimapCtx.fill();
+      minimapCtx.stroke();
+      minimapCtx.beginPath();
+      minimapCtx.arc(epx, epy, 12, 0, Math.PI*2);
+      minimapCtx.stroke();
+    } else {
+      // Off-rim chevron pointing at the site bearing so the pilot can read
+      // "the emergency target is THAT way" even when it's beyond the map.
+      const eAng = Math.atan2(edz, edx);
+      const eRimX = cx + Math.cos(eAng) * (R - 6);
+      const eRimY = cy + Math.sin(eAng) * (R - 6);
+      minimapCtx.translate(eRimX, eRimY);
+      minimapCtx.rotate(eAng + Math.PI/2);
+      minimapCtx.fillStyle = '#ff6cf7';
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(0, -8);
+      minimapCtx.lineTo(-6, 4);
+      minimapCtx.lineTo( 6, 4);
+      minimapCtx.closePath();
+      minimapCtx.fill();
     }
     minimapCtx.restore();
   }
