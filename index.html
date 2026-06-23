@@ -673,6 +673,7 @@
     <div class="row"><span class="name">LOOPS</span><span class="val" id="stLoops">0</span></div>
     <div class="row"><span class="name">AILERON ROLLS</span><span class="val" id="stRolls">0</span></div>
     <div class="row"><span class="name">FORMATIONS</span><span class="val" id="stFormations">0</span></div>
+    <div class="row"><span class="name">🤝 WINGS WAGGED</span><span class="val" id="stWingsWagged">0</span></div>
     <div class="row"><span class="name">🍔 BURGERS EATEN</span><span class="val" id="stBurgers">0</span></div>
     <div class="row"><span class="name">BEST T&amp;G STREAK</span><span class="val" id="stTg">0</span></div>
     <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
@@ -863,6 +864,7 @@ const STATS_DEFAULT = {
   loops: 0,                // 360° pitch loops completed (acrobat tracker)
   rolls: 0,                // 360° aileron rolls completed (acrobat tracker)
   formations: 0,           // formation-flight sessions with AI traffic (5s+ in close parallel)
+  wingsWagged: 0,          // wing-wave greetings exchanged with the AI plane (lifetime counter)
   burgers: 0,              // "100-dollar hamburger" — full-stop lands at the rotating OPEN-FOR-LUNCH airport
   bestTgStreak: 0,         // longest touch-and-go streak (touchdown+lift-off within 12s, no full-stop)
   perfectLandings: 0       // count of landings scored 300+ (used by rank progression)
@@ -3560,7 +3562,8 @@ const aiState = {
   leg: 0,                 // current waypoint index
   pos: new THREE.Vector3(),
   heading: MAIN_AP.hdg,   // radians, 0 = north (-z)
-  bank: 0                 // current visual roll for smoothing
+  bank: 0,                // current visual roll for smoothing
+  waveBank: 0             // additive roll overlay used by the wing-wave greeting (radians, signed)
 };
 // Spawn somewhere on downwind so it shows up immediately.
 {
@@ -3610,7 +3613,7 @@ function updateAITraffic(dt){
   aiPlane.position.copy(aiState.pos);
   aiPlane.rotation.set(0, 0, 0);
   aiPlane.rotateY(aiState.heading);
-  aiPlane.rotateZ(-aiState.bank);
+  aiPlane.rotateZ(-aiState.bank + aiState.waveBank);
   // Mild nose attitude tracking the climb/descent.
   aiPlane.rotateX(Math.max(-0.18, Math.min(0.18, -vy * 0.05)));
   aiProp.rotation.z += dt * 60;
@@ -3782,7 +3785,7 @@ function updateWingmanLead(dt){
   aiPlane.position.copy(aiState.pos);
   aiPlane.rotation.set(0, 0, 0);
   aiPlane.rotateY(aiState.heading);
-  aiPlane.rotateZ(-aiState.bank);
+  aiPlane.rotateZ(-aiState.bank + aiState.waveBank);
   aiPlane.rotateX(Math.max(-0.18, Math.min(0.18, -vy * 0.05)));
   aiProp.rotation.z += dt * 60;
   const distToPlayer = aiPlane.position.distanceTo(plane.position);
@@ -8522,6 +8525,114 @@ function updateAcrobat(dt){
   _acroQPrev.copy(plane.quaternion);
 }
 
+// ====== WING-WAVE GREETING ======
+// Classic pilot social moment: when you fly close to the AI plane and wag
+// your wings (roll past ±25° twice within 3s in alternating directions),
+// fire a one-shot "WAVE" toast, bump a lifetime counter, and have the AI
+// plane wag back with two eased ±20° rolls over 1.5s. Achievement-style one
+// per session, but the WINGS WAGGED stat is permanent across the lifetime.
+const WAVE_PROX_M        = 250;   // m — max 3D distance to AI plane to count as "in range"
+const WAVE_TRIGGER_DEG   = 25;    // deg — player roll threshold each wag crosses
+const WAVE_RESET_DEG     = 8;     // deg — must dip back inside this band before a re-trigger fires
+const WAVE_WINDOW_SEC    = 3.0;   // s — max time between the first and last wag of the pattern
+const WAVE_COOLDOWN_SEC  = 12;    // s — wait before another wave can fire (prevents social-toast spam)
+const WAVE_AI_DURATION   = 1.5;   // s — AI wag-back animation length
+const WAVE_AI_PEAK_DEG   = 20;    // deg — AI wag-back peak bank amplitude
+const _waveTmpE = new THREE.Euler();
+const waveState = {
+  taps: [],          // recent zero-crossing taps: { side:-1|+1, t:seconds-from-init }
+  armed: true,       // true when player roll is back inside WAVE_RESET_DEG (ready for a new tap)
+  cooldownSec: 0,    // remaining lockout before another wave fires
+  firedThisSession: false, // achievement-style toast only fires once per page load
+  aiT: 0,            // remaining time in AI wag-back animation
+  clock: 0           // running seconds counter so tap timestamps can be aged out
+};
+function updateWingWave(dt){
+  if (dt <= 0) return;
+  waveState.clock += dt;
+  // Animate any in-progress AI wag-back regardless of pause gates so a
+  // brief overlay pop-in doesn't get stranded. Reset to 0 when done.
+  if (waveState.aiT > 0){
+    waveState.aiT = Math.max(0, waveState.aiT - dt);
+    // Two ease-in-out cycles over WAVE_AI_DURATION → sin(2*PI * progress)
+    // gives one left, one right, ending level. Multiplied by an envelope
+    // that fades the peak in over the first 15% and out over the last 25%.
+    const progress = 1 - (waveState.aiT / WAVE_AI_DURATION); // 0..1
+    const env = progress < 0.15 ? (progress / 0.15)
+              : progress > 0.75 ? Math.max(0, (1 - progress) / 0.25)
+              : 1;
+    const peakRad = THREE.MathUtils.degToRad(WAVE_AI_PEAK_DEG);
+    aiState.waveBank = Math.sin(progress * Math.PI * 2) * peakRad * env;
+    if (waveState.aiT <= 0) aiState.waveBank = 0;
+  } else if (aiState.waveBank !== 0){
+    aiState.waveBank = 0;
+  }
+  // Don't run detection during pause / replay / photo / intro / crash / ground.
+  // The AI animation above still ticks so a wave kicked off just before a
+  // pause finishes cleanly when the sim resumes.
+  if (state.paused || state.replayActive || state.photoMode || state.introOpen) return;
+  if (state.onGround || state.crashed) return;
+  if (!aiPlane.visible) return;
+  if (waveState.cooldownSec > 0){
+    waveState.cooldownSec = Math.max(0, waveState.cooldownSec - dt);
+  }
+  // Proximity gate — only meaningful when the AI plane is actually close.
+  const dist3 = aiPlane.position.distanceTo(plane.position);
+  if (dist3 > WAVE_PROX_M){
+    // Drift away → forget any in-flight pattern so a separate later wag
+    // doesn't accidentally combine with a stale tap.
+    if (waveState.taps.length) waveState.taps.length = 0;
+    return;
+  }
+  // Read player roll (degrees, signed). YXZ order keeps roll on .z without
+  // the gimbal flip that XYZ hits near vertical.
+  _waveTmpE.setFromQuaternion(plane.quaternion, 'YXZ');
+  const rollDeg = THREE.MathUtils.radToDeg(_waveTmpE.z);
+  const absRoll = Math.abs(rollDeg);
+  // Re-arm when the player levels out below the reset band so a long-held
+  // bank only counts as one tap (no continuous trigger spam).
+  if (absRoll < WAVE_RESET_DEG) waveState.armed = true;
+  // Tap fires the instant we cross WAVE_TRIGGER_DEG on either side, but only
+  // if the previous bank dipped back inside WAVE_RESET_DEG first (the armed
+  // flag enforces that). Each tap records the bank side (+1 = right wing
+  // down, -1 = left wing down) and the timestamp.
+  if (waveState.armed && absRoll >= WAVE_TRIGGER_DEG){
+    const side = rollDeg > 0 ? 1 : -1;
+    waveState.taps.push({ side, t: waveState.clock });
+    waveState.armed = false;
+    // Trim taps older than the rolling window so the array never grows.
+    while (waveState.taps.length && (waveState.clock - waveState.taps[0].t) > WAVE_WINDOW_SEC){
+      waveState.taps.shift();
+    }
+  }
+  // Need 3 alternating taps within WAVE_WINDOW_SEC (e.g. R→L→R or L→R→L)
+  // to count as a deliberate wave. Two taps would fire on any clean roll
+  // reversal; three forces the rhythm of an actual greeting.
+  if (waveState.cooldownSec > 0) return;
+  if (waveState.taps.length < 3) return;
+  const n = waveState.taps.length;
+  const a = waveState.taps[n - 3];
+  const b = waveState.taps[n - 2];
+  const c = waveState.taps[n - 1];
+  const altern = (a.side !== b.side) && (b.side !== c.side);
+  const span = c.t - a.t;
+  if (!altern || span > WAVE_WINDOW_SEC) return;
+  // Pattern matched — fire the greeting.
+  waveState.taps.length = 0;
+  waveState.armed = false;
+  waveState.cooldownSec = WAVE_COOLDOWN_SEC;
+  waveState.aiT = WAVE_AI_DURATION;
+  pilotStats.wingsWagged = (pilotStats.wingsWagged || 0) + 1;
+  savePilotStats();
+  if (!waveState.firedThisSession){
+    waveState.firedThisSession = true;
+    if (typeof showToast === 'function'){
+      showToast('\u{1F91D}', 'WAVE', 'Wing-wave with the AI plane \u2014 every pilot\u2019s favorite hello.');
+    }
+  }
+  if (typeof pushATC === 'function') pushATC('Good wave, see you out there.', { tag:'TWR' });
+}
+
 function step(dt){
   // Cold-start ritual: tick the ignition timer here so the legacy throttle
   // path stays untouched. Throttle pinning lives inside the throttle branch
@@ -10016,6 +10127,11 @@ function step(dt){
   // Acrobat tracker: watch for completed 360° pitch loops / aileron rolls
   // and bump pilotStats + toast when one lands. Cheap, runs once per step.
   updateAcrobat(dt);
+
+  // Wing-wave greeting: detect the classic two-tap roll ±pattern next to
+  // the AI plane and have it wag back. Always ticks so the wag animation
+  // finishes even if the player pauses mid-greeting.
+  updateWingWave(dt);
 
   drawAttitude(plane.quaternion);
   drawCompass(hdg, state.ap.hdgBug);
@@ -13231,6 +13347,7 @@ addEventListener('keydown', e => {
     loops:    document.getElementById('stLoops'),
     rolls:    document.getElementById('stRolls'),
     formations: document.getElementById('stFormations'),
+    wingsWagged: document.getElementById('stWingsWagged'),
     burgers:  document.getElementById('stBurgers'),
     tgStreak: document.getElementById('stTg'),
     perfect:  document.getElementById('stPerfect'),
@@ -13250,6 +13367,7 @@ addEventListener('keydown', e => {
     if (cells.loops) cells.loops.textContent = pilotStats.loops || 0;
     if (cells.rolls) cells.rolls.textContent = pilotStats.rolls || 0;
     if (cells.formations) cells.formations.textContent = pilotStats.formations || 0;
+    if (cells.wingsWagged) cells.wingsWagged.textContent = pilotStats.wingsWagged || 0;
     if (cells.burgers) cells.burgers.textContent = pilotStats.burgers || 0;
     if (cells.tgStreak) cells.tgStreak.textContent = pilotStats.bestTgStreak || 0;
     if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
