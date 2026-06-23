@@ -12472,7 +12472,26 @@ function step(dt){
       plane.quaternion.setFromEuler(new THREE.Euler(newPitch, eaY, newRoll, 'YXZ'));
       const groundSpeed = Math.hypot(state.vel.x, state.vel.z);
       if (groundSpeed > 1){
-        const yawRate = yIn * 0.9 + rIn * 0.35;
+        // Engine torque / P-factor: single-engine props pull the nose left
+        // on full-throttle takeoff rolls. Scales with throttle² so half power
+        // barely tugs, and with a speedFactor that's 1 at brake-release and
+        // fades to 0 by ~80 km/h ground speed (lift-off speed range) — pure
+        // ground effect, no torque bias once airborne. Reverse thrust on
+        // rollout flips sign so the nose pulls the opposite way during a
+        // hard reverse. Skipped on twin-engine config since P-factor mostly
+        // cancels with counter-rotating-style symmetric thrust readout.
+        let torqueBias = 0;
+        if (!settings.twinEngine && engineLiveForRev && state.throttle > 0.05){
+          const gsKmh = groundSpeed * 3.6;
+          const speedFactor = Math.max(0, 1 - gsKmh / 80);
+          // Peak ~0.13 rad/s at full throttle from a standstill — small
+          // enough that ~0.15 right rudder (yIn≈+0.17) cleanly cancels it,
+          // but big enough that ignoring it walks the nose off centerline
+          // over a 30s takeoff roll. Negative = left swing.
+          torqueBias = -0.13 * state.throttle * state.throttle * speedFactor;
+          if (revActive) torqueBias = -torqueBias;
+        }
+        const yawRate = yIn * 0.9 + rIn * 0.35 + torqueBias;
         const ang = -yawRate * dt;
         const cs = Math.cos(ang), sn = Math.sin(ang);
         const nx = state.vel.x*cs - state.vel.z*sn;
