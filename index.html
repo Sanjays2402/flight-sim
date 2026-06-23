@@ -18260,9 +18260,46 @@ function step(dt){
       tmpE.setFromQuaternion(plane.quaternion, 'YXZ');
       const eaY = tmpE.y;
       const newPitch = tmpE.x * Math.exp(-3*dt);
-      const newRoll  = tmpE.z * Math.exp(-3*dt);
+      let newRoll  = tmpE.z * Math.exp(-3*dt);
+      // Engine torque roll on takeoff: a spinning prop pulls the airframe
+      // the opposite way by Newton's third law, so a left-turning prop at
+      // high throttle wants to roll the airframe LEFT. Wings are pinned by
+      // the gear so the plane only leans a few degrees, but the lean is
+      // visible + adds a small left-yaw nudge through the existing aileron
+      // -> ground-yaw coupling below. Pilot counters with right rudder
+      // (cancels the yaw walk) and a touch of right aileron (cancels the
+      // lean) — exactly the takeoff cue a student pilot trains for.
+      //
+      // Gates: single engine only (twin counter-cancels), engine live, the
+      // brake-release-to-rotation window (throttle >80%, ground speed under
+      // ~80 km/h, fading to zero by 100 km/h so cruise + climb stay clean).
+      // Reverse thrust flips sign so a hard rollout reverser briefly tugs
+      // the opposite way, matching the existing yaw-bias behavior.
+      const _gsKmhRoll = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+      if (!settings.twinEngine && engineLiveForRev && state.throttle > 0.8 && _gsKmhRoll < 100){
+        // Linear roll-in past the 80% throttle gate so the lean kicks in
+        // sharply once the pilot firewalls it.
+        const thrFactor = (state.throttle - 0.8) / 0.2;
+        // 1 at brake-release, 0 at 100 km/h — pure ground-roll effect.
+        const speedFactor = Math.max(0, 1 - _gsKmhRoll / 100);
+        // Peak ~0.04 rad/s left-roll bias at full throttle from a standstill
+        // (per spec). Negative = left wing drops.
+        let rollTorqueBias = -0.04 * thrFactor * speedFactor;
+        if (revActive) rollTorqueBias = -rollTorqueBias;
+        newRoll += rollTorqueBias * dt;
+      }
       plane.quaternion.setFromEuler(new THREE.Euler(newPitch, eaY, newRoll, 'YXZ'));
-      const groundSpeed = Math.hypot(state.vel.x, state.vel.z);
+      // Aileron authority on the ground: small but real, so the pilot can
+      // physically counter the torque lean above by feeding right aileron.
+      // Scales with ground speed so a parked plane with the stick over
+      // doesn't tilt on its tires. Only applies on the runway / apron / grass
+      // (anywhere on the ground) and only if any aileron is actually held.
+      const _gsForAil = Math.hypot(state.vel.x, state.vel.z);
+      if (Math.abs(rIn) > 0.01 && _gsForAil > 3){
+        const ailGroundAuth = Math.min(1, _gsForAil / 25) * 0.5 * settings.sensitivity;
+        plane.rotateZ(-rIn * ailGroundAuth * dt);
+      }
+      const groundSpeed = _gsForAil;
       if (groundSpeed > 1){
         // Engine torque / P-factor: single-engine props pull the nose left
         // on full-throttle takeoff rolls. Scales with throttle² so half power
