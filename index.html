@@ -9926,6 +9926,12 @@ const state = {
   // flash on far cells. Everything resets on resetPlane() so a mission
   // restart re-rolls the storm timeline cleanly.
   lightning: { nextStrikeMs: 0, flashT: 0, flashDur: 0, peakAlpha: 0, pendingThunder: [] },
+  // Storm cells visualized on the weather radar. Each entry is a cell drifting
+  // on the wind: { x, z, r, sev, age, ttl, fade }. sev 0..1 picks amber→red
+  // tint, fade 0..1 eases in on spawn + eases out when rain toggles off so
+  // cells melt off the scope instead of popping out. Reset on resetPlane().
+  stormCells: [],
+  stormCellsNextSpawnMs: 0,
   stall: 0,
   vortex: 0,
   // Crash report card data: peakG and peakSink track the worst values seen
@@ -12728,6 +12734,13 @@ function resetPlane(){
     state.lightning.flashDur = 0;
     state.lightning.peakAlpha = 0;
     state.lightning.pendingThunder.length = 0;
+  }
+  // Storm cells — wipe the radar painted cells + reset the spawn scheduler
+  // so a fresh sortie starts with a clean scope. If rain is on, the next
+  // updateStormCells() tick will seed a fresh set within ~1s.
+  if (state.stormCells){
+    state.stormCells.length = 0;
+    state.stormCellsNextSpawnMs = 0;
   }
   // Active-runway change suggestion latches — mission restart wipes the
   // per-airport one-shot map so a fresh sortie re-evaluates wind vs lineup
@@ -22246,6 +22259,59 @@ function drawWeatherRadar(){
     ctx.fillStyle = g;
     ctx.fillRect(px - blobR, py - blobR, blobR * 2, blobR * 2);
   }
+  // Storm cells — painted ON TOP of the cloud blobs so the player can clearly
+  // see which weather is actual rain/storm vs just scattered cloud. Cells use
+  // amber→red gradients (heavier than the green/amber cloud paint) and scale
+  // their painted radius to the cell's world radius so a 3 km supercell really
+  // looks like a blob you'd want to detour around.
+  if (state.stormCells && state.stormCells.length){
+    for (let i = 0; i < state.stormCells.length; i++){
+      const c = state.stormCells[i];
+      if (c.fade <= 0.01) continue;
+      const dx = c.x - plane.position.x;
+      const dz = c.z - plane.position.z;
+      const px = cx + dx * scale;
+      const py = cy + dz * scale;
+      // World-radius → panel pixels, with a soft floor so small cells still
+      // read on the narrow panel, and a soft cap so a giant cell doesn't
+      // swallow the whole scope.
+      const cellR = Math.max(8, Math.min(38, c.r * scale));
+      if (px < -cellR || px > W + cellR || py < -cellR || py > H + cellR) continue;
+      // Severity 0⁤0.5 stays amber, 0.5⁤1.0 shifts to red. Multiply by fade
+      // so cells ease in/out without popping.
+      const f = c.fade;
+      const sev = c.sev;
+      // Two-stop palette: core hot, edge mid, fades to transparent.
+      let core, mid;
+      if (sev < 0.55){
+        // amber cell — building storm
+        const a1 = (0.78 * f).toFixed(3);
+        const a2 = (0.40 * f).toFixed(3);
+        core = `rgba(255,180,60,${a1})`;
+        mid  = `rgba(230,120,40,${a2})`;
+      } else {
+        // red cell — mature storm
+        const a1 = (0.85 * f).toFixed(3);
+        const a2 = (0.45 * f).toFixed(3);
+        core = `rgba(255,90,70,${a1})`;
+        mid  = `rgba(220,55,45,${a2})`;
+      }
+      const g2 = ctx.createRadialGradient(px, py, 1, px, py, cellR);
+      g2.addColorStop(0,    core);
+      g2.addColorStop(0.5,  mid);
+      g2.addColorStop(1,    'rgba(0,0,0,0)');
+      ctx.fillStyle = g2;
+      ctx.fillRect(px - cellR, py - cellR, cellR * 2, cellR * 2);
+      // Hot core dot in the centre of mature cells — sells the "this one’s
+      // dangerous" read at a glance without needing a legend.
+      if (sev >= 0.7){
+        ctx.fillStyle = `rgba(255,240,210,${(0.65 * f).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(px, py, Math.min(3.5, cellR * 0.18), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
   ctx.globalCompositeOperation = 'source-over';
   // Sweep wedge — a soft trailing arc that fades behind the leading edge.
   // ~1 revolution every 4 seconds; reads clearly without distracting. The
@@ -25251,6 +25317,109 @@ function playThunderRumble(distance){
 // off (one boolean check). When rain is on it picks a fresh strike every
 // 3-6 min, eases the white overlay alpha down per frame, and pumps any
 // pending delayed thunder rumbles past their playAt cutoff.
+// ====== STORM CELL VISUALIZATION (weather radar) ======
+// Spawns 1–3 amber/red storm cells that drift on the surface wind whenever
+// settings.rain is on. They render as bigger, brighter blobs on the weather
+// radar so the player can actually *see* where the storm is relative to the
+// plane and steer around it instead of just guessing from the cloud blobs.
+// Cells fade in on spawn, fade out when rain toggles off, and re-roll their
+// position when they drift outside the radar's effective range so the scope
+// always has something to paint while it's raining. Pure scenery — zero
+// gameplay effect, no new meshes, no allocations per frame.
+const STORM_CELL_RANGE_M    = 22000;   // cells can sit up to ~22 km from plane (radar range is 18 km, so they’ll drift in)
+const STORM_CELL_SPAWN_GAP  = 25000;   // ms between top-up spawns
+const STORM_CELL_TTL_S      = 240;     // ~4 min before a cell expires + reshuffles
+const STORM_CELL_FADE_IN_S  = 6;       // ease-in alpha so cells materialize, not pop
+const STORM_CELL_FADE_OUT_S = 4;       // ease-out when rain toggles off
+const STORM_CELL_DRIFT_MULT = 0.7;     // cells move slower than wind so they read as anchored weather
+const STORM_CELL_MAX        = 3;
+
+function _spawnStormCell(){
+  // Pick a bearing + distance from the plane, biased toward upwind so the
+  // freshly-spawned cell drifts INTO view rather than away from it. Falls
+  // back to a random direction on a dead-calm day.
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  const ws = Math.hypot(wx, wz);
+  let dir;
+  if (ws > 0.5){
+    // "Upwind" = direction the wind is coming FROM = -windVec normalized.
+    const upx = -wx / ws, upz = -wz / ws;
+    const baseAng = Math.atan2(upx, upz);
+    dir = baseAng + (Math.random() - 0.5) * (Math.PI * 0.7); // ±63° spread
+  } else {
+    dir = Math.random() * Math.PI * 2;
+  }
+  const dist = STORM_CELL_RANGE_M * (0.45 + Math.random() * 0.55);
+  const cx = plane.position.x + Math.sin(dir) * dist;
+  const cz = plane.position.z + Math.cos(dir) * dist;
+  // Cell size + severity. Bigger cells lean redder; small cells stay amber.
+  const sev = 0.35 + Math.random() * 0.65;    // 0..1 amber→red
+  const r   = 900 + sev * 1800 + Math.random() * 600; // ~900–3300 m radius in world space
+  state.stormCells.push({
+    x: cx, z: cz, r, sev,
+    age: 0,
+    ttl: STORM_CELL_TTL_S * (0.65 + Math.random() * 0.7),
+    fade: 0, // eases toward 1 on spawn; eased toward 0 + culled when rain off
+  });
+}
+
+function updateStormCells(dt){
+  if (!state.stormCells) return;
+  const frozen = !!(state.photoMode || state.paused || state.introOpen || state.replayActive);
+  if (frozen) return; // pause the storm clock while frozen so cells don't all expire on resume
+  const rainOn = !!settings.rain;
+  // 1. Drift / age / fade every existing cell. Cull cells that fully faded out.
+  const wx = state.wind ? state.wind.x : 0;
+  const wz = state.wind ? state.wind.z : 0;
+  for (let i = state.stormCells.length - 1; i >= 0; i--){
+    const c = state.stormCells[i];
+    c.x += wx * STORM_CELL_DRIFT_MULT * dt;
+    c.z += wz * STORM_CELL_DRIFT_MULT * dt;
+    c.age += dt;
+    if (rainOn && c.age < c.ttl){
+      c.fade = Math.min(1, c.fade + dt / STORM_CELL_FADE_IN_S);
+    } else {
+      // Rain off OR past TTL — ease the cell out, then drop it.
+      c.fade = Math.max(0, c.fade - dt / STORM_CELL_FADE_OUT_S);
+      if (c.fade <= 0.001){
+        state.stormCells.splice(i, 1);
+        continue;
+      }
+    }
+    // Cell drifted way out of any useful range — retire it so the spawner
+    // can plant a fresh one closer to the action.
+    const dx = c.x - plane.position.x;
+    const dz = c.z - plane.position.z;
+    if (Math.hypot(dx, dz) > STORM_CELL_RANGE_M * 1.6){
+      // Convert into a fading cell instead of yanking it instantly.
+      c.ttl = Math.min(c.ttl, c.age + 0.1);
+    }
+  }
+  // 2. Spawn fresh cells while it's raining and we're under the cap.
+  if (!rainOn){
+    state.stormCellsNextSpawnMs = 0;
+    return;
+  }
+  const now = performance.now();
+  if (state.stormCellsNextSpawnMs === 0){
+    // First tick after rain switched on — seed 1–2 cells immediately so the
+    // radar lights up without a long wait, then schedule the next top-up.
+    const seed = 1 + (Math.random() < 0.5 ? 1 : 0);
+    for (let i = 0; i < seed && state.stormCells.length < STORM_CELL_MAX; i++){
+      _spawnStormCell();
+    }
+    state.stormCellsNextSpawnMs = now + STORM_CELL_SPAWN_GAP * (0.6 + Math.random() * 0.6);
+    return;
+  }
+  if (now >= state.stormCellsNextSpawnMs){
+    if (state.stormCells.length < STORM_CELL_MAX){
+      _spawnStormCell();
+    }
+    state.stormCellsNextSpawnMs = now + STORM_CELL_SPAWN_GAP * (0.6 + Math.random() * 0.6);
+  }
+}
+
 function tickLightning(dt){
   const L = state.lightning;
   if (!L || !lightningEl) return;
@@ -25540,6 +25709,7 @@ function loop(now){
   updateWipers(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
+  updateStormCells(dt);
   tickLightning(dt);
   updatePlaneShadow(dt);
   updateEntityShadows(dt);
