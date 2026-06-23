@@ -2225,6 +2225,88 @@ function updateTaxiwayLights(dt){
 // — way easier than squinting at the HUD wind readout on short final.
 const WINDSOCK_LIFT_FULL = 10; // m/s — wind speed at which the sock sits horizontal
 const windSocks = []; // [{ yawGrp, tiltMesh }]
+// Shared compass-rose texture for the disc painted on the ground at the base
+// of every windsock pole. ~1.2 m flat disc with N/E/S/W cardinals, 30°/60°
+// labels, and tick marks every 10° + bolder ticks every 30°. World-aligned
+// (north is geographic -z), so taxiing pilots can read where the wind is
+// blowing FROM relative to the runway without staring at the HUD. Built once
+// and reused across all airports so we don't pay the canvas cost per field.
+const _windsockRoseTex = (() => {
+  const SIZE = 512;
+  const cv = document.createElement('canvas'); cv.width = SIZE; cv.height = SIZE;
+  const cx = cv.getContext('2d');
+  // Transparent background — only the rose itself shows on the ground.
+  cx.clearRect(0, 0, SIZE, SIZE);
+  const cxC = SIZE/2, cyC = SIZE/2;
+  const rOuter = SIZE*0.46;
+  const rInner = SIZE*0.38;
+  const rTickOut = SIZE*0.455;
+  const rTickMid = SIZE*0.43;
+  // Faint translucent fill so the disc reads as a painted ground marking,
+  // not a hovering decal. Slight white tint over the dark grass/asphalt.
+  cx.fillStyle = 'rgba(245, 245, 245, 0.32)';
+  cx.beginPath(); cx.arc(cxC, cyC, rOuter, 0, Math.PI*2); cx.fill();
+  // Outer ring stroke.
+  cx.lineWidth = 4;
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  cx.beginPath(); cx.arc(cxC, cyC, rOuter, 0, Math.PI*2); cx.stroke();
+  cx.beginPath(); cx.arc(cxC, cyC, rInner, 0, Math.PI*2); cx.stroke();
+  // Tick marks every 10°. Canvas angle 0 = +x (east on the world). We want
+  // 0° at the TOP of the texture (north = -z world, which is +y on canvas
+  // pre-flipY → top of texture). So map compass degrees → canvas angle by
+  // `canvasAngle = -π/2 + deg * π/180` (deg=0 → top, deg=90 → right, etc.).
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+  for (let d = 0; d < 360; d += 10){
+    const a = -Math.PI/2 + d * Math.PI/180;
+    const isMajor = (d % 30 === 0);
+    const rIn = isMajor ? SIZE*0.41 : rTickMid;
+    cx.lineWidth = isMajor ? 4 : 2;
+    const x1 = cxC + Math.cos(a) * rIn;
+    const y1 = cyC + Math.sin(a) * rIn;
+    const x2 = cxC + Math.cos(a) * rTickOut;
+    const y2 = cyC + Math.sin(a) * rTickOut;
+    cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x2, y2); cx.stroke();
+  }
+  // Cardinal letters N/E/S/W in bold white, intermediate 30/60-style labels
+  // smaller. Drawn at ~80% of inner radius so they sit inside the ring.
+  cx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+  cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  const labelR = SIZE*0.33;
+  const cardinals = [
+    { d:   0, t: 'N', big: true  },
+    { d:  30, t: '3', big: false },
+    { d:  60, t: '6', big: false },
+    { d:  90, t: 'E', big: true  },
+    { d: 120, t: '12', big: false },
+    { d: 150, t: '15', big: false },
+    { d: 180, t: 'S', big: true  },
+    { d: 210, t: '21', big: false },
+    { d: 240, t: '24', big: false },
+    { d: 270, t: 'W', big: true  },
+    { d: 300, t: '30', big: false },
+    { d: 330, t: '33', big: false }
+  ];
+  for (const c of cardinals){
+    const a = -Math.PI/2 + c.d * Math.PI/180;
+    const lx = cxC + Math.cos(a) * labelR;
+    const ly = cyC + Math.sin(a) * labelR;
+    cx.font = c.big ? 'bold 64px sans-serif' : 'bold 32px sans-serif';
+    cx.fillStyle = c.big ? 'rgba(255, 255, 255, 0.98)' : 'rgba(235, 235, 235, 0.85)';
+    cx.fillText(c.t, lx, ly);
+  }
+  // Small inner crosshair so the rose reads as oriented even from a steep
+  // viewing angle (e.g. taxiing past it). Thin lines through the center.
+  cx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  cx.lineWidth = 2;
+  cx.beginPath();
+  cx.moveTo(cxC, cyC - SIZE*0.06); cx.lineTo(cxC, cyC + SIZE*0.06);
+  cx.moveTo(cxC - SIZE*0.06, cyC); cx.lineTo(cxC + SIZE*0.06, cyC);
+  cx.stroke();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+})();
 function makeWindSock(a){
   const grp = new THREE.Group();
   // Place on the left side of the runway (local -x = pilot's left when taking
@@ -2282,6 +2364,27 @@ function makeWindSock(a){
   tiltGrp.add(tiltMesh);
   yawGrp.add(tiltGrp);
   windSocks.push({ yawGrp, tiltGrp });
+  // Painted compass-rose disc at the base of the pole, world-aligned so the
+  // N/E/S/W labels match geographic north regardless of how the runway is
+  // oriented. Sits just above ground (y=0.02) to avoid z-fighting with the
+  // terrain mesh. Cancels grp's hdg yaw so the inner wrapper's local axes
+  // line up with world axes; flatten the disc onto the XZ plane via a -π/2
+  // tilt about X. Material reuses the shared CanvasTexture so all airports
+  // share one GPU upload.
+  const roseGrp = new THREE.Group();
+  roseGrp.position.set(stripX, 0.02, poleZ);
+  roseGrp.rotation.y = -a.hdg; // cancel parent yaw so the rose stays world-aligned
+  const roseGeom = new THREE.CircleGeometry(0.6, 48);
+  const roseMat = new THREE.MeshLambertMaterial({
+    map: _windsockRoseTex,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  const roseDisc = new THREE.Mesh(roseGeom, roseMat);
+  roseDisc.rotation.x = -Math.PI/2; // lay flat on the ground (canvas +y → world -z = north)
+  roseGrp.add(roseDisc);
+  grp.add(roseGrp);
 }
 for (const a of AIRPORTS) makeWindSock(a);
 
