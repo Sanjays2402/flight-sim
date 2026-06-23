@@ -493,6 +493,7 @@
   <div class="row"><span id="terrain" class="warn-red" style="display:none">⚠ TERRAIN — PULL UP</span></div>
   <div class="row"><span id="engfire" class="warn-red" style="display:none">🔥 ENG FIRE — CUT THROTTLE</span></div>
   <div class="row"><span id="engtemp" class="warn" style="display:none">⚠ ENG TEMP</span></div>
+  <div class="row"><span id="canopyPill" style="display:none;color:#ffd166;font-weight:700">🔓 CANOPY</span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
@@ -524,7 +525,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -3135,6 +3136,13 @@ const WING_FLEX_MAX_RAD = 0.07;  // ~4° hard clamp so it reads as bend, not bre
 const WING_FLEX_PER_G   = 0.018; // ~1° per +1G above 1G → ~3° at 4G, clamped above.
 const WING_FLEX_RATE    = 4.5;   // rad/sec lerp rate so the bend tracks G but doesn't twitch.
 
+// Canopy hinge pivot. Built inside the airframe block below, hoisted here so
+// the per-frame canopy tick can lerp it open / closed.
+let canopyPivot = null;
+const CANOPY_OPEN_RAD   = -1.22;   // ~70° backward hinge when fully open.
+const CANOPY_ANIM_RATE  = 1 / 0.6; // 0→full in 0.6s, matches the spec.
+const CANOPY_DRAG_BUMP  = 0.08;    // +8% drag while the canopy is open in flight.
+
 {
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 4.6, 14), matFuse);
   body.rotation.x = Math.PI/2; plane.add(body);
@@ -3144,8 +3152,19 @@ const WING_FLEX_RATE    = 4.5;   // rad/sec lerp rate so the bend tracks G but d
   tail.rotation.x = Math.PI/2; tail.position.z = 3.1; plane.add(tail);
   const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.561, 0.561, 0.5, 14), matAccent);
   stripe.rotation.x = Math.PI/2; plane.add(stripe);
+  // Hinged canopy. The glass dome lives inside a pivot group whose origin is
+  // at the rear edge of the cockpit (plane-local z ~ +0.05). The dome mesh
+  // sits at pivot-local (0, 0, -0.95) so its base center ends up at the same
+  // (0, 0.42, -0.9) it always was — silhouette is identical with the canopy
+  // closed. Rotating the pivot around X (negative) lifts the forward edge up
+  // and tilts the dome back, the classic bubble-canopy hinge action. Hoisted
+  // to module scope (canopyPivot) so the per-frame canopy tick can lerp it.
   const cp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 10, 0, Math.PI*2, 0, Math.PI/2), matGlass);
-  cp.position.set(0, 0.42, -0.9); cp.scale.set(1.0, 0.9, 1.7); plane.add(cp);
+  cp.position.set(0, 0, -0.95); cp.scale.set(1.0, 0.9, 1.7);
+  canopyPivot = new THREE.Group();
+  canopyPivot.position.set(0, 0.42, 0.05);
+  canopyPivot.add(cp);
+  plane.add(canopyPivot);
   const wing = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.12, 1.4), matFuse);
   wing.position.set(0, 0.05, -0.2); plane.add(wing);
   for (const s of [-1,1]){
@@ -6050,6 +6069,15 @@ const state = {
   lookPressT: -1,
   lookLastTapMs: -1,
   lookRightLocked: false,
+  // Canopy state. canopyOpen is the player's last commanded target (true =
+  // open). canopyAnim is the rendered 0..1 lerp position, updated each frame
+  // by tickCanopy() so the dome eases between closed and open instead of
+  // snapping. canopyAtcLatchAir fires the "unsecured" ATC call once per air
+  // opening; cleared on close or full-stop so a touch-and-go that goes
+  // canopy-open again re-arms the call.
+  canopyOpen: false,
+  canopyAnim: 0,
+  canopyAtcLatchAir: false,
   // Cockpit head-bob: a subtle low-frequency camera wobble in cockpit cam
   // (state.cam===1) that sells the "I'm sitting in the plane" feeling. headBobT
   // is a continuous time accumulator driving the sine terms so the motion stays
@@ -6517,7 +6545,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote','Backslash'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -6525,6 +6553,7 @@ addEventListener('keydown', e=>{
   if (e.repeat) return;
   if (e.code==='KeyG') toggleGear();
   if (e.code==='KeyF') cycleFlaps();
+  if (e.code==='Backslash') toggleCanopy();
   // Shift+B toggles the parking brake. Plain B is hold-to-brake (handled in
   // step() via keys map), so we only trigger the latch when Shift is held
   // and we're not already mid-air. Engaging plays a soft ratchet click; the
@@ -7345,6 +7374,14 @@ function resetPlane(){
   state.reverserPrevActive = false;
   state.reverserDustT = 0;
   clearReverseDust();
+  // Canopy: every fresh sortie starts closed and silent so the engine can
+  // actually crank. Snap both the commanded state and the rendered angle so
+  // there's no eased lerp playing as the player spawns in.
+  state.canopyOpen = false;
+  state.canopyAnim = 0;
+  state.canopyAtcLatchAir = false;
+  if (canopyPivot) canopyPivot.rotation.x = 0;
+  setCanopyWindAudio(false, 0);
   // Steam catapult: clear arm/fire timers + steam puff cooldown so a fresh
   // sortie starts on the deck without an inherited launch in progress.
   state.catArmT = 0;
@@ -7971,6 +8008,15 @@ function beginIgnition(){
   // only block the ground sequence from firing while in the air.
   if (state.introOpen || state.crashed) return;
   if (state.coldStart && !state.onGround) return;
+  // Canopy must be closed before the engine spools — preflight discipline.
+  // One-shot ATC nudge so the pilot knows why nothing happened, no SFX spend.
+  if (state.canopyOpen){
+    if (typeof pushATC === 'function'){
+      pushATC('Close the canopy before starting engine.', { tag:'ATC', now:true });
+    }
+    showStatus('CANOPY OPEN', 'close before ignition', 'hard');
+    return;
+  }
   // No fuel = no fire. Bail with a helpful nudge instead of silently faking it.
   if (state.fuel <= 0){
     showStatus('NO FUEL', state.onGround ? 'taxi onto the apron to refuel' : 'glide her in', 'hard');
@@ -8183,6 +8229,152 @@ function playWakeRumble(intensity){
   osc.connect(og).connect(ctx.destination);
   osc.start(t0);
   osc.stop(t0 + dur + 0.02);
+}
+
+// ====== CANOPY ======
+// Player canopy hinges back ~70° over 0.6s when toggled. Closed silhouette
+// matches the legacy cockpit dome exactly (same hemisphere geometry + scale,
+// just parented under a hinge pivot now). Ground rule: throttle <10% to
+// toggle. Air rule: also allowed but bumps drag and fires an ATC nudge.
+// Engine start (cold-start or in-air restart) is blocked while canopy is
+// open and fires a one-shot ATC "close the canopy" call.
+let canopyWindNoise = null;   // looping noise buffer source (in-flight wind rush)
+let canopyWindFilter = null;  // low-pass that gives it a "hood-open" timbre
+let canopyWindGain = null;    // gain node we ramp 0..target per frame
+function playCanopyClunk(open){
+  // Short mechanical thunk on every toggle. Sharper / brighter on close,
+  // softer + woodier on open (latch dropping vs canopy bumping off the rails).
+  // Same WebAudio context the rest of the SFX shares, no new hardware nodes.
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const vol = 0.26 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  // Noise burst: ~40 ms of bandpassed white noise at ~700 Hz (open) /
+  // ~1.1 kHz (close) so close = brighter latch click, open = woodier thunk.
+  const dur = 0.06;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let j = 0; j < data.length; j++) data[j] = (Math.random()*2-1) * (1 - j/data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = open ? 700 : 1100;
+  bp.Q.value = 1.2;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Low thump underneath for weight: a quick sine sag from 220→90 Hz so it
+  // sells the canopy frame settling onto its rails.
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(220, t0);
+  osc.frequency.exponentialRampToValueAtTime(90, t0 + 0.09);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0, t0);
+  og.gain.linearRampToValueAtTime(vol * 0.55, t0 + 0.015);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.14);
+}
+function setCanopyWindAudio(active, intensity){
+  // Looping low-pass-filtered noise that fades in while the canopy is open
+  // and the plane is moving through air. Allocated lazily on first call so
+  // we don't burn an oscillator on flights that never crack the canopy.
+  // intensity 0..1 ramps the gain so the rush gets louder with airspeed.
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const target = active ? Math.max(0, Math.min(1, intensity)) * 0.22 * settings.volume : 0;
+  if (!canopyWindNoise){
+    if (target <= 0) return;
+    // 2s of white noise looped — plenty to hide the seam.
+    const dur = 2.0;
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let j = 0; j < data.length; j++) data[j] = (Math.random()*2-1);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1400;
+    lp.Q.value = 0.5;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(lp).connect(g).connect(ctx.destination);
+    src.start();
+    canopyWindNoise = src;
+    canopyWindFilter = lp;
+    canopyWindGain = g;
+  }
+  if (canopyWindGain){
+    const now = ctx.currentTime;
+    canopyWindGain.gain.cancelScheduledValues(now);
+    canopyWindGain.gain.linearRampToValueAtTime(target, now + 0.12);
+  }
+}
+// Toggle the canopy. Ground gate: throttle must be at idle so a stray O
+// during the takeoff roll doesn't unzip the bubble at 100 kt. In-air opens
+// are allowed (daredevil mode) but fire an ATC nudge + bump drag via the
+// tickCanopy loop. Engine-start gate is enforced inside beginIgnition().
+function toggleCanopy(){
+  if (state.introOpen || state.crashed) return;
+  if (state.onGround && state.throttle > 0.1){
+    showStatus('CANOPY LOCKED', 'throttle to idle to open', 'hard');
+    return;
+  }
+  state.canopyOpen = !state.canopyOpen;
+  playCanopyClunk(state.canopyOpen);
+  showStatus('CANOPY ' + (state.canopyOpen ? 'OPEN' : 'CLOSED'), null, state.canopyOpen ? 'hard' : 'good');
+  if (state.canopyOpen && !state.onGround && !state.canopyAtcLatchAir){
+    state.canopyAtcLatchAir = true;
+    if (typeof pushATC === 'function'){
+      pushATC('Canopy unsecured, request immediate landing.', { tag:'PILOT', now:true });
+    }
+  }
+  if (!state.canopyOpen) state.canopyAtcLatchAir = false;
+}
+// Per-frame canopy update: lerp the rendered angle toward the commanded
+// target, drive the in-flight wind-rush gain, and toggle the HUD pill.
+// Called from step() so it freezes cleanly on pause/photo/replay (the
+// rendered angle holds at its last value, which matches every other
+// physics-driven visual).
+function tickCanopy(dt){
+  const target = state.canopyOpen ? 1 : 0;
+  const animStep = CANOPY_ANIM_RATE * dt;
+  if (state.canopyAnim < target) state.canopyAnim = Math.min(target, state.canopyAnim + animStep);
+  else if (state.canopyAnim > target) state.canopyAnim = Math.max(target, state.canopyAnim - animStep);
+  if (canopyPivot) canopyPivot.rotation.x = CANOPY_OPEN_RAD * state.canopyAnim;
+  // Wind-rush SFX: only when there is meaningful canopy opening AND meaningful
+  // airspeed. Intensity scales 0..1 between 80 and 260 km/h so a slow taxi
+  // doesn't ramp it up and a 250 km/h cruise pegs it.
+  const spdKmh = Math.hypot(state.vel.x, state.vel.y, state.vel.z) * 3.6;
+  const open = state.canopyAnim;
+  const inAir = !state.onGround;
+  const audible = !state.photoMode && !state.paused && !state.replayActive && !state.introOpen;
+  if (audible && open > 0.05 && inAir && spdKmh > 80){
+    const intensity = open * Math.max(0, Math.min(1, (spdKmh - 80) / 180));
+    setCanopyWindAudio(true, intensity);
+  } else {
+    setCanopyWindAudio(false, 0);
+  }
+  // HUD pill: show whenever the canopy is anywhere off-closed. Hidden in
+  // cockpit cam (we're sitting inside it, the dome geometry is hidden by
+  // the airframe-hide loop and showing a pill would just clutter the view)
+  // and in photo mode via the existing PHOTO_HIDE_IDS sweep.
+  const cpPill = document.getElementById('canopyPill');
+  if (cpPill){
+    const showPill = open > 0.02 && state.cam !== 1 && !state.photoMode;
+    cpPill.style.display = showPill ? 'inline' : 'none';
+  }
+  // Re-arm the in-air ATC latch once we're firmly on the ground and stopped
+  // so the next sortie that pops the canopy in flight gets a fresh nudge.
+  if (state.onGround && spdKmh < 5 && !state.canopyOpen) state.canopyAtcLatchAir = false;
 }
 
 // Wheel dust kicked up the moment reverse thrust grabs. Tiny fixed-pool sprite
@@ -9110,6 +9302,10 @@ function step(dt){
   const dCLflap = flapRad * 0.9;
   const dCDflap = (flapDeg/40) * 0.04;
   const dCDgear = state.gearDown ? 0.025 : 0;
+  // Open canopy adds a small but noticeable drag penalty so the daredevil
+  // mode actually has consequences in flight. Scaled by the rendered
+  // canopyAnim so a half-open canopy doesn't slam the cruise speed.
+  const dCDcanopy = CANOPY_DRAG_BUMP * state.canopyAnim;
   let cl;
   if (Math.abs(aoa) < STALL_AOA){
     cl = CL0 + CL_SLOPE * aoa + dCLflap;
@@ -9120,7 +9316,7 @@ function step(dt){
   } else {
     cl = (CL0 * 0.3) * Math.sign(aoa || 1);
   }
-  const cd = CD0 + K_INDUCED*cl*cl + dCDflap + dCDgear;
+  const cd = CD0 + K_INDUCED*cl*cl + dCDflap + dCDgear + dCDcanopy;
 
   const qDyn = 0.5 * RHO * speed * speed;
   const liftMag = qDyn * WING_AREA * cl;
@@ -9822,6 +10018,7 @@ function step(dt){
   tickAirportBeacons(dt);
   tickNavLights(dt);
   tickLandingLight(dt);
+  tickCanopy(dt);
   // Sunrise/sunset toast: when the hour hand sweeps past 6 (sunrise) or 18
   // (sunset), fire a quick golden toast so the player notices the world
   // changing mid-flight. Wrap-aware: a midnight wrap (prev > now) only
