@@ -1252,6 +1252,7 @@
     <div class="row"><span class="name">BEST LANDING STREAK</span><span class="val" id="stLs">0</span></div>
     <div class="row"><span class="name">PERFECT LANDINGS</span><span class="val" id="stPerfect">0</span></div>
     <div class="row"><span class="name">🪂 BAILOUTS</span><span class="val" id="stBailouts">0</span></div>
+    <div class="row"><span class="name">🛬 TOWER FLYBYS</span><span class="val" id="stFlybys">0</span></div>
     <div class="row"><span class="name">🎖️ RANK</span><span class="val hi" id="stRank">CADET</span></div>
     <div class="hint">Lifetime totals across every flight. Saved locally to this browser.</div>
     <div class="actions">
@@ -1572,7 +1573,8 @@ const STATS_DEFAULT = {
   bestTgStreak: 0,         // longest touch-and-go streak (touchdown+lift-off within 12s, no full-stop)
   bestLandStreak: 0,       // longest streak of consecutive successful landings without a crash (any mode, survives full-stops)
   perfectLandings: 0,      // count of landings scored 300+ (used by rank progression)
-  bailouts: 0              // total Shift+P pilot ejections that survived to canopy-down
+  bailouts: 0,             // total Shift+P pilot ejections that survived to canopy-down
+  flybys: 0                // total tower flybys (low pass under 200m AGL within 500m of an airport tower)
 };
 const pilotStats = Object.assign({}, STATS_DEFAULT);
 try {
@@ -13417,6 +13419,34 @@ function playGearHornBeep(){
     osc.stop(tNote + noteDur + 0.02);
   });
 }
+// Tower-flyby horn: cheerful two-note triangle chirp (E5 -> A5, ascending
+// instead of the gear horn's descending square) so the ear instantly reads
+// "buzz the tower!" rather than "warning". Triangle wave keeps it bright but
+// soft, well clear of the harsh gear/stall horns and the calmer radalt sine
+// chimes. Reuses sfxReady() so no new audio nodes; volume rides settings.volume.
+function playFlybyHorn(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.26 * settings.volume;
+  if (vol <= 0) return;
+  const tones = [{ f: 659.25, t: 0.00 }, { f: 880.00, t: 0.16 }]; // E5 -> A5
+  const noteDur = 0.20;
+  tones.forEach(({ f, t }) => {
+    const tNote = t0 + t;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(f, tNote);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, tNote);
+    g.gain.linearRampToValueAtTime(vol, tNote + 0.012);
+    g.gain.setValueAtTime(vol, tNote + noteDur - 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, tNote + noteDur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(tNote);
+    osc.stop(tNote + noteDur + 0.02);
+  });
+}
 // Short-final callout chime — a soft, single sine "bong" that layers under
 // each radalt callout ("500", "100", "MINIMUMS", etc.) without stomping the
 // ATC tag the same frame. Lower + warmer than the GPWS chirp so the pilot's
@@ -19684,6 +19714,52 @@ function step(dt){
       // Not eligible (no runway or gear up): keep the latch high so a future
       // approach starts from "above all thresholds".
       state.approachLastAGL = 9999;
+    }
+  }
+
+  // Tower flyby horn / wave — buzz the tower under 200 m AGL within 500 m
+  // of an airport tower and a cheerful one-shot ATC "Nice pass!" + a soft
+  // two-note horn chirp + a tiny `+1 FLYBY` toast fires. 30 s cooldown
+  // PER AIRPORT so a circuit pattern doesn't spam it but you can still
+  // pop one at each field on a multi-stop tour. Lifetime counter persists
+  // to pilotStats.flybys. Gated by the same crash/replay/photo/intro/pause
+  // mask used everywhere else so frozen frames and intro animations stay
+  // clean. Carrier deck is excluded — no tower out there.
+  if (!state.crashed && !state.onGround && !state.replayActive && !state.photoMode
+      && !state.introOpen && !state.paused){
+    if (!state._flybyCooldown){
+      // Lazy-init keyed by airport id so future airport additions cost nothing.
+      state._flybyCooldown = Object.create(null);
+      for (let i = 0; i < AIRPORTS.length; i++) state._flybyCooldown[AIRPORTS[i].id] = 0;
+    }
+    const _flybyT = performance.now();
+    for (let i = 0; i < AIRPORTS.length; i++){
+      const a = AIRPORTS[i];
+      // World position of the airport's beacon tower, mirroring the math
+      // in the TOWER camera + makeAirportBeacon (local x=a.w/2+9, z=a.len/2-18
+      // rotated by a.hdg). Cheap: cos/sin per airport per frame.
+      const _lx = a.w/2 + 9;
+      const _lz = a.len/2 - 18;
+      const _cs = Math.cos(a.hdg), _sn = Math.sin(a.hdg);
+      const _tx = a.x + _lx * _cs + _lz * _sn;
+      const _tz = a.z - _lx * _sn + _lz * _cs;
+      const _td = Math.hypot(plane.position.x - _tx, plane.position.z - _tz);
+      if (_td > 500) continue;
+      const _agl = plane.position.y - a.elev - GEAR_H;
+      if (_agl <= 5 || _agl >= 200) continue; // 5 m floor keeps taxi/landing rollouts out of the trigger
+      const _last = state._flybyCooldown[a.id] || 0;
+      if (_flybyT - _last < 30000) continue;
+      state._flybyCooldown[a.id] = _flybyT;
+      pilotStats.flybys = (pilotStats.flybys || 0) + 1;
+      savePilotStats();
+      if (typeof pushATC === 'function'){
+        pushATC('Nice pass, ' + (a.id || 'tower') + '!', { tag: 'TWR', now: true });
+      }
+      playFlybyHorn();
+      if (typeof showToast === 'function'){
+        showToast('\u{1F6EC}', '+1 FLYBY', 'Buzzed ' + (a.name || a.id) + ' tower.');
+      }
+      break; // one airport per frame is plenty; the rest stay armed for the next pass
     }
   }
 
@@ -26074,6 +26150,7 @@ addEventListener('keydown', e => {
     landStreak: document.getElementById('stLs'),
     perfect:  document.getElementById('stPerfect'),
     bailouts: document.getElementById('stBailouts'),
+    flybys:   document.getElementById('stFlybys'),
     rank:     document.getElementById('stRank')
   };
   function refresh(){
@@ -26101,6 +26178,7 @@ addEventListener('keydown', e => {
     if (cells.landStreak) cells.landStreak.textContent = pilotStats.bestLandStreak || 0;
     if (cells.perfect) cells.perfect.textContent = pilotStats.perfectLandings || 0;
     if (cells.bailouts) cells.bailouts.textContent = pilotStats.bailouts || 0;
+    if (cells.flybys) cells.flybys.textContent = pilotStats.flybys || 0;
     if (cells.rank){
       const cur = currentRank();
       cells.rank.textContent = cur ? cur.id : 'CADET';
