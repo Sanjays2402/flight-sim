@@ -215,6 +215,15 @@
   #missionDone { position:fixed; top:34%; left:50%; transform:translate(-50%,-50%); padding:22px 44px; border-radius:14px; font-size:38px; font-weight:900; letter-spacing:3px; display:none; border:3px solid #ffd166; background:rgba(20,30,10,.92); color:#ffd166; text-align:center; text-shadow:0 0 14px rgba(255,209,102,.6); box-shadow:0 0 40px rgba(255,209,102,.4), 0 6px 30px rgba(0,0,0,.6); z-index:14; animation:missionPop .35s ease-out; }
   #missionDone small { display:block; font-size:15px; font-weight:600; letter-spacing:1px; margin-top:8px; opacity:0.9; color:#fff5cc; }
   @keyframes missionPop { 0%{transform:translate(-50%,-50%) scale(.7); opacity:0;} 100%{transform:translate(-50%,-50%) scale(1); opacity:1;} }
+  /* Wind shear escape guidance: fires the same frame tickWindShear() flips a
+     shear burst active on short final. Centered green banner with up-arrow
+     icons teaches the real-world wind-shear-escape procedure (max thrust,
+     pitch for max climb, don't chase the airspeed needle). Hidden by default;
+     showShearEscape() pops it for 4s then auto-hides. Pairs with the existing
+     yellow WIND SHEAR pill on the WIND row and the PILOT ATC line on the
+     ticker. Hidden in photo mode via PHOTO_HIDE_IDS. */
+  #shearEscape { position:fixed; top:30%; left:50%; transform:translate(-50%,-50%); padding:18px 36px; border-radius:14px; font-size:28px; font-weight:900; letter-spacing:3px; display:none; border:3px solid #7ee787; background:rgba(10,32,16,.92); color:#7ee787; text-align:center; text-shadow:0 0 14px rgba(126,231,135,.7); box-shadow:0 0 40px rgba(126,231,135,.45), 0 6px 30px rgba(0,0,0,.6); z-index:14; animation:missionPop .35s ease-out; pointer-events:none; }
+  #shearEscape small { display:block; font-size:13px; font-weight:700; letter-spacing:2px; margin-top:8px; opacity:0.9; color:#caf5d3; }
   /* Cruise ribbon: faint top-center pill that fades in for ~2s the first time
      the autopilot captures the target altitude (within ±10 m of state.ap.alt
      with vertical speed near zero). Paired with the two-note cabin chime in
@@ -905,6 +914,7 @@
 </div>
 <div id="status"></div>
 <div id="missionDone"></div>
+<div id="shearEscape"></div>
 <div id="aerobox">
   <div class="ttl">🎯 AEROBATIC BOX</div>
   <div class="clock" id="aeroClock">60.0</div>
@@ -11262,6 +11272,26 @@ function showMissionDone(title, sub){
   missionDoneTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
   playMissionFanfare();
 }
+// Wind shear escape banner: 4s green centered banner with arrow icons. Fired
+// the same frame tickWindShear() flips a shear burst active on short final.
+// Teaches the real wind-shear-escape procedure (max power, pitch for climb,
+// don't chase the airspeed needle) the same way the takeoff-clearance coach
+// teaches into-wind aileron. Stays out of #status so the pill row underneath
+// can still narrate the per-event detail.
+let shearEscapeTimer = 0;
+function showShearEscape(){
+  const el = document.getElementById('shearEscape');
+  if (!el) return;
+  el.innerHTML = '\u2191 NOSE UP \u00b7 \u2191 MAX POWER<small>WIND SHEAR ESCAPE</small>';
+  el.style.display = 'block';
+  // Restart the pop animation so re-firing (rare; per-shear-burst latch keeps
+  // it one-shot, but a touch-and-go re-arm could fire it again) still pops.
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = '';
+  if (shearEscapeTimer) clearTimeout(shearEscapeTimer);
+  shearEscapeTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
 function toggleGear(){
   state.gearDown = !state.gearDown;
   playGearClunk();
@@ -12345,7 +12375,12 @@ function tickWindShear(){
   if (typeof pushATC === 'function'){
     const tail = sh.rwyDesignator ? (' RWY ' + sh.rwyDesignator) : '';
     pushATC('Wind shear on final,' + tail + '.', { tag:'TWR', now:true });
+    // Escape guidance: real wind-shear procedure is firewall the throttle and
+    // pitch for max climb performance — DO NOT chase the airspeed indicator.
+    // PILOT-tagged so it reads as a self-call right after the TWR alert.
+    pushATC('Wind shear escape \u2014 max power, pitch for climb.', { tag:'PILOT', now:true });
   }
+  if (typeof showShearEscape === 'function') showShearEscape();
 }
 
 // ====== GEAR WARNING HORN ======
@@ -19979,7 +20014,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','shearEscape'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
