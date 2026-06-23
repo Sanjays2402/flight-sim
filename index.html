@@ -741,7 +741,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -8374,6 +8374,23 @@ const state = {
   // when the plane passes within 300 m so the pin doesn't stick around after
   // arrival. Free-flight only — scored missions own their own goals.
   waypoint: null,
+  // Route planner chain: extra pending waypoints queued behind state.waypoint.
+  // Shift+click on the mini-map appends a pin to this chain instead of
+  // replacing the active waypoint. When the active waypoint is reached, the
+  // next pin in the chain auto-promotes into state.waypoint and the AP
+  // wpFollow lock carries over so heading-hold keeps chasing the route
+  // without the pilot re-arming. Plain-click on the map clears the active
+  // waypoint AND the whole chain (legacy single-pin behavior); Shift+M from
+  // the keyboard wipes the chain (and falls back to trip-timer reset when no
+  // chain exists). Stored as world-space { x, z } objects in flight order.
+  waypointChain: [],
+  // 1-based original index of the currently-active waypoint within the route
+  // the pilot built. Starts at 1 when the first pin is dropped, increments
+  // on every chain advance so the HUD WPT counter and the auto-advance
+  // toast both read like "WPT 3/5" instead of resetting to 1 each leg.
+  // Reset to 0 on resetPlane / startMission / clearRoute so a fresh route
+  // starts counting at 1 again.
+  waypointIdx: 0,
   // Emergency landing site finder (Shift+E). When the engine is dead or on
   // fire and the plane is above 200m AGL, the pilot can ping the nearest
   // landable surface inside best-glide range: nearest airport runway, the
@@ -8876,12 +8893,14 @@ addEventListener('keydown', e=>{
     state.ap.wpFollow = false;
   }
   if (e.code==='KeyM' && e.shiftKey){
-    // Shift+M: reset the trip / Hobbs timer to 00:00:00. Allowed in all
-    // live-play states (incl. pause / on-the-ground / crash) so the pilot
-    // can zero the chronometer whenever they want without restarting the
-    // mission. Gated against intro / replay / photo so the reset doesn't
-    // fire from a menu or while a recording is playing back.
+    // Shift+M priority 1: when a route is set (active waypoint or queued
+    // chain), wipe the whole route — the pilot is bailing on the plan. The
+    // route planner is the higher-stakes surface, so it wins the binding.
+    // Falls through to the trip / Hobbs timer reset when there's nothing
+    // to clear, preserving the legacy zero-the-chronometer behavior so this
+    // chord still works on a fresh sortie with no pins.
     if (state.introOpen || state.replayActive || state.photoMode) return;
+    if (typeof window.__flightClearRoute === 'function' && window.__flightClearRoute()) return;
     resetHobbsTimer();
     return;
   }
@@ -10234,7 +10253,12 @@ function resetPlane(){
   state.ap.cruiseLatch = false;
   // Mini-map waypoint is a per-flight target — reset clears the pin so the
   // next sortie starts with a clean map (matches trim, which also resets).
+  // The route planner chain rides on the same lifecycle so a reset wipes
+  // any queued legs too — otherwise leftover pins would steer the next
+  // takeoff into yesterday's plan.
   state.waypoint = null;
+  state.waypointChain.length = 0;
+  state.waypointIdx = 0;
   // Emergency landing site — same lifecycle as the waypoint pin: a per-flight
   // pointer that should not survive a reset, otherwise the magenta diamond
   // would hover on the new sortie's map for no reason.
@@ -13560,6 +13584,12 @@ function step(dt){
       if (_bestAp && _rangeM < _bestD * 1.2){
         state.bingoLatch = true;
         state.waypoint = { x: _bestAp.x, z: _bestAp.z };
+        // Bingo divert overrides any pre-planned route — the airframe is
+        // running out of fuel and getting to a runway beats whatever leg
+        // the pilot had queued. Wipe the chain so the auto-clear at 300m
+        // doesn't promote a stale leg over the diverted airport.
+        state.waypointChain.length = 0;
+        state.waypointIdx = 1;
         state.ap.wpFollow = false;
         const _distKm = _bestD / 1000;
         showStatus('BINGO FUEL', 'DIVERT → ' + _bestAp.id + ' · ' + _distKm.toFixed(1) + ' km', 'hard');
@@ -14654,6 +14684,9 @@ function step(dt){
   // Waypoint HUD row: hidden when no pin. Shows bearing (to-bug, 000–359) and
   // slant distance in km. Auto-clear within 300 m so the row vanishes after
   // arrival; if the AP was following, release the lock and toast the pilot.
+  // When a route chain is queued, reaching the active pin instead promotes
+  // the next chain leg into the active slot so the AP keeps tracking and
+  // the HUD never blinks empty mid-route.
   const wpRow = document.getElementById('wpRow');
   if (state.waypoint){
     const wdx = state.waypoint.x - plane.position.x;
@@ -14661,18 +14694,40 @@ function step(dt){
     const wDist = Math.hypot(wdx, wdz);
     if (wDist < 300){
       const wasFollowing = state.ap.wpFollow;
-      state.waypoint = null;
-      state.ap.wpFollow = false;
-      wpRow.style.display = 'none';
-      showStatus('WAYPOINT REACHED', wasFollowing ? 'AP releasing nav' : null, 'good');
-      pushATC('Waypoint reached, good navigation.', { tag:'TOWER' });
+      if (state.waypointChain.length){
+        // Promote the next leg. AP wpFollow stays armed so heading-hold keeps
+        // tracking without the pilot tapping M again — the whole point of
+        // the route planner. waypointIdx increments so HUD readouts read
+        // "WPT 3/5" instead of resetting to 1 each leg.
+        const _reachedIdx = state.waypointIdx;
+        const _next = state.waypointChain.shift();
+        state.waypointIdx = _reachedIdx + 1;
+        const _total = state.waypointIdx + state.waypointChain.length;
+        showStatus('WPT ' + _reachedIdx + ' REACHED', 'NEXT → ' + state.waypointIdx + '/' + _total + ' · ' + (Math.hypot(_next.x - plane.position.x, _next.z - plane.position.z)/1000).toFixed(1) + ' km', 'good');
+        pushATC('Waypoint reached, proceeding to next leg.', { tag:'TOWER' });
+        state.waypoint = _next;
+      } else {
+        state.waypoint = null;
+        state.waypointIdx = 0;
+        state.ap.wpFollow = false;
+        wpRow.style.display = 'none';
+        showStatus('WAYPOINT REACHED', wasFollowing ? 'AP releasing nav' : null, 'good');
+        pushATC('Waypoint reached, good navigation.', { tag:'TOWER' });
+      }
     } else {
       wpRow.style.display = 'flex';
       const brgRad = Math.atan2(wdx, -wdz);
       const brgDeg = ((Math.round(brgRad * 180/Math.PI) % 360) + 360) % 360;
       const tag = state.ap.wpFollow ? 'AP → ' : '';
+      // When a chain is queued, append a `1/N` counter so the pilot can see
+      // route progress at a glance. Total = active (1) + queued.
+      const _chainN = state.waypointChain.length;
+      // Total = active + queued; current index honors progression through
+      // the chain (waypointIdx increments on each advance).
+      const _routeTotal = state.waypointIdx + _chainN;
+      const _routeSuffix = _routeTotal > 1 ? '  ·  WPT ' + state.waypointIdx + '/' + _routeTotal : '';
       document.getElementById('wpReadout').textContent =
-        tag + String(brgDeg).padStart(3,'0') + '° / ' + (wDist/1000).toFixed(1) + ' km';
+        tag + String(brgDeg).padStart(3,'0') + '° / ' + (wDist/1000).toFixed(1) + ' km' + _routeSuffix;
     }
   } else {
     wpRow.style.display = 'none';
@@ -17015,6 +17070,68 @@ function drawMinimap(hdgDeg){
       minimapCtx.restore();
     }
     minimapCtx.restore();
+    // Chain legs: draw the queued route past the active pin as a series of
+    // numbered diamonds connected by a thin dashed magenta line (active → 1
+    // → 2 → …). Off-map legs collapse onto the rim so the route remains
+    // legible even when the planner stretches past the visible map face.
+    if (state.waypointChain.length){
+      minimapCtx.save();
+      // Start of the leg-to-leg line is the active waypoint's drawn position
+      // (use the same on-screen point we just drew, including the rim
+      // collapse), so the line and active marker connect cleanly.
+      let prevX = endX, prevY = endY;
+      for (let i = 0; i < state.waypointChain.length; i++){
+        const cp = state.waypointChain[i];
+        const cdx = cp.x - plane.position.x;
+        const cdz = cp.z - plane.position.z;
+        const cpx = cx + cdx * scale;
+        const cpy = cy + cdz * scale;
+        const cInside = (cpx >= 4 && cpx <= W-4 && cpy >= 4 && cpy <= H-4);
+        const cAng = Math.atan2(cdz, cdx);
+        const cRimX = cx + Math.cos(cAng) * (R - 8);
+        const cRimY = cy + Math.sin(cAng) * (R - 8);
+        const cEndX = cInside ? cpx : cRimX;
+        const cEndY = cInside ? cpy : cRimY;
+        // Thin dashed magenta connector (lighter than the active leg's line
+        // so the active waypoint still pops as "go here first").
+        minimapCtx.strokeStyle = 'rgba(255,108,247,0.55)';
+        minimapCtx.lineWidth = 1;
+        minimapCtx.setLineDash([3, 3]);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(prevX, prevY);
+        minimapCtx.lineTo(cEndX, cEndY);
+        minimapCtx.stroke();
+        minimapCtx.setLineDash([]);
+        if (cInside){
+          // Smaller diamond than the active pin so the eye still finds the
+          // active target first.
+          minimapCtx.fillStyle = 'rgba(255,108,247,0.85)';
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(cpx, cpy - 4);
+          minimapCtx.lineTo(cpx + 4, cpy);
+          minimapCtx.lineTo(cpx, cpy + 4);
+          minimapCtx.lineTo(cpx - 4, cpy);
+          minimapCtx.closePath();
+          minimapCtx.fill();
+          // Leg number badge so the route order is obvious. Uses the active
+          // waypoint's original index as the base so badges read in flight
+          // order (e.g. WPT 3 reached -> next chained pins draw as 4, 5…).
+          minimapCtx.fillStyle = '#ffffff';
+          minimapCtx.font = '600 9px ui-monospace, monospace';
+          minimapCtx.textAlign = 'left';
+          minimapCtx.textBaseline = 'middle';
+          minimapCtx.fillText(String(state.waypointIdx + i + 1), cpx + 6, cpy - 6);
+        } else {
+          // Off-rim tick so distant legs still show direction.
+          minimapCtx.fillStyle = 'rgba(255,108,247,0.85)';
+          minimapCtx.beginPath();
+          minimapCtx.arc(cRimX, cRimY, 2.2, 0, Math.PI*2);
+          minimapCtx.fill();
+        }
+        prevX = cEndX; prevY = cEndY;
+      }
+      minimapCtx.restore();
+    }
   }
   // Emergency landing site marker — flashing magenta diamond at the site, or
   // a flashing tick on the rim if the site is off-map. Sits above the
@@ -17463,16 +17580,77 @@ function drawWeatherRadar(){
     if (!canSetWaypoint()) return;
     if (state.waypoint){
       state.waypoint = null;
+      // Plain click clears the active leg AND any chained pins behind it —
+      // mirrors the legacy single-pin contract (one tap wipes the map).
+      state.waypointChain.length = 0;
+      state.waypointIdx = 0;
       state.ap.wpFollow = false;
       showStatus('WAYPOINT CLEARED', null, 'hard');
       return;
     }
     if (!p) return;
     state.waypoint = p;
+    state.waypointIdx = 1;
     const distKm = Math.hypot(p.x - plane.position.x, p.z - plane.position.z) / 1000;
     showStatus('WAYPOINT SET', distKm.toFixed(1) + ' km · press M for AP', 'good');
     pushATC('Waypoint logged, ' + distKm.toFixed(1) + ' km out.', { tag:'PILOT' });
   }
+  // Append a pin to the route chain (Shift+click on the mini-map). First
+  // shift-click with no active waypoint just sets it (so a fresh map +
+  // shift-click still does the obvious thing); subsequent shift-clicks push
+  // a new leg onto state.waypointChain. The HUD WPT row picks up a `2/4`
+  // counter, the mini-map draws a dashed magenta line through every leg,
+  // and the auto-clear at 300m promotes the next chain pin into the active
+  // slot so the AP keeps tracking without re-arming.
+  function appendChain(p){
+    if (!canSetWaypoint() || !p) return;
+    if (!state.waypoint){
+      state.waypoint = p;
+      state.waypointIdx = 1;
+      const distKm = Math.hypot(p.x - plane.position.x, p.z - plane.position.z) / 1000;
+      showStatus('WAYPOINT SET', distKm.toFixed(1) + ' km · press M for AP', 'good');
+      pushATC('Waypoint logged, ' + distKm.toFixed(1) + ' km out.', { tag:'PILOT' });
+      return;
+    }
+    // Safety: don't append a pin that's effectively on top of the last leg
+    // (active waypoint or last chain entry) — a stray double-shift-click
+    // would just stack identical pins and bloat the chain. 50m tolerance.
+    const _last = state.waypointChain.length
+      ? state.waypointChain[state.waypointChain.length - 1]
+      : state.waypoint;
+    if (Math.hypot(_last.x - p.x, _last.z - p.z) < 50) return;
+    // Cap the chain so a runaway shift-click streak can't make the map a
+    // spaghetti monster. 12 pins is plenty for any free-flight route.
+    if (state.waypointChain.length >= 11){
+      showStatus('ROUTE FULL', 'max 12 waypoints — clear with Shift+M', 'hard');
+      return;
+    }
+    state.waypointChain.push(p);
+    // New leg's original index = active idx + queued count (chain holds the
+    // legs AFTER the active one, so the just-added pin sits at the very end).
+    const _newIdx = state.waypointIdx + state.waypointChain.length;
+    const _total = state.waypointIdx + state.waypointChain.length;
+    const distKm = Math.hypot(p.x - plane.position.x, p.z - plane.position.z) / 1000;
+    showStatus('WPT ' + _newIdx + '/' + _total + ' ADDED', distKm.toFixed(1) + ' km from plane', 'good');
+    pushATC('Waypoint ' + _newIdx + ' logged, route ' + _total + ' legs.', { tag:'PILOT' });
+  }
+  // Wipe everything (active + chain). Used by Shift+M from the keyboard.
+  // Returns true when something was actually cleared so the caller can
+  // decide whether to fall through to the trip-timer reset.
+  function clearRoute(){
+    if (!state.waypoint && state.waypointChain.length === 0) return false;
+    const _n = (state.waypoint ? 1 : 0) + state.waypointChain.length;
+    state.waypoint = null;
+    state.waypointChain.length = 0;
+    state.waypointIdx = 0;
+    state.ap.wpFollow = false;
+    showStatus('ROUTE CLEARED', _n + ' waypoint' + (_n === 1 ? '' : 's') + ' wiped', 'hard');
+    pushATC('Route cancelled.', { tag:'PILOT' });
+    return true;
+  }
+  // Exposed so the keydown handler (Shift+M) can call clearRoute() without
+  // shoehorning chain plumbing into the outer keyboard scope.
+  window.__flightClearRoute = clearRoute;
   // Desktop: a plain click sets/clears. Use pointerup so it works for mouse
   // and pen alike; touch is handled below with a long-press so a casual finger
   // tap (often a mis-fire on small HUD elements) doesn't drop accidental pins.
@@ -17505,8 +17683,15 @@ function drawWeatherRadar(){
       // pin (lpFired). Prevents stray taps while the HUD is being read.
       return;
     }
-    // Desktop pointer: treat as a click.
-    setOrClear(pxToWorld(e.clientX, e.clientY));
+    // Desktop pointer: plain click = set/clear-active; Shift+click = chain a
+    // new leg onto the existing route (route planner). Keeping legacy plain
+    // click as toggle preserves every existing muscle-memory flow.
+    if (e.shiftKey){
+      const _p = pxToWorld(e.clientX, e.clientY);
+      if (_p) appendChain(_p);
+    } else {
+      setOrClear(pxToWorld(e.clientX, e.clientY));
+    }
   });
   // Double-click an airport icon (or its off-map rim tick) to snap the
   // waypoint pin straight onto that airport. Saves the "squint at the dot,
@@ -17543,6 +17728,11 @@ function drawWeatherRadar(){
     }
     if (!best) return;
     state.waypoint = { x: best.x, z: best.z };
+    // Double-click on an airport icon is an explicit "go HERE" override —
+    // wipe any queued route legs so the auto-clear at 300m doesn't promote
+    // an old leg after arriving at the selected field.
+    state.waypointChain.length = 0;
+    state.waypointIdx = 1;
     state.ap.wpFollow = false;
     const distKm = Math.hypot(best.x - plane.position.x, best.z - plane.position.z) / 1000;
     showStatus('WAYPOINT → ' + best.id, distKm.toFixed(1) + ' km · press M for AP', 'good');
@@ -20482,6 +20672,8 @@ updateCamModeUi();
     state.ap.wpFollow = false;
     state.ap.cruiseLatch = false;
     state.waypoint = null;
+    state.waypointChain.length = 0;
+    state.waypointIdx = 0;
     state.msgT = 0;
     state.refueling = false;
     state.repairing = false;
