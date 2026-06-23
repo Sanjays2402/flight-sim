@@ -934,6 +934,7 @@
   <div class="row"><span id="fuelStarve" class="warn-amber" style="display:none">⚠ FUEL STARVATION</span></div>
   <div class="row"><span id="trafficWarn" class="warn-amber" style="display:none">⚠ TRAFFIC <span id="trafficArrow" style="display:inline-block;margin-left:4px;transform-origin:50% 50%">↑</span> <span id="trafficDist" style="margin-left:4px;font-weight:600">—</span></span></div>
   <div class="row"><span id="canopyPill" style="display:none;color:#ffd166;font-weight:700">🔓 CANOPY</span></div>
+  <div class="row"><span id="wingmanPill" style="display:none;color:#7ee787;font-weight:700" title="Wingman on call — press O again to dismiss">✈ WINGMAN <span id="wingmanPillState" style="margin-left:4px;color:#cfe;font-weight:600">✓</span></span></div>
   <div class="row"><span id="electrical" class="warn-amber" style="display:none">⚡ BATT-ONLY <span id="electricalT" style="margin-left:6px;font-weight:600;color:#d8c389">3:00</span></span></div>
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
@@ -1022,7 +1023,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -5368,6 +5369,31 @@ function _initEntityShadows(){
       baseSx: 8.6, baseSz: 6.6,
     });
   }
+  // Co-pilot wingman shadow: same footprint as the home-field AI plane
+  // (identical mesh family). visible=false at boot — the per-frame loop
+  // only paints the shadow when wingmanPlane.visible flips on after a
+  // summon, so an off wingman has no visible footprint.
+  if (typeof wingmanPlane !== 'undefined' && wingmanPlane){
+    const wmMat = new THREE.MeshBasicMaterial({
+      map: planeShadowTex,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      blending: THREE.NormalBlending,
+    });
+    const wmMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), wmMat);
+    wmMesh.rotation.x = -Math.PI / 2;
+    wmMesh.renderOrder = 2;
+    wmMesh.visible = false;
+    scene.add(wmMesh);
+    entityShadows.push({
+      mesh: wmMesh, mat: wmMat, kind: 'wingman',
+      get: () => wingmanPlane,
+      baseSx: 8.6, baseSz: 6.6,
+    });
+  }
   // Balloons: a fat circular disc (no bank, no pitch — they're round). One
   // shadow per balloon, all sharing the same texture as the player so the
   // GPU only ever holds one shadow bitmap.
@@ -6130,6 +6156,61 @@ function addNavLights(group){
 }
 addNavLights(plane);
 addNavLights(aiPlane);
+
+// ====== CO-PILOT WINGMAN ON CALL ======
+// Optional second AI plane the pilot can summon with the `O` key. Spawns ~3 km
+// behind + 100 m above and flies a loose chase formation ~80 m off the right
+// wing trail with a 1.2 s pose-lag so it looks alive instead of glued. Same
+// silhouette as the home-field circuit AI; painted in a contrasting livery
+// (Navy when the player is Classic, Stealth when Navy, etc.) so the two AI
+// planes never read as the same airframe. Disabled inside the wingman
+// mission (`state.mode === 'wing'`) because that mode already centers on
+// the home-field AI lead; double AI would be confusing. Auto-dismisses on
+// crash / full-stop landing / fuel-low so the pilot never has to chase a
+// ghost wingman around.
+const wingmanPlane = new THREE.Group();
+const wmMatFuse   = new THREE.MeshLambertMaterial({ color: 0x1d3a6a });
+const wmMatAccent = new THREE.MeshLambertMaterial({ color: 0xffc94a });
+const wmMatDark   = new THREE.MeshLambertMaterial({ color: 0x222428 });
+const wmMatGlass  = new THREE.MeshLambertMaterial({ color: 0x223344, transparent:true, opacity:0.75 });
+{
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 4.6, 14), wmMatFuse);
+  body.rotation.x = Math.PI/2; wingmanPlane.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 14), wmMatFuse);
+  nose.rotation.x = -Math.PI/2; nose.position.z = -2.9; wingmanPlane.add(nose);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 14), wmMatFuse);
+  tail.rotation.x = Math.PI/2; tail.position.z = 3.1; wingmanPlane.add(tail);
+  const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.561, 0.561, 0.5, 14), wmMatAccent);
+  stripe.rotation.x = Math.PI/2; wingmanPlane.add(stripe);
+  const cp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 10, 0, Math.PI*2, 0, Math.PI/2), wmMatGlass);
+  cp.position.set(0, 0.42, -0.9); cp.scale.set(1.0, 0.9, 1.7); wingmanPlane.add(cp);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.12, 1.4), wmMatFuse);
+  wing.position.set(0, 0.05, -0.2); wingmanPlane.add(wing);
+  for (const s of [-1,1]){
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 1.0), wmMatAccent);
+    tip.position.set(s*4.3, 0.06, -0.2); wingmanPlane.add(tip);
+  }
+  const tp = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.1, 0.9), wmMatFuse);
+  tp.position.set(0, 0.3, 3.4); wingmanPlane.add(tp);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 1.1), wmMatFuse);
+  fin.position.set(0, 0.7, 3.4); wingmanPlane.add(fin);
+  const finAcc = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.4), wmMatAccent);
+  finAcc.position.set(0, 1.05, 3.5); wingmanPlane.add(finAcc);
+}
+const wmProp = new THREE.Group();
+{
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.22, 12), wmMatDark);
+  hub.rotation.x = Math.PI/2; wmProp.add(hub);
+  for (let i=0;i<2;i++){
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.9, 0.06), wmMatDark);
+    blade.rotation.z = i*Math.PI/2; wmProp.add(blade);
+  }
+}
+wmProp.position.set(0, 0, -3.6);
+wingmanPlane.add(wmProp);
+wingmanPlane.visible = false; // off until the pilot calls `O`
+scene.add(wingmanPlane);
+addNavLights(wingmanPlane);
 let navStrobePhase = 0;
 function tickNavLights(dt){
   // Reuse the same dusk gate as runway edge lights / airport beacons so the
@@ -6649,6 +6730,232 @@ function updateWingmanLock(dt){
       if (typeof showStatus === 'function') showStatus('WINGMAN BUSTED', 'Dropped formation \u2014 mission failed.', 'bad');
       if (typeof pushATC === 'function') pushATC('Two, you are way out of position, mission scrubbed.', { tag:'LEAD', now:true });
     }
+  }
+}
+
+// ====== CO-PILOT WINGMAN STATE + TICK ======
+// Runtime state for the on-call wingman summoned with the `O` key. The mesh
+// (wingmanPlane) was built earlier alongside the home-field AI plane; here we
+// own its pose, spawn / dismiss logic, and per-frame chase math. Everything
+// is gated to `state.coPilotOn === true` so a turned-off wingman costs one
+// branch per frame and nothing else.
+const COPILOT_TRAIL_BACK_M  = 80;    // m — trail distance behind player along plane's -Z
+const COPILOT_TRAIL_RIGHT_M = 30;    // m — slight right-wing stack so wingman isn't in player's prop wash
+const COPILOT_TRAIL_UP_M    = 12;    // m — sits a touch high so it's visible in chase cam
+const COPILOT_SPAWN_BACK_M  = 3000;  // m — initial spawn distance behind player
+const COPILOT_SPAWN_UP_M    = 100;   // m — initial spawn altitude above player
+const COPILOT_LAG_S         = 1.2;   // s — pose follow time-constant (lower = tighter wing)
+const COPILOT_FUEL_BAIL     = 0.20;  // fraction — break off when player's tank drops below this
+const COPILOT_CULL_M        = 12000; // m — render distance, matches aiPlane.visible cap
+const coPilotState = {
+  pos: new THREE.Vector3(),
+  vel: new THREE.Vector3(),      // smoothed velocity used for prop spin + nose-attitude visuals
+  heading: 0,                    // radians, 0 = north (-z), matches aiState.heading convention
+  bank: 0,                       // smoothed visual roll
+  pitch: 0,                      // smoothed visual pitch (nose-up positive radians)
+  spawnedAt: 0,                  // perfNow ms; used to ease the catch-up so the spawn doesn't pop
+  joinFade: 0                    // 0..1 ease from spawn pose toward the live trail slot
+};
+// Repaint the wingman in a livery that contrasts with the player so the two
+// AI planes never read as the same airframe. Picks the next index that
+// isn't the player's. Called at every summon so changing the player livery
+// then re-summoning yields a fresh contrast pick.
+function coPilotPickContrastLivery(){
+  if (!Array.isArray(LIVERIES) || LIVERIES.length === 0) return;
+  const playerIdx = (settings && Number.isInteger(settings.livery)) ? settings.livery : 0;
+  let idx = (playerIdx + 1) % LIVERIES.length;
+  if (idx === playerIdx) idx = (idx + 1) % LIVERIES.length;
+  const lv = LIVERIES[idx] || LIVERIES[1] || LIVERIES[0];
+  if (lv){
+    wmMatFuse.color.set(lv.fuse);
+    wmMatAccent.color.set(lv.accent);
+  }
+}
+// Place the wingman at its spawn offset behind + above the player and align
+// to the player's heading so it reads as already in formation when called.
+function coPilotSpawnBehindPlayer(){
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+  // Player heading in the same convention as aiState.heading.
+  coPilotState.heading = Math.atan2(fwd.x, -fwd.z);
+  coPilotState.bank = 0;
+  coPilotState.pitch = 0;
+  coPilotState.spawnedAt = performance.now();
+  coPilotState.joinFade = 0;
+  // Spawn 3 km behind (opposite to player forward) + 100 m above. Use the
+  // horizontal projection of the player's forward so the spawn doesn't end
+  // up underground when the player is nose-down.
+  const horiz = Math.hypot(fwd.x, fwd.z) || 1;
+  const fx = fwd.x / horiz, fz = fwd.z / horiz;
+  coPilotState.pos.set(
+    plane.position.x - fx * COPILOT_SPAWN_BACK_M,
+    plane.position.y + COPILOT_SPAWN_UP_M,
+    plane.position.z - fz * COPILOT_SPAWN_BACK_M
+  );
+  coPilotState.vel.set(fx * 60, 0, fz * 60); // seed with a forward-ish velocity so the first frame's nose math is stable
+  wingmanPlane.position.copy(coPilotState.pos);
+  wingmanPlane.rotation.set(0, 0, 0);
+  wingmanPlane.rotateY(coPilotState.heading);
+  wingmanPlane.visible = true;
+}
+// Toggle entry point — called by the `O` keydown handler. Returns true on
+// success so the keydown can suppress fall-through to other O behavior.
+function coPilotToggle(){
+  // Hard gates: mid-replay / photo / pause / intro / crashed -> ignore so a
+  // stray tap doesn't summon a wingman the player can't see or fly with.
+  if (state.replayActive || state.photoMode || state.introOpen || state.paused) return false;
+  if (state.crashed) return false;
+  // Mode gate: wingman mission already centers on the home-field AI as the
+  // lead, so a second AI plane following the player would be confusing.
+  if (state.mode === 'wing') return false;
+  if (state.coPilotOn){
+    coPilotDismiss('Solo flight resumed.');
+  } else {
+    coPilotSummon();
+  }
+  return true;
+}
+function coPilotSummon(){
+  state.coPilotOn = true;
+  state.coPilotFuelBailLatch = false;
+  coPilotPickContrastLivery();
+  coPilotSpawnBehindPlayer();
+  if (typeof showStatus === 'function') showStatus('WINGMAN ON CALL', '\u2708 Two is on your wing.', 'good');
+  if (typeof pushATC === 'function') pushATC('Two, joining up, three klicks trail.', { tag:'WING', now:true });
+}
+function coPilotDismiss(reason){
+  state.coPilotOn = false;
+  state.coPilotFuelBailLatch = false;
+  wingmanPlane.visible = false;
+  if (typeof showStatus === 'function') showStatus('WINGMAN OFF', reason || 'Solo flight resumed.', 'hard');
+  if (typeof pushATC === 'function') pushATC(reason || 'Two breaking off, see you on the ground.', { tag:'WING', now:true });
+}
+// Per-frame chase tick for the on-call wingman. Computes a target slot in
+// the player's body frame, eases the pose toward it with a COPILOT_LAG_S
+// time constant (so heading swings + bank look natural rather than glued),
+// and auto-dismisses on the standard bail-out conditions (crash / full-stop
+// landing / fuel-low / world-cull). Visibility cull matches aiPlane.visible
+// so the same 12 km LOD threshold applies.
+function updateCoPilotWingman(dt){
+  if (!state.coPilotOn) return;
+  if (dt <= 0) return;
+  // Freeze on pause / photo / replay / intro — the player isn't flying, so
+  // the wingman pose holds still. Don't auto-dismiss; the pilot probably
+  // wants the wingman back when they resume.
+  if (state.paused || state.photoMode || state.replayActive || state.introOpen) return;
+  // Crash -> auto-dismiss with a sympathetic ATC line.
+  if (state.crashed){ coPilotDismiss('Two breaking off, mayday acknowledged.'); return; }
+  // Switching INTO wingman mission mid-call -> dismiss so the existing AI
+  // lead can take center stage without a doppelganger trailing the player.
+  if (state.mode === 'wing'){ coPilotDismiss('Two breaking off, lead has the brief.'); return; }
+  // Full-stop landing on a runway -> wingman calls it a day. We treat
+  // "onGround + landed + below taxi speed" as the landed-and-stopped state
+  // so the wingman doesn't bail the moment the wheels touch.
+  if (state.onGround && state.landed){
+    const gsp = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+    if (gsp < 12){ coPilotDismiss('Two, nice landing, see you on the ramp.'); return; }
+  }
+  // Fuel low -> wingman breaks off to orbit while the player handles their
+  // own emergency. Latched so a brief refuel above 0.20 doesn't oscillate.
+  if (!state.coPilotFuelBailLatch && (state.fuel || 0) <= COPILOT_FUEL_BAIL){
+    state.coPilotFuelBailLatch = true;
+    coPilotDismiss('Two breaking off, your tank is dry.');
+    return;
+  }
+  // Compute the target slot in the player's body frame: trail back along
+  // the player's -Z forward axis, offset slightly right + up so it stacks
+  // off the right wing instead of sitting directly in the prop wash. Use
+  // the player's full quaternion so the slot banks with the player — a
+  // wingman pinned to the world-up offset would slide up/down through the
+  // air every time the player rolled.
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(plane.quaternion);
+  const tx = plane.position.x - fwd.x * COPILOT_TRAIL_BACK_M
+           + right.x * COPILOT_TRAIL_RIGHT_M + up.x * COPILOT_TRAIL_UP_M;
+  const ty = plane.position.y - fwd.y * COPILOT_TRAIL_BACK_M
+           + right.y * COPILOT_TRAIL_RIGHT_M + up.y * COPILOT_TRAIL_UP_M;
+  const tz = plane.position.z - fwd.z * COPILOT_TRAIL_BACK_M
+           + right.z * COPILOT_TRAIL_RIGHT_M + up.z * COPILOT_TRAIL_UP_M;
+  // First-order low-pass toward the slot. alpha = 1 - exp(-dt/tau) gives a
+  // dt-stable filter; tau = COPILOT_LAG_S. The joinFade ramp (0 -> 1 over
+  // ~3 s after spawn) lets a freshly-summoned wingman ease in faster so it
+  // closes the 3 km initial gap quickly, then settles into the lazy 1.2 s
+  // lag for the steady-state chase. Without the ramp the spawn would take
+  // ~30 s to visibly close.
+  coPilotState.joinFade = Math.min(1, coPilotState.joinFade + dt / 3.0);
+  const tauActive = COPILOT_LAG_S * (0.25 + 0.75 * coPilotState.joinFade);
+  const alpha = 1 - Math.exp(-dt / Math.max(0.05, tauActive));
+  const prevX = coPilotState.pos.x, prevY = coPilotState.pos.y, prevZ = coPilotState.pos.z;
+  coPilotState.pos.x += (tx - prevX) * alpha;
+  coPilotState.pos.y += (ty - prevY) * alpha;
+  coPilotState.pos.z += (tz - prevZ) * alpha;
+  // Smooth velocity for prop-spin + nose-attitude derivation.
+  const invDt = 1 / Math.max(dt, 1/240);
+  const vxNow = (coPilotState.pos.x - prevX) * invDt;
+  const vyNow = (coPilotState.pos.y - prevY) * invDt;
+  const vzNow = (coPilotState.pos.z - prevZ) * invDt;
+  const velAlpha = 1 - Math.exp(-dt / 0.5);
+  coPilotState.vel.x += (vxNow - coPilotState.vel.x) * velAlpha;
+  coPilotState.vel.y += (vyNow - coPilotState.vel.y) * velAlpha;
+  coPilotState.vel.z += (vzNow - coPilotState.vel.z) * velAlpha;
+  // Heading: face the direction of travel. atan2 convention matches aiState.
+  const speedH = Math.hypot(coPilotState.vel.x, coPilotState.vel.z);
+  if (speedH > 1){
+    const desiredHdg = Math.atan2(coPilotState.vel.x, -coPilotState.vel.z);
+    let dh = desiredHdg - coPilotState.heading;
+    while (dh >  Math.PI) dh -= 2*Math.PI;
+    while (dh < -Math.PI) dh += 2*Math.PI;
+    // Soft heading ease so the nose swings into turns rather than snapping.
+    coPilotState.heading += dh * Math.min(1, dt * 2.5);
+    // Bank into turns — driven by the heading-error sign + a clamp so it
+    // never exceeds a Cessna-ish 45° lean.
+    const wantBank = Math.max(-0.6, Math.min(0.6, dh * 1.2));
+    coPilotState.bank += (wantBank - coPilotState.bank) * Math.min(1, 2.5 * dt);
+  } else {
+    // Standing still (e.g. paused world during initial spawn) — bleed bank
+    // toward level so the wingman doesn't sit cocked over.
+    coPilotState.bank += (0 - coPilotState.bank) * Math.min(1, 2.5 * dt);
+  }
+  // Pitch: nose up/down from vertical speed.
+  const wantPitch = Math.max(-0.22, Math.min(0.22, -coPilotState.vel.y * 0.04));
+  coPilotState.pitch += (wantPitch - coPilotState.pitch) * Math.min(1, 2.5 * dt);
+  // Push visual pose.
+  wingmanPlane.position.copy(coPilotState.pos);
+  wingmanPlane.rotation.set(0, 0, 0);
+  wingmanPlane.rotateY(coPilotState.heading);
+  wingmanPlane.rotateZ(-coPilotState.bank);
+  wingmanPlane.rotateX(coPilotState.pitch);
+  // Prop spins at a fixed visual rate so the wingman always looks live, even
+  // when the world is briefly paused mid-frame (paused-state early-return
+  // above handles real pauses). Matches aiProp's spin cadence.
+  wmProp.rotation.z += dt * 60;
+  // Distance cull — match aiPlane's 12 km threshold so the wingman LODs out
+  // gracefully at long range instead of popping in/out of mesh.
+  const distToPlayer = wingmanPlane.position.distanceTo(plane.position);
+  wingmanPlane.visible = distToPlayer < COPILOT_CULL_M;
+}
+// HUD pill state — flips visibility + colour based on coPilotOn. Cheap; runs
+// every frame off the existing HUD update loop via updateCoPilotWingmanHUD().
+const _coPilotPillEl = (typeof document !== 'undefined') ? document.getElementById('wingmanPill') : null;
+const _coPilotPillStateEl = (typeof document !== 'undefined') ? document.getElementById('wingmanPillState') : null;
+function updateCoPilotWingmanHUD(){
+  if (!_coPilotPillEl) return;
+  const show = !!state.coPilotOn;
+  _coPilotPillEl.style.display = show ? '' : 'none';
+  if (!show) return;
+  if (_coPilotPillStateEl){
+    // Distance-aware label: ✓ once the wingman is in the trail slot,
+    // "JOINING" while it's still closing from spawn. Treat in-slot as
+    // "under 200 m from the slot offset" — same neighbourhood the formation
+    // tracker uses, so the pill flips green at roughly the moment the
+    // wingman reads as actually in formation.
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+    const dx = wingmanPlane.position.x - (plane.position.x - fwd.x * COPILOT_TRAIL_BACK_M);
+    const dz = wingmanPlane.position.z - (plane.position.z - fwd.z * COPILOT_TRAIL_BACK_M);
+    const dy = wingmanPlane.position.y - (plane.position.y + COPILOT_TRAIL_UP_M);
+    const off = Math.hypot(dx, dy, dz);
+    _coPilotPillStateEl.textContent = (off < 200) ? '\u2713' : 'JOINING';
+    _coPilotPillStateEl.style.color = (off < 200) ? '#cfe' : '#ffd166';
   }
 }
 
@@ -10153,6 +10460,13 @@ const state = {
   canopyOpen: false,
   canopyAnim: 0,
   canopyAtcLatchAir: false,
+  // Co-pilot wingman on call (`O` key). When true, a second AI plane
+  // (wingmanPlane) flies a loose 80 m trail off the player's right wing.
+  // coPilotFuelBailLatch arms the one-shot fuel-low dismissal so the
+  // wingman doesn't oscillate around the 20% threshold while the tank
+  // tickles back up at the refuel apron. Both clear on resetPlane().
+  coPilotOn: false,
+  coPilotFuelBailLatch: false,
   // Cockpit head-bob: a subtle low-frequency camera wobble in cockpit cam
   // (state.cam===1) that sells the "I'm sitting in the plane" feeling. headBobT
   // is a continuous time accumulator driving the sine terms so the motion stays
@@ -11386,6 +11700,17 @@ addEventListener('keydown', e=>{
       showStatus('AUTOPILOT ON', 'ALT ' + Math.round(state.ap.alt - GEAR_H) + 'm · HDG ' + String(apHdgMag).padStart(3,'0'), 'good');
       pushATC('Autopilot engaged, holding ' + Math.round(state.ap.alt - GEAR_H) + 'm.', { tag:'PILOT' });
     }
+  }
+  if (e.code==='KeyO' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey){
+    // Co-pilot wingman toggle (`O` for "on call" — sits right next to `H` for
+    // hold autopilot in the keymap). Hard gate against the carrier catapult:
+    // when the player is sitting on the deck pointed at the bow ready to
+    // fire, the same `O` key drives the cat-arm hold via keys['KeyO']. We
+    // bail out here so a wingman toggle can't sneak in while the player is
+    // arming the shuttle. coPilotToggle() owns the other safety gates
+    // (mid-replay, photo, paused, crashed, wingman mission).
+    if (typeof catapultEligible === 'function' && catapultEligible()) return;
+    if (typeof coPilotToggle === 'function') coPilotToggle();
   }
   if (e.code==='BracketLeft' || e.code==='BracketRight'){
     // Heading bug nudge. Plain press = 5° coarse step, Shift = 1° fine step.
@@ -12786,6 +13111,11 @@ function resetPlane(){
   state.catFireT = -1;
   state.catSteamT = 0;
   clearCatSteam();
+  // Co-pilot wingman on call: a hot reset wipes the summon so a fresh sortie
+  // starts solo. The pilot can re-summon with `O` once airborne again.
+  state.coPilotOn = false;
+  state.coPilotFuelBailLatch = false;
+  if (typeof wingmanPlane !== 'undefined' && wingmanPlane) wingmanPlane.visible = false;
   state.onGround = true;
   state.crashed = false;
   state.landed = false;
@@ -20702,6 +21032,13 @@ function step(dt){
 
   // AI traffic update (visual only, runs alongside player physics).
   updateAITraffic(dt);
+  // Co-pilot wingman on call — second AI plane the pilot summoned with `O`.
+  // Bails fast when state.coPilotOn is false, so unused calls are cheap.
+  // Runs immediately after updateAITraffic so both AI poses are fresh for
+  // any downstream consumer (entity shadows / formation tracker pick up
+  // the updated transforms in the same frame).
+  if (typeof updateCoPilotWingman === 'function') updateCoPilotWingman(dt);
+  if (typeof updateCoPilotWingmanHUD === 'function') updateCoPilotWingmanHUD();
   // Wingman mission — update the formation-lock bar based on player
   // distance from the lead. Drains outside WING_LOCK_RADIUS_M, refills
   // inside; empties to zero = mission fail. Safe to call every frame; it
