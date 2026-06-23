@@ -1044,6 +1044,7 @@
   <div class="gauge"><canvas id="cpFuel" width="220" height="220" title="Fuel quantity — left wing (green) + right wing (cyan) tanks · Shift+Y cycles fuel selector BOTH / LEFT / RIGHT"></canvas><div class="glbl">FUEL QTY L/R</div></div>
   <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
   <div class="gauge"><canvas id="cpVor" width="220" height="220" title="Click around the dial to set OBS course · Right-click to center on current bearing"></canvas><div class="glbl">VOR / CDI</div></div>
+  <div class="gauge"><canvas id="cpClk" width="220" height="220" title="Cockpit clock — click the dial to toggle ZULU / LOCAL"></canvas><div class="glbl">CLOCK</div></div>
   <div class="gauge"><canvas id="cpDa"  width="220" height="220" title="Pressure altitude vs density altitude · amber over +2000ft DA, red over +4000ft"></canvas><div class="glbl">DENSITY ALT ft</div></div>
   <div class="gauge"><canvas id="cpAdf" width="220" height="220" title="NDB / ADF · pointer aims at tuned beacon · click to cycle stations"></canvas><div class="glbl">ADF / NDB</div></div>
 </div>
@@ -1495,7 +1496,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1608,6 +1609,7 @@ try {
     if (typeof saved.copilot === 'boolean') settings.copilot = saved.copilot;
     if (typeof saved.speedUnit === 'string' && SPEED_UNIT_IDS.indexOf(saved.speedUnit) !== -1) settings.speedUnit = saved.speedUnit;
     if (typeof saved.fuelSelector === 'string' && ['BOTH','LEFT','RIGHT'].indexOf(saved.fuelSelector) !== -1) settings.fuelSelector = saved.fuelSelector;
+    if (typeof saved.cockpitClockZulu === 'boolean') settings.cockpitClockZulu = saved.cockpitClockZulu;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -10450,6 +10452,13 @@ const state = {
   // already early-returns when the panel is hidden). resetPlane() wipes it
   // so every fresh sortie starts at 00:00.0.
   chrono: { running: false, elapsedMs: 0, lapMs: 0 },
+  // Cockpit clock. showZulu flips the analog face + digital window between
+  // simulated local time (state.todHours) and Zulu (UTC, offset +8h since
+  // KSEA is UTC-8 in-sim). Click on the cpClk gauge toggles the mode and
+  // persists to settings.cockpitClockZulu so the choice survives reloads;
+  // it's a pilot setting so resetPlane() leaves it alone, mirroring the
+  // fuelSelector / carbHeat / mixture pattern next door.
+  clock: { showZulu: !!(settings && settings.cockpitClockZulu) },
   // Cockpit VOR receiver. Picks the nearest airport as the station, computes
   // the radial FROM the station to the plane, and the CDI needle deflects
   // left/right based on how far that radial is off the selected OBS course
@@ -24461,6 +24470,7 @@ const cpFfCv  = document.getElementById('cpFf');
 const cpFuelCv = document.getElementById('cpFuel');
 const cpChrCv = document.getElementById('cpChr');
 const cpVorCv = document.getElementById('cpVor');
+const cpClkCv = document.getElementById('cpClk');
 const cpDaCv  = document.getElementById('cpDa');
 const cpAdfCv = document.getElementById('cpAdf');
 const cpEngCv = document.getElementById('cpEng');
@@ -24483,6 +24493,7 @@ const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
 const cpFuelCtx = cpFuelCv && cpFuelCv.getContext('2d');
 const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
 const cpVorCtx = cpVorCv && cpVorCv.getContext('2d');
+const cpClkCtx = cpClkCv && cpClkCv.getContext('2d');
 const cpDaCtx  = cpDaCv  && cpDaCv.getContext('2d');
 const cpAdfCtx = cpAdfCv && cpAdfCv.getContext('2d');
 // Click on the chronograph gauge to start/stop, right-click to record a lap
@@ -24549,6 +24560,20 @@ if (cpVorCv){
     let radial = Math.atan2(dx, -dz) * 180 / Math.PI;
     radial = ((Math.round(radial) % 360) + 360) % 360;
     state.vor.obs = radial;
+  });
+}
+// Cockpit clock interaction: click the gauge to toggle ZULU ↔ LOCAL. State
+// lives on state.clock.showZulu and persists to settings.cockpitClockZulu so
+// the choice survives reloads, mirroring the chronograph / VOR / ADF pattern
+// of keeping all clock-face interactions on the canvas itself so no new
+// keybinding is taken. Pilot setting — resetPlane() leaves it alone.
+if (cpClkCv){
+  cpClkCv.addEventListener('click', e => {
+    e.preventDefault();
+    if (!state.clock) return;
+    state.clock.showZulu = !state.clock.showZulu;
+    settings.cockpitClockZulu = !!state.clock.showZulu;
+    try { saveSettings(); } catch(e){}
   });
 }
 // ADF gauge interaction: click the canvas to cycle through the available
@@ -25720,6 +25745,92 @@ function drawCockpitChrono(){
   const lapText = chr.lapMs > 0 ? _formatChrono(chr.lapMs) : '--:--.-';
   ctx.fillText('LAP ' + lapText, cx, cy + R*0.62);
 }
+function drawCockpitClock(){
+  if (!cpClkCtx) return;
+  const W = cpClkCv.width, H = cpClkCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpClkCtx;
+  _cpBezel(ctx, W, H);
+  // Pull the live in-sim local time and derive a Zulu offset. KSEA sits at
+  // UTC-8 in-sim (USER.md / sim convention), so Zulu = local + 8h. wrap to
+  // 0..24 in both directions so the math is safe across midnight either way.
+  const showZulu = !!(state.clock && state.clock.showZulu);
+  const local = ((state.todHours % 24) + 24) % 24;
+  const tHours = showZulu ? ((local + 8) % 24) : local;
+  // Break tHours into 12-hour-face fractions so each hand has a clean
+  // floating-point position (the second hand sweeps in real time off the
+  // fractional minute, no per-frame jitter).
+  const totalSec = tHours * 3600;
+  const secF = (totalSec % 60);                // 0..60 — sweep seconds
+  const minF = ((totalSec / 60) % 60);          // 0..60 — sweep minutes
+  const hrF  = ((tHours % 12) + 12) % 12;       // 0..12 — sweep hours
+  // Mode label up top, color-keyed (amber = ZULU, cyan = LOCAL) so a glance
+  // at the panel tells the pilot which time domain they're reading. Sits in
+  // the same slot as the chronograph's CHRONO label so the cluster reads as
+  // a matched pair.
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.fillStyle = showZulu ? '#ffb347' : '#6ad8ff';
+  ctx.fillText(showZulu ? 'ZULU' : 'LOCAL', cx, cy - R*0.62);
+  // 12-hour bezel with Roman numerals. Major ticks at every hour, minor
+  // dot at every minute so the dial reads as a real wristwatch face and
+  // not just a bare circle with three hands.
+  const ROMAN = ['XII','I','II','III','IIII','V','VI','VII','VIII','IX','X','XI'];
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  for (let m = 0; m < 60; m++){
+    const a = -Math.PI/2 + (m / 60) * Math.PI * 2;
+    if (m % 5 === 0){
+      // Hour tick — thicker.
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (R - 6), cy + Math.sin(a) * (R - 6));
+      ctx.lineTo(cx + Math.cos(a) * (R - 18), cy + Math.sin(a) * (R - 18));
+      ctx.stroke();
+    } else {
+      // Minute dot — thin.
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (R - 6), cy + Math.sin(a) * (R - 6));
+      ctx.lineTo(cx + Math.cos(a) * (R - 11), cy + Math.sin(a) * (R - 11));
+      ctx.stroke();
+    }
+  }
+  ctx.font = 'bold 12px serif';
+  for (let h = 0; h < 12; h++){
+    const a = -Math.PI/2 + (h / 12) * Math.PI * 2;
+    const rt = R - 30;
+    ctx.fillText(ROMAN[h], cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+  }
+  // Three hands. _cpNeedle uses 0 = up, so the +Math.PI/2 phase matches
+  // the rest of the panel. Hour and minute hands are white, the sweep
+  // second is yellow so the eye picks up motion at a glance.
+  const hourA = -Math.PI/2 + (hrF / 12) * Math.PI * 2;
+  const minA  = -Math.PI/2 + (minF / 60) * Math.PI * 2;
+  const secA  = -Math.PI/2 + (secF / 60) * Math.PI * 2;
+  _cpNeedle(ctx, cx, cy, hourA + Math.PI/2, R * 0.45, '#e8eef5', 4);
+  _cpNeedle(ctx, cx, cy, minA  + Math.PI/2, R * 0.68, '#e8eef5', 3);
+  _cpNeedle(ctx, cx, cy, secA  + Math.PI/2, R - 16,    '#ffd166', 1.8);
+  // Center cap covers the three pivots so the stack reads clean.
+  ctx.fillStyle = '#0b1018';
+  ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.stroke();
+  // Digital HH:MM window underneath the dial, mode-tinted to match the top
+  // label so the two ends of the gauge agree without an extra glance.
+  const hh = Math.floor(tHours);
+  const mm = Math.floor((tHours - hh) * 60);
+  const digital = (hh < 10 ? '0'+hh : ''+hh) + ':' + (mm < 10 ? '0'+mm : ''+mm);
+  ctx.font = 'bold 20px ui-monospace, monospace';
+  ctx.fillStyle = showZulu ? '#ffb347' : '#7ee787';
+  ctx.fillText(digital, cx, cy + R*0.45);
+  // Suffix tag (Z or LT) tucked under the digital window for a final
+  // unambiguous read — same convention real cockpit chronos use.
+  ctx.font = 'bold 9px ui-monospace, monospace';
+  ctx.fillStyle = '#6aa';
+  ctx.fillText(showZulu ? 'Z' : 'LT', cx, cy + R*0.68);
+}
 function drawCockpitVor(){
   if (!cpVorCtx) return;
   const W = cpVorCv.width, H = cpVorCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
@@ -26338,6 +26449,11 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // (the OBS is a pilot setting that survives the power-up; the needle
   // and TO/FROM flag fall out of state.vor and the live plane position).
   drawCockpitVor();
+  // Cockpit clock — analog face + digital window driven off state.todHours.
+  // Click on the gauge toggles ZULU ↔ LOCAL (persisted to settings). Pure
+  // derived gauge so it tolerates the avionics self-test sweep without any
+  // special casing.
+  drawCockpitClock();
   // ADF / NDB: derived from the NDB list + the tuned station, mirrors the
   // VOR's tolerance of the avionics self-test sweep (the needle just keeps
   // pointing at the beacon while the rest of the panel powers up).
