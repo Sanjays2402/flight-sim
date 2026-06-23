@@ -2849,10 +2849,59 @@ function tickAirportBeacons(dt){
   const dir = sunDirFor(state.todHours);
   const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / AIRPORT_BEACON_NIGHT_FALLOFF));
   airportBeaconPhase = (airportBeaconPhase + dt * (Math.PI * 2 / AIRPORT_BEACON_PERIOD)) % (Math.PI * 2);
-  for (const b of airportBeacons){
+  // Tower light-gun flash: a one-shot directed beam aimed at the holding-short
+  // player. While active we override the chosen beacon's heads to a single
+  // solid color (with a red flicker) so the player sees a clear daylight-
+  // readable signal instead of the usual green/white sweep. Decrement first
+  // so a flash that just expired this frame doesn't render. Guarded with
+  // typeof so the priming call at module-load (before `state` exists) is safe.
+  let flash = (typeof state !== 'undefined' && state) ? state.lightGunFlash : null;
+  if (flash){
+    flash.tRemain -= dt;
+    if (flash.tRemain <= 0){
+      state.lightGunFlash = null;
+      flash = null;
+    }
+  }
+  for (let bi = 0; bi < airportBeacons.length; bi++){
+    const b = airportBeacons[bi];
     // Spin the head group as a unit; per-airport hdg offset so the two
     // beacons aren't all facing the same way at the same instant.
     b.headGrp.rotation.y = airportBeaconPhase + (b.ap.hdg || 0) * 1.7;
+    // Active light-gun flash on this beacon? Override both heads with the
+    // chosen color and pin glare to full so the signal reads in daylight.
+    if (flash && flash.beaconIdx === bi){
+      const lifeT = Math.max(0, Math.min(1, flash.tRemain / flash.tTotal));
+      // Soft ease-in / ease-out so the flash pops cleanly without a hard cut.
+      const env = Math.sin(Math.PI * lifeT);
+      // Red "hold position" is flashing per FAA convention; green and white
+      // are steady (the white "return to start" is technically flashing too
+      // but reads cleanly as a steady directed beam at sim scale).
+      let mod = 1.0;
+      if (flash.kind === 'red'){
+        // ~4 Hz square-ish flicker, clamped to [0.25, 1] so it never goes
+        // fully black mid-flash.
+        const s = Math.sin(flash.tRemain * Math.PI * 2 * 4);
+        mod = 0.25 + 0.75 * (s > 0 ? 1 : 0);
+      }
+      const flashCol = new THREE.Color(flash.color);
+      const eIE = 1.6 * env * mod;
+      b.greenMat.emissive.copy(flashCol).multiplyScalar(eIE);
+      b.whiteMat.emissive.copy(flashCol).multiplyScalar(eIE);
+      // Both glare sprites take the flash color so the directed beam reads
+      // the same regardless of which head is sweeping past the camera.
+      b.greenGlare.color.copy(flashCol);
+      b.whiteGlare.color.copy(flashCol);
+      const gOp = 0.85 * env * mod;
+      b.greenGlare.opacity = gOp;
+      b.whiteGlare.opacity = gOp;
+      continue;
+    } else {
+      // Restore the rotating beacon's native colors in case this beacon was
+      // mid-flash on a previous frame.
+      b.greenGlare.color.setHex(0x55ff66);
+      b.whiteGlare.color.setHex(0xfff4d0);
+    }
     // Emissive base always reflects the dusk gate so the bulbs glow even
     // when no one's looking straight at them.
     const gIE = 0.18 + 1.05 * nightT;
@@ -6054,6 +6103,18 @@ const state = {
   // long static run-up at full throttle doesn't spam the strip.
   takeoffClearArmed: true,
   takeoffClearFired: false,
+  // Tower light-gun signals (no-radio comms). When the player sits stationary
+  // on a runway with the engine running for ~6 seconds (i.e. "holding short
+  // with a dead radio"), the nearest airport beacon emits one steady 2s
+  // colored flash aimed at the player: green = cleared for takeoff (70%),
+  // flashing red = hold position (20%), white = return to start / taxi back
+  // (10%). One-shot per stop; re-arms once the wheels are rolling again.
+  lightGunArmed: true,
+  lightGunHoldT: 0,
+  lightGunFired: false,
+  // Active flash record: { beaconIdx, color (hex), kind ('green'|'red'|'white'),
+  // tRemain (seconds), tTotal (seconds) }. null when no flash is playing.
+  lightGunFlash: null,
   // Engine fire emergency. Rare random event in normal flight, or guaranteed
   // when a bird strike hits at high throttle. While `engineFire` is true,
   // `engineFireT` counts up the seconds since ignition (drives the cowl flame
@@ -7298,6 +7359,12 @@ function resetPlane(){
   // first throttle push past 70% with brakes off.
   state.takeoffClearArmed = true;
   state.takeoffClearFired = false;
+  // Tower light-gun: fresh sortie re-arms the holding-short detector and
+  // clears any beacon flash that might have been in flight at reset time.
+  state.lightGunArmed = true;
+  state.lightGunHoldT = 0;
+  state.lightGunFired = false;
+  state.lightGunFlash = null;
   // Landing light: a fresh sortie re-arms the auto-suggest latch so the
   // first night approach in the new flight gets the prompt again. The actual
   // on/off bit stays where the pilot left it (mirrors how pitot heat is
@@ -9958,6 +10025,7 @@ function step(dt){
   drawCrabIndicator(hdg);
   drawXwTakeoffHint();
   maybeFireTakeoffClearance();
+  maybeFireLightGun(dt);
   drawChecklist(indicatedKmh);
   drawMinimap(hdg);
   drawWeatherRadar();
@@ -11056,6 +11124,96 @@ function maybeFireTakeoffClearance(){
          + 'wind ' + dir + ' at ' + kt + '.';
   }
   pushATC(line, { tag:'TWR', now:true });
+}
+
+// ====== Tower light-gun signals ======
+// No-radio comms made visible. When the player parks on a runway with the
+// engine running and sits still for ~6 seconds (the classic "holding short
+// with a dead radio" pose), the nearest airport beacon fires one steady 2s
+// directed flash at the player's airplane. Colors follow real FAA light-gun
+// procedure: solid green = cleared for takeoff (most common), flashing red =
+// hold position / traffic (uncommon), white = return to start / taxi back
+// (rare). The ATC ticker echoes the matching phraseology so a brand-new
+// pilot can map the light to its meaning.
+//
+// Implementation: one-shot per stationary period. Re-arms once the wheels
+// are rolling again (gs > 1.5 m/s) so the next holding-short cycle gets a
+// fresh signal. The flash itself is rendered inside tickAirportBeacons by
+// pinning both heads on the chosen beacon to a super-emissive single color
+// for tTotal seconds, with a red flicker for the "hold" signal.
+const LIGHTGUN_HOLD_SECS = 6.0;       // seconds stationary on a runway before signal arms
+const LIGHTGUN_FLASH_SECS = 2.0;      // duration of the steady directed flash
+const LIGHTGUN_GROUND_REARM = 1.5;    // m/s ground speed above which the latch re-arms
+function maybeFireLightGun(dt){
+  const live = !state.crashed && !state.paused && !state.replayActive
+               && !state.photoMode && !state.introOpen;
+  if (!live){ state.lightGunHoldT = 0; return; }
+  if (!state.onGround){ state.lightGunHoldT = 0; return; }
+  // Engine must actually be running so a fuel-out airplane sitting derelict
+  // on the strip doesn't pull a green light.
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  if (!engineLive){ state.lightGunHoldT = 0; return; }
+  const gs = Math.hypot(state.vel.x, state.vel.z);
+  // Re-arm once we're rolling again so the next holding-short pose gets a
+  // fresh signal (mirrors the takeoff-clearance latch pattern).
+  if (state.lightGunFired && gs > LIGHTGUN_GROUND_REARM){
+    state.lightGunFired = false;
+    state.lightGunArmed = true;
+    state.lightGunHoldT = 0;
+  }
+  if (!state.lightGunArmed || state.lightGunFired) return;
+  // Movement resets the dwell timer — the call only fires after a real stop.
+  if (gs > 0.8){ state.lightGunHoldT = 0; return; }
+  // Must actually be on a runway (taxiway / apron / grass shouldn't trip it).
+  let onRwy = null;
+  try {
+    const proj = (typeof landingProj === 'function')
+      ? landingProj(plane.position.x, plane.position.z) : null;
+    if (proj && proj.ri && proj.onRunway) onRwy = proj;
+  } catch(e){ onRwy = null; }
+  if (!onRwy) return;
+  state.lightGunHoldT += dt;
+  if (state.lightGunHoldT < LIGHTGUN_HOLD_SECS) return;
+  // Find the beacon for this airport so we can flash the right tower.
+  let beaconIdx = -1;
+  for (let i = 0; i < airportBeacons.length; i++){
+    if (airportBeacons[i].ap === onRwy.ri.ap){ beaconIdx = i; break; }
+  }
+  if (beaconIdx < 0) return; // carrier deck etc. — no tower, no light gun
+  // Roll the signal. Green dominates so most cycles end in a takeoff.
+  const r = Math.random();
+  let kind, color, line;
+  let rwy = '';
+  try {
+    if (typeof runwayDesignator === 'function'){
+      rwy = runwayDesignator(onRwy.ri.ap.hdg, plane);
+    }
+  } catch(e){ rwy = ''; }
+  const rwyPart = rwy ? 'RWY ' + rwy + ', ' : '';
+  if (r < 0.70){
+    kind = 'green';
+    color = 0x55ff66;
+    line = onRwy.ri.ap.id + ', ' + rwyPart + 'steady green, cleared for takeoff.';
+  } else if (r < 0.90){
+    kind = 'red';
+    color = 0xff4040;
+    line = onRwy.ri.ap.id + ', ' + rwyPart + 'flashing red, hold position, traffic.';
+  } else {
+    kind = 'white';
+    color = 0xffffff;
+    line = onRwy.ri.ap.id + ', ' + rwyPart + 'flashing white, return to starting point on the airport.';
+  }
+  state.lightGunFlash = {
+    beaconIdx,
+    color,
+    kind,
+    tRemain: LIGHTGUN_FLASH_SECS,
+    tTotal: LIGHTGUN_FLASH_SECS
+  };
+  state.lightGunFired = true;
+  state.lightGunArmed = false;
+  state.lightGunHoldT = 0;
+  if (typeof pushATC === 'function') pushATC(line, { tag:'TWR', now:true });
 }
 
 // ====== Mini-map ======
