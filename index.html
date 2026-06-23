@@ -783,7 +783,7 @@
 <div id="bino"></div>
 <div id="hud" class="panel">
   <div class="row" id="divertRow" style="display:none;padding:3px 6px;margin:-4px -6px 4px;background:rgba(48,38,8,.78);border:1px solid #ffd166;border-radius:5px;justify-content:flex-start;gap:6px;box-shadow:0 0 12px rgba(255,209,102,.35)"><span id="divertChev" style="display:inline-block;color:#ffd166;font-weight:900;font-size:18px;line-height:1;transform-origin:50% 50%;text-shadow:0 0 6px rgba(255,209,102,.55)">↑</span><span style="color:#ffd166;font-weight:800;letter-spacing:1px">DIVERT</span><span class="val" style="color:#fff;font-weight:700;margin-left:auto"><span id="divertId">—</span> <span id="divertDist" style="color:#ffd166;margin-left:4px">—</span></span></div>
-  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h<span id="asiTag" style="display:none;margin-left:6px;color:#ff5252;font-weight:700">ASI</span><span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
+  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> <span id="spdUnit">km/h</span><span id="asiTag" style="display:none;margin-left:6px;color:#ff5252;font-weight:700">ASI</span><span id="pitotIce" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ PITOT ICE</span></span></div>
   <div class="row"><span class="lbl">G</span><span class="val"><span id="gnow">1.0</span> <span id="gpk" style="color:#6aa;font-weight:500">pk 1.0</span></span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
   <div class="row" id="rwyDistRow" style="display:none"><span class="lbl">RWY</span><span class="val"><span id="rwyDist">0.0 km</span><span id="rwyArrow" style="display:inline-block;margin-left:6px;color:#9ad8ff;font-weight:700;transform:rotate(0deg);transform-origin:50% 50%">↑</span></span></div>
@@ -804,7 +804,7 @@
   <div class="row" id="trimRow" style="display:none"><span class="lbl">TRIM</span><span class="val" id="trimReadout"><span id="trimArrow">▲</span> <span id="trimVal">0%</span></span></div>
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
-  <div class="row"><span id="bestGlide" style="display:none;color:#7ad0ff;font-weight:700" title="Engine out — pitch for best glide IAS">BEST GLIDE <span id="bestGlideTgt">105</span> km/h <span id="bestGlideIas" style="margin-left:6px;color:#7ee787">—</span></span></div>
+  <div class="row"><span id="bestGlide" style="display:none;color:#7ad0ff;font-weight:700" title="Engine out — pitch for best glide IAS">BEST GLIDE <span id="bestGlideTgt">105</span> <span id="bestGlideTgtUnit">km/h</span> <span id="bestGlideIas" style="margin-left:6px;color:#7ee787">—</span></span></div>
   <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
   <div class="row"><span id="catapult" style="display:none;color:#ffd166;font-weight:700"></span></div>
   <div class="row"><span id="landingLight" style="display:none;color:#fff3a8;font-weight:700">💡 LIGHT</span></div>
@@ -834,7 +834,7 @@
   <div class="row" id="clkGear"><span class="box">☐</span><span>GEAR DOWN</span></div>
   <div class="row" id="clkFlap"><span class="box">☐</span><span>FLAPS</span></div>
   <div class="row" id="clkFuel"><span class="box">☐</span><span>FUEL &gt;10%</span></div>
-  <div class="row" id="clkSpd"><span class="box">☐</span><span>SPEED &lt;200 km/h</span></div>
+  <div class="row" id="clkSpd"><span class="box">☐</span><span id="clkSpdText">SPEED &lt;200 km/h</span></div>
 </div>
 <div id="kneeboard">
   <div class="hdr"><span class="id" id="kbId">—</span><span class="nm" id="kbName">briefing</span></div>
@@ -912,7 +912,7 @@
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
 <div id="cockpitPanel">
   <div id="cpPitotHeat" style="display:none;position:absolute;top:-18px;right:8px;font-size:9px;letter-spacing:1.5px;color:#ff9e3d;font-weight:800;text-shadow:0 0 6px rgba(255,158,61,.55)">● PITOT HEAT</div>
-  <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl">AIRSPEED km/h</div></div>
+  <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl" id="cpAsiLbl">AIRSPEED km/h</div></div>
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
   <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
@@ -946,6 +946,11 @@
       <div class="top"><span class="name">AUDIO VOLUME</span><span class="val" id="setVolV">100%</span></div>
       <input type="range" id="setVol" min="0" max="100" step="5" value="100">
       <div class="hint">Master volume (stall horn, future engine sound).</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">SPEED UNITS</span><span class="val" id="setSpeedUnitV">KM/H</span></div>
+      <select id="setSpeedUnit"></select>
+      <div class="hint">Every visible speed readout (HUD SPD, cockpit ASI, best glide, checklist, wind) switches to the chosen unit. Flight model stays in km/h internally, so nothing flight-modelly changes.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">MAG VAR</span><span class="val" id="setMagVarV">+15°E</span></div>
@@ -1230,8 +1235,8 @@
       <span>Quick-jump airport</span><span><kbd>J</kbd>, <kbd>1</kbd>–<kbd>9</kbd> · <kbd>Shift</kbd>+digit = other end</span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
-    <div class="tip">
-      Throttle to ~80%, hold <kbd>I</kbd> at ~140 km/h to rotate. Retract gear with <kbd>G</kbd>.
+    <div class="tip" id="helpRotateTip">
+      Throttle to ~80%, hold <kbd>I</kbd> at <span class="rotateSpeed">~140 km/h</span> to rotate. Retract gear with <kbd>G</kbd>.
       Three airfields scattered across mountains, lakes &amp; coast. To land: lower gear, deploy flaps, fly the PAPI — <span style="color:#ff3030">red</span>=low, <span style="color:#fff">white</span>=high, 2&amp;2=on slope.
       Watch the <b>WIND</b> readout — a stiff crosswind on final means you’ll need rudder (<kbd>Q</kbd>/<kbd>E</kbd>) to crab the nose into the breeze.
     </div>
@@ -1261,7 +1266,7 @@
         <div class="line"><span class="nm">Ignition crank</span><span class="keys"><kbd>I</kbd></span></div>
       </div>
     </div>
-    <div class="tip">Throttle to ~80%, hold <kbd>I</kbd> at ~140 km/h to rotate. Press <kbd>,</kbd> any time for full settings, <kbd>Esc</kbd> for the pause menu. You can re-open this guide later from Settings.</div>
+    <div class="tip" id="tutRotateTip">Throttle to ~80%, hold <kbd>I</kbd> at <span class="rotateSpeed">~140 km/h</span> to rotate. Press <kbd>,</kbd> any time for full settings, <kbd>Esc</kbd> for the pause menu. You can re-open this guide later from Settings.</div>
     <label class="opt"><input type="checkbox" id="tutSkip"> Don't show this again</label>
     <div class="actions">
       <button id="tutGotIt" class="primary" type="button">GOT IT</button>
@@ -1309,7 +1314,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh' };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1347,6 +1352,26 @@ const TRAIL_COLORS = [
   { id: 'magenta', name: 'MAGENTA', hex: 0xff4ad2 },
 ];
 const TRAIL_COLOR_IDS = TRAIL_COLORS.map(t => t.id);
+// Speed-unit display modes. Physics + flight model stay in km/h internally;
+// every pilot-facing speed readout (HUD SPD, cockpit ASI dial labels, best
+// glide, checklist, takeoff tips, HUD WIND, touchdown banners) runs its number
+// through speedFromKmh() and pairs it with speedSuffix() at draw time. Factor
+// is the multiplier applied to a km/h value to convert it INTO this unit.
+const SPEED_UNITS = [
+  { id: 'kmh', name: 'KM/H',  suffix: 'km/h', factor: 1            },
+  { id: 'kt',  name: 'KNOTS', suffix: 'kt',   factor: 0.539956803  }, // 1 km/h → kt
+  { id: 'mph', name: 'MPH',   suffix: 'mph',  factor: 0.621371192  }, // 1 km/h → mph
+];
+const SPEED_UNIT_IDS = SPEED_UNITS.map(u => u.id);
+function speedUnitEntry(){
+  return SPEED_UNITS.find(u => u.id === settings.speedUnit) || SPEED_UNITS[0];
+}
+function speedSuffix(){ return speedUnitEntry().suffix; }
+function speedFromKmh(kmh){ return (+kmh || 0) * speedUnitEntry().factor; }
+function speedFmt(kmh){
+  // Pretty rounded value + suffix, e.g. "105 km/h" / "57 kt" / "65 mph".
+  return Math.round(speedFromKmh(kmh)) + ' ' + speedSuffix();
+}
 // Windshield wiper modes. `auto` runs at a steady cadence whenever rain is on,
 // `off` parks the blades, `slow`/`fast` are manual cycles. The `N` key cycles
 // off→slow→fast→off; the settings panel dropdown exposes the auto mode.
@@ -1398,6 +1423,7 @@ try {
     if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
     if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
     if (typeof saved.copilot === 'boolean') settings.copilot = saved.copilot;
+    if (typeof saved.speedUnit === 'string' && SPEED_UNIT_IDS.indexOf(saved.speedUnit) !== -1) settings.speedUnit = saved.speedUnit;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -1405,6 +1431,32 @@ camera.updateProjectionMatrix();
 function saveSettings(){
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch(e){ /* private mode — skip */ }
 }
+// Push the current speed-unit suffix + converted numeric labels into the
+// static-markup spans / tutorial tips that don't get touched every sim frame.
+// Per-frame readouts (#spd, #wind, cockpit ASI ticks, best-glide IAS) pull the
+// unit live via speedFmt() in their existing draw paths.
+function applySpeedUnitText(){
+  const suf = speedSuffix();
+  const _spdU = document.getElementById('spdUnit');
+  if (_spdU) _spdU.textContent = suf;
+  const _bgU = document.getElementById('bestGlideTgtUnit');
+  if (_bgU) _bgU.textContent = suf;
+  const _bgT = document.getElementById('bestGlideTgt');
+  if (_bgT) _bgT.textContent = String(Math.round(speedFromKmh(BEST_GLIDE_KMH_DEF)));
+  const _clk = document.getElementById('clkSpdText');
+  if (_clk) _clk.textContent = 'SPEED <' + Math.round(speedFromKmh(CHECKLIST_SPEED_OK_DEF)) + ' ' + suf;
+  const _asiLbl = document.getElementById('cpAsiLbl');
+  if (_asiLbl) _asiLbl.textContent = 'AIRSPEED ' + suf;
+  // Two ~140 km/h rotate-speed mentions in the intro + tutorial tips.
+  const rotateStr = '~' + Math.round(speedFromKmh(ROTATE_SPEED_TIP_KMH)) + ' ' + suf;
+  document.querySelectorAll('.rotateSpeed').forEach(el => { el.textContent = rotateStr; });
+}
+// Canonical km/h values that the static tips/checklist/best-glide labels reference
+// so the conversion uses one source of truth. These mirror the live thresholds
+// in the sim (CHECKLIST_SPEED_OK, BEST_GLIDE_KMH, the ~140 km/h rotate hint).
+const BEST_GLIDE_KMH_DEF = 105;
+const CHECKLIST_SPEED_OK_DEF = 200;
+const ROTATE_SPEED_TIP_KMH = 140;
 
 // ====== PILOT STATS ======
 // Lifetime tally across every flight: total flights, successful landings,
@@ -11126,7 +11178,7 @@ function showCrashCard(d){
   ccSinkEl.textContent = d.sinkRate.toFixed(1) + ' m/s';
   ccSinkEl.className = 'val' + (d.sinkRate >= 10 ? ' bad' : d.sinkRate >= 5 ? ' warn' : '');
   // Speed at impact — amber > 200 km/h, red > 280.
-  ccSpdEl.textContent = Math.round(d.speedKmh) + ' km/h';
+  ccSpdEl.textContent = speedFmt(d.speedKmh);
   ccSpdEl.className = 'val' + (d.speedKmh >= 280 ? ' bad' : d.speedKmh >= 200 ? ' warn' : '');
   // AoA at impact — amber when near/over stall.
   ccAoaEl.textContent = d.aoaDeg.toFixed(1) + '°';
@@ -11176,7 +11228,7 @@ function showLandCard(d){
   state.landReport = d;
   lcVerdictEl.textContent = pickLandVerdict(d);
   // TD speed — green in the 90–140 km/h sweet spot, amber outside, red way out.
-  lcSpdEl.textContent = Math.round(d.speedKmh) + ' km/h';
+  lcSpdEl.textContent = speedFmt(d.speedKmh);
   lcSpdEl.className = 'val' + (d.speedKmh > 200 || d.speedKmh < 70 ? ' bad'
                               : (d.speedKmh > 150 || d.speedKmh < 90) ? ' warn'
                               : ' good');
@@ -17232,7 +17284,7 @@ function step(dt){
           }
         }
         const title = (sinkRate < 2.5 ? 'GREASED IT' : 'GOOD LANDING') + ' · +' + score;
-        const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+Math.round(fwdKmh)+' km/h @ '+apid + extra;
+        const sub = 'Sink '+sinkRate.toFixed(1)+' m/s · CL '+centerOff.toFixed(1)+'m · '+speedFmt(fwdKmh)+' @ '+apid + extra;
         showStatus(title, sub, 'good');
         pushATC(apid + ', cleared to land confirmed. Welcome in.', { now:true });
         // NOTAM violation banner + pilot ATC. Fires AFTER the good-landing
@@ -17855,7 +17907,7 @@ function step(dt){
   const todM = Math.floor((state.todHours - todH) * 60);
   $('#tod').textContent = String(todH).padStart(2,'0') + ':' + String(todM).padStart(2,'0');
 
-  $('#spd').textContent  = Math.round(indicatedKmh);
+  $('#spd').textContent  = Math.round(speedFromKmh(indicatedKmh));
   $('#alt').textContent  = Math.round(altMDisp);
   // RWY distance pill: straight-line distance to the nearest runway threshold
   // (either end of any runway, including the carrier deck since it lives in
@@ -18003,7 +18055,7 @@ function step(dt){
         const ad = Math.abs(delta);
         const ind = document.getElementById('bestGlideIas');
         if (ind){
-          ind.textContent = Math.round(indicatedKmh) + ' km/h';
+          ind.textContent = speedFmt(indicatedKmh);
           ind.style.color = ad <= 5 ? '#7ee787'
                           : ad <= 15 ? '#ffb020'
                                      : '#ff5252';
@@ -21888,8 +21940,14 @@ function drawCockpitAsi(speedKmh){
   const W = cpAsiCv.width, H = cpAsiCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
   const ctx = cpAsiCtx;
   _cpBezel(ctx, W, H);
-  // Scale: 0..400 km/h sweeps 240° (from -210° to +30° around the dial top).
-  const SPEED_MAX = 400;
+  // Convert km/h → the chosen display unit. Dial geometry is laid out in the
+  // chosen unit so major-tick labels stay round (0, 50, 100, ...). Underlying
+  // physics still feeds km/h — only the display values + scale max convert.
+  const unitFactor = speedUnitEntry().factor;
+  // Dial covers 0..400 km/h worth of speed in the chosen unit, rounded up to
+  // the next 50-unit step so the major ticks stay clean.
+  const speedMaxBase = 400 * unitFactor;
+  const SPEED_MAX = Math.ceil(speedMaxBase / 50) * 50;
   const sweep = Math.PI * 4/3; // 240°
   const startA = -Math.PI - Math.PI/6; // start at lower-left
   ctx.strokeStyle = '#dfe';
@@ -21897,7 +21955,7 @@ function drawCockpitAsi(speedKmh){
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = 'bold 18px ui-monospace, monospace';
-  // Major ticks every 50 km/h with labels, minor every 10.
+  // Major ticks every 50 units with labels, minor every 10.
   for (let v = 0; v <= SPEED_MAX; v += 10){
     const a = startA + (v / SPEED_MAX) * sweep;
     const major = (v % 50 === 0);
@@ -21913,27 +21971,27 @@ function drawCockpitAsi(speedKmh){
       ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
     }
   }
-  // Red stall arc near the bottom of the dial (0..60 km/h).
+  // Red stall arc near the bottom of the dial (0..60 km/h equivalent).
   ctx.strokeStyle = '#ff5252';
   ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.arc(cx, cy, R - 28, startA, startA + (60 / SPEED_MAX) * sweep);
+  ctx.arc(cx, cy, R - 28, startA, startA + ((60 * unitFactor) / SPEED_MAX) * sweep);
   ctx.stroke();
-  // Green normal-ops band 80..220.
+  // Green normal-ops band 80..220 km/h equivalent.
   ctx.strokeStyle = '#7ee787';
   ctx.beginPath();
-  ctx.arc(cx, cy, R - 28, startA + (80 / SPEED_MAX) * sweep, startA + (220 / SPEED_MAX) * sweep);
+  ctx.arc(cx, cy, R - 28, startA + ((80 * unitFactor) / SPEED_MAX) * sweep, startA + ((220 * unitFactor) / SPEED_MAX) * sweep);
   ctx.stroke();
   // Needle.
-  const s = Math.max(0, Math.min(SPEED_MAX, speedKmh));
+  const sDisp = Math.max(0, Math.min(SPEED_MAX, speedKmh * unitFactor));
   // Needle is drawn with rotate(angle) where 0 points up; map dial angle a (in
   // standard math coords measured from +X axis) into a top-up rotation.
-  const a = startA + (s / SPEED_MAX) * sweep;
+  const a = startA + (sDisp / SPEED_MAX) * sweep;
   _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
   // Digital readout below center.
   ctx.fillStyle = '#7ee787';
   ctx.font = 'bold 20px ui-monospace, monospace';
-  ctx.fillText(Math.round(s), cx, cy + R*0.55);
+  ctx.fillText(Math.round(sDisp), cx, cy + R*0.55);
 }
 function drawCockpitAi(qPlane){
   if (!cpAiCtx) return;
@@ -23720,6 +23778,7 @@ function applyRunwayWetness(){
   }
 }
 applyRainVisible();
+applySpeedUnitText();
 // Fog weather toggle. OFF restores the original long-range clear-day haze;
 // LIGHT/HEAVY clamp scene.fog.near/far so the world dissolves into a soft
 // grey wall well before the camera's far plane. The fog *color* is still
@@ -25068,6 +25127,8 @@ addEventListener('keydown', e => {
   const wiperV = document.getElementById('setWiperV');
   const voiceSel = document.getElementById('setVoice');
   const voiceV = document.getElementById('setVoiceV');
+  const speedUnitSel = document.getElementById('setSpeedUnit');
+  const speedUnitV = document.getElementById('setSpeedUnitV');
   if (!panel || !btnOpen) return;
   // Build the livery chip row once. Each chip stores its index and repaints the
   // plane on click via applyLivery(); selection state is reflected on syncInputs.
@@ -25151,6 +25212,17 @@ addEventListener('keydown', e => {
     }
   }
   buildSnowOptions();
+  function buildSpeedUnitOptions(){
+    if (!speedUnitSel) return;
+    speedUnitSel.innerHTML = '';
+    for (const opt of SPEED_UNITS){
+      const o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.name;
+      speedUnitSel.appendChild(o);
+    }
+  }
+  buildSpeedUnitOptions();
   function syncInputs(){
     sens.value = Math.round(settings.sensitivity * 100);
     fov.value = Math.round(settings.fov);
@@ -25223,6 +25295,13 @@ addEventListener('keydown', e => {
       const sl = SNOW_LEVELS.find(s => s.id === settings.snow) || SNOW_LEVELS[0];
       snowV.textContent = sl.name;
     }
+    if (speedUnitSel) speedUnitSel.value = settings.speedUnit;
+    if (speedUnitV){
+      speedUnitV.textContent = speedUnitEntry().name;
+    }
+    // Push the unit suffix into the static-markup HUD spans + tutorial tips so
+    // the dropdown change reads instantly without waiting for the next sim tick.
+    applySpeedUnitText();
   }
   function applyFov(){
     camera.fov = settings.fov;
@@ -25275,6 +25354,15 @@ addEventListener('keydown', e => {
         settings.rain = false;
       }
       applyRainVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (speedUnitSel){
+    speedUnitSel.addEventListener('change', () => {
+      const v = speedUnitSel.value;
+      if (SPEED_UNIT_IDS.indexOf(v) === -1) return;
+      settings.speedUnit = v;
       syncInputs();
       saveSettings();
     });
