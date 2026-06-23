@@ -2913,6 +2913,56 @@ flapL.position.set(-2.4, 0.04, 0.62);
 flapR.position.set( 2.4, 0.04, 0.62);
 plane.add(flapL); plane.add(flapR);
 
+// Animated control surfaces — outboard ailerons on each wing trailing edge,
+// elevator on the tailplane TE, rudder on the fin TE. Each surface is a thin
+// slab glued to a small pivot group hinged at its leading edge, so rotating
+// the pivot swings the trailing edge up/down (or left/right for the rudder)
+// without translating the slab off the airframe. Lerped toward the live
+// stick / autopilot / trim input so the plane finally looks alive at rest
+// and on rollout instead of being a rigid airframe with only flaps moving.
+// Hidden in cockpit cam by the existing plane.children airframe-hide loop.
+function mkSurface(w, h, d){
+  // Slab geo centered at +d/2 inside a parent pivot so the pivot sits at the
+  // slab's leading edge and rotation pivots around that hinge line.
+  const pivot = new THREE.Group();
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matAccent);
+  slab.position.z = d/2;
+  pivot.add(slab);
+  return pivot;
+}
+// Outboard ailerons: each ~1.0m wide x 0.35m chord, hinged at z=+0.42 on the
+// outer wing TE (just outboard of the flap mid-section). y=+0.15 puts them on
+// top of the wing TE (clear of the wing's top face at y=0.11) so they read
+// clearly from chase/orbit/photo views.
+const aileronL = mkSurface(1.0, 0.05, 0.35);
+const aileronR = mkSurface(1.0, 0.05, 0.35);
+aileronL.position.set(-3.6, 0.15, 0.42);
+aileronR.position.set( 3.6, 0.15, 0.42);
+plane.add(aileronL); plane.add(aileronR);
+// Elevator: 2.8m wide x 0.30m chord hinged at z=+3.86 (just aft of the
+// tailplane TE at z=3.85, tiny gap so co-planar faces don't z-fight).
+const elevator = mkSurface(2.8, 0.05, 0.30);
+elevator.position.set(0, 0.30, 3.86);
+plane.add(elevator);
+// Rudder: 0.10m wide x 0.80m tall x 0.40m chord hinged at z=+3.96 (just aft
+// of the fin TE at z=3.95, tiny gap to avoid z-fight). Hinges around Y so the
+// TE swings left/right under yaw input.
+const rudder = mkSurface(0.10, 0.80, 0.40);
+rudder.position.set(0, 0.70, 3.96);
+plane.add(rudder);
+
+// Smoothed surface deflection state. Eased toward target each frame so a
+// stick snap doesn't make the surfaces visibly twitch. Max deflection picked
+// to read like real-world max travel (~22° aileron/elevator, ~28° rudder)
+// without ever colliding with the surrounding airframe.
+let aileronAnim = 0;          // -1..+1, rendered roll input
+let elevatorAnim = 0;         // -1..+1, rendered pitch input
+let rudderAnim = 0;           // -1..+1, rendered yaw input
+const AILERON_MAX_RAD  = 0.38;   // ~22° trailing-edge deflection
+const ELEVATOR_MAX_RAD = 0.38;   // ~22° trailing-edge deflection
+const RUDDER_MAX_RAD   = 0.49;   // ~28° trailing-edge deflection
+const SURFACE_RATE     = 7.0;    // 1/sec lerp rate (snappy but not twitchy)
+
 // Animated gear + flap state. Flaps used to snap to their target deflection and
 // the gear group used to flip visible/invisible. Now we ease toward the target
 // so the wing surfaces visibly hinge down and the gear tucks up into the belly
@@ -6423,6 +6473,11 @@ function resetPlane(){
   wingFlexCurrent = 0;
   if (wingTipPivotL) wingTipPivotL.rotation.z = 0;
   if (wingTipPivotR) wingTipPivotR.rotation.z = 0;
+  // Control surfaces snap back to neutral so a fresh sortie doesn't inherit
+  // a deflected aileron / elevator / rudder from the previous flight.
+  aileronAnim = 0; elevatorAnim = 0; rudderAnim = 0;
+  aileronL.rotation.x = 0; aileronR.rotation.x = 0;
+  elevator.rotation.x = 0; rudder.rotation.y = 0;
   state.brakes = false;
   // Parking brake clears on reset/restart so the new sortie isn't held
   // hostage by a latch left over from the previous one.
@@ -8248,6 +8303,38 @@ function step(dt){
   flapR.rotation.x = flapAnimRad;
   gearGrp.position.y = -gearAnim * GEAR_LIFT;
   gearGrp.visible = gearAnim < 0.999;
+
+  // Animated control surfaces: lerp the rendered deflection toward the live
+  // effective stick input (pIn/rIn/yIn already include AP overrides + trim).
+  // Roll: right-roll command (rIn>0) drops the RIGHT aileron's TE and lifts
+  // the LEFT one (asymmetric, mirrored sign). Pitch: pull-back (pIn<0) lifts
+  // the elevator TE up. Yaw: right-rudder (yIn>0) swings the rudder TE right
+  // around its Y hinge. SURFACE_RATE keeps a stick-jab from popping the
+  // surfaces — they ease in over ~150ms.
+  {
+    const sStep = SURFACE_RATE * dt;
+    const aT = Math.max(-1, Math.min(1, rIn));
+    const eT = Math.max(-1, Math.min(1, pIn));
+    const rT = Math.max(-1, Math.min(1, yIn));
+    if (aileronAnim  < aT) aileronAnim  = Math.min(aT, aileronAnim  + sStep);
+    else if (aileronAnim  > aT) aileronAnim  = Math.max(aT, aileronAnim  - sStep);
+    if (elevatorAnim < eT) elevatorAnim = Math.min(eT, elevatorAnim + sStep);
+    else if (elevatorAnim > eT) elevatorAnim = Math.max(eT, elevatorAnim - sStep);
+    if (rudderAnim   < rT) rudderAnim   = Math.min(rT, rudderAnim   + sStep);
+    else if (rudderAnim   > rT) rudderAnim   = Math.max(rT, rudderAnim   - sStep);
+    // Mirror sign on the ailerons so roll command produces opposite
+    // deflection on each wing. Elevator/rudder are single-surface so they
+    // just track their respective input directly.
+    aileronL.rotation.x =  aileronAnim * AILERON_MAX_RAD;
+    aileronR.rotation.x = -aileronAnim * AILERON_MAX_RAD;
+    // pIn<0 = pull back = elevator TE swings UP. In this coord system the
+    // tailplane sits at +Z so a NEGATIVE X-rotation of the hinge lifts the
+    // TE (rotates trailing edge toward +Y). Multiply by -1 to match feel.
+    elevator.rotation.x = -elevatorAnim * ELEVATOR_MAX_RAD;
+    // yIn>0 = right rudder = TE swings to the +X side. Rudder hinge axis is
+    // Y, so a NEGATIVE Y-rotation swings the TE that way.
+    rudder.rotation.y   = -rudderAnim   * RUDDER_MAX_RAD;
+  }
 
   // Wing flex: bend the wingtip pivots upward proportional to the live G-load
   // we already compute for the G-meter. Hard 4° clamp so it reads as visible
@@ -12081,6 +12168,10 @@ updateCamModeUi();
     gearGrp.visible = true;
     flapL.rotation.x = 0;
     flapR.rotation.x = 0;
+    // Surfaces neutral so the teleport doesn't leave them frozen mid-deflection.
+    aileronAnim = 0; elevatorAnim = 0; rudderAnim = 0;
+    aileronL.rotation.x = 0; aileronR.rotation.x = 0;
+    elevator.rotation.x = 0; rudder.rotation.y = 0;
     state.brakes = false;
     state.parkingBrake = false;
     state.onGround = true;
