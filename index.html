@@ -2784,6 +2784,55 @@ function makeAirport(a){
       }
     }
   })();
+  // Aim-point bars + fixed-distance markers — the two fat painted-white
+  // rectangles every real-world runway has, plus a smaller paired marker
+  // 150 m further down. Aim points sit centered 300 m past each threshold
+  // (right at PAPI/touchdown reference aimX/aimZ), fixed-distance markers
+  // 450 m past each threshold. Paired across the centerline, long axis runs
+  // ALONG the runway. ICAO/FAA dimensions trimmed to read well at sim scale
+  // without dwarfing the centerline dashes. Carrier deck has its own
+  // markings (arrestor wires + touchdown box) and is built elsewhere, so
+  // this code only runs for ground airports as part of makeAirport().
+  (function paintAimAndFixedDist(){
+    const aimMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.95,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1
+    });
+    const AIM_LEN = 50;    // metres along the runway (FAA spec ~45-60 m)
+    const AIM_W = 5;       // metres across
+    const FDM_LEN = 22;    // metres along (FAA spec ~22.5 m)
+    const FDM_W = 3;       // metres across
+    const OFFSET = 9;      // metres off centerline to each bar's center
+    // Skip pairs whose outboard edge would leave the runway pavement.
+    const halfW = a.w / 2;
+    const aimOutboard = OFFSET + AIM_W / 2;
+    const fdmOutboard = OFFSET + FDM_W / 2;
+    const aimGeo = (aimOutboard <= halfW - 1) ? new THREE.PlaneGeometry(AIM_W, AIM_LEN) : null;
+    const fdmGeo = (fdmOutboard <= halfW - 1) ? new THREE.PlaneGeometry(FDM_W, FDM_LEN) : null;
+    // Skip the fixed-distance marker if the strip is too short for both
+    // threshold pairs to fit without the opposing markers crowding midfield.
+    const fdmFits = a.len >= 2 * 450 + 100;
+    for (const end of [-1, 1]){
+      if (aimGeo){
+        const aimZ = end * (a.len / 2 - 300);
+        for (const side of [-1, 1]){
+          const bar = new THREE.Mesh(aimGeo, aimMat);
+          bar.rotation.x = -Math.PI / 2;
+          bar.position.set(side * OFFSET, 0.045, aimZ);
+          grp.add(bar);
+        }
+      }
+      if (fdmGeo && fdmFits){
+        const fdmZ = end * (a.len / 2 - 450);
+        for (const side of [-1, 1]){
+          const bar = new THREE.Mesh(fdmGeo, aimMat);
+          bar.rotation.x = -Math.PI / 2;
+          bar.position.set(side * OFFSET, 0.045, fdmZ);
+          grp.add(bar);
+        }
+      }
+    }
+  })();
   const edgeGeo = new THREE.PlaneGeometry(0.5, a.len);
   for (const side of [-1, 1]){
     const e = new THREE.Mesh(edgeGeo, wMat);
