@@ -140,6 +140,26 @@
      the cone, so it never nags outside approach. Hidden in photo mode via
      PHOTO_HIDE_IDS so saved PNGs stay clean. */
   #checklist { position:fixed; top:328px; right:12px; min-width:172px; padding:6px 10px 7px; font-size:11px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); display:none; z-index:5; pointer-events:none; box-shadow:0 0 12px rgba(0,0,0,.4); }
+  /* Pre-flight checklist (Shift+K): left-side panel that lists the six
+     items a pilot would scan before takeoff. Each row auto-ticks green as
+     the player satisfies its condition (canopy closed, parking brake set,
+     fuel CHECK, trim NEUTRAL, flaps set, pitot/mixture READY); pending
+     rows stay amber. Closes with Shift+K, auto-hides on takeoff or when
+     the sim is paused / in photo / replay / intro / crashed. Pure HUD
+     overlay — does not pause the sim, does not steal pointer events. */
+  #preflight { position:fixed; top:160px; left:12px; width:228px; padding:10px 12px 11px; font-size:12px; color:#cfe; background:rgba(8,14,22,.92); border:1px solid #2a4a6a; border-radius:8px; backdrop-filter:blur(8px); display:none; z-index:7; pointer-events:none; box-shadow:0 6px 18px rgba(0,0,0,.45); }
+  #preflight.show { display:block; }
+  #preflight .ttl { color:#ffd166; font-weight:800; letter-spacing:2px; font-size:11px; margin-bottom:2px; }
+  #preflight .sub { color:#9bb; font-size:10px; letter-spacing:1px; margin-bottom:7px; }
+  #preflight .row { display:flex; align-items:center; gap:8px; padding:3px 0; font-family:ui-monospace, monospace; font-size:12px; line-height:1.35; color:#ffb066; transition:color .25s ease; }
+  #preflight .row .box { display:inline-block; width:14px; text-align:center; color:#ffb066; font-weight:700; transition:color .25s ease; }
+  #preflight .row .lbl { flex:1 1 auto; }
+  #preflight .row .state { color:#9bb; font-size:10px; letter-spacing:1px; }
+  #preflight .row.ok { color:#7ee787; }
+  #preflight .row.ok .box { color:#7ee787; }
+  #preflight .row.ok .state { color:#7ee787; }
+  #preflight .foot { margin-top:8px; padding-top:7px; border-top:1px solid #1e3548; color:#9bb; font-size:10px; letter-spacing:1px; }
+  #preflight .foot .done { color:#7ee787; font-weight:700; }
   #checklist .ttl { color:#ffd166; font-weight:700; letter-spacing:1px; font-size:10px; margin-bottom:4px; }
   #checklist .row { display:flex; align-items:center; gap:6px; padding:1px 0; font-family:ui-monospace, monospace; font-size:11px; line-height:1.35; }
   #checklist .row .box { display:inline-block; width:11px; text-align:center; color:#6aa; }
@@ -590,6 +610,17 @@
   <div class="row" id="clkFuel"><span class="box">☐</span><span>FUEL &gt;10%</span></div>
   <div class="row" id="clkSpd"><span class="box">☐</span><span>SPEED &lt;200 km/h</span></div>
 </div>
+<div id="preflight">
+  <div class="ttl">PRE-FLIGHT</div>
+  <div class="sub">RUN BEFORE TAKEOFF</div>
+  <div class="row" id="pfCanopy"><span class="box">☐</span><span class="lbl">CANOPY</span><span class="state" id="pfCanopyState">OPEN</span></div>
+  <div class="row" id="pfBrake"><span class="box">☐</span><span class="lbl">PARKING BRAKE</span><span class="state" id="pfBrakeState">OFF</span></div>
+  <div class="row" id="pfFuel"><span class="box">☐</span><span class="lbl">FUEL</span><span class="state" id="pfFuelState">—</span></div>
+  <div class="row" id="pfTrim"><span class="box">☐</span><span class="lbl">TRIM</span><span class="state" id="pfTrimState">—</span></div>
+  <div class="row" id="pfFlaps"><span class="box">☐</span><span class="lbl">FLAPS</span><span class="state" id="pfFlapsState">0</span></div>
+  <div class="row" id="pfPitot"><span class="box">☐</span><span class="lbl">PITOT / MIXTURE</span><span class="state" id="pfPitotState">CHECK</span></div>
+  <div class="foot" id="pfFoot">0 / 6 complete · <kbd>Shift</kbd>+<kbd>K</kbd> to close</div>
+</div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
 <div id="score">
@@ -605,7 +636,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1054,6 +1085,13 @@ function savePilotStats(){
 let flightStartMs = null;
 function onTakeoff(){
   if (flightStartMs != null) return;
+  // Auto-close the pre-flight checklist on liftoff so it doesn't linger
+  // into the climb. (updatePreflight() also catches this via the
+  // !state.onGround gate, but doing it explicitly here means no
+  // one-frame post-liftoff flash of the panel.)
+  if (state.preflightOpen && typeof setPreflightOpen === 'function'){
+    try { setPreflightOpen(false); } catch(e){}
+  }
   flightStartMs = performance.now();
   pilotStats.totalFlights += 1;
   savePilotStats();
@@ -7183,6 +7221,16 @@ const state = {
   // jumpOpen: the K-toggle handler and any Esc consumer check this so the
   // keypad's own close path wins cleanly before falling through to pause.
   sqkeypadOpen: false,
+  // Pre-flight checklist (#preflight) overlay visible. Shift+K toggles.
+  // Pure HUD panel — does NOT pause the sim and does NOT block input, so
+  // it's not listed in isAnyOtherModalOpen(). Auto-closes on takeoff or
+  // any unsafe mode (intro/replay/photo/crashed) via updatePreflight().
+  preflightOpen: false,
+  // 6-bit mask of which preflight rows have already played their soft sine
+  // pip. Reset on resetPlane() and whenever the panel closes so the player
+  // gets a fresh chime sequence on every panel session, but a row that
+  // ticks/unticks/reticks during the same session pips only once.
+  preflightPipMask: 0,
   mode: 'free',
   hopOrder: [],
   hopIdx: 0,
@@ -7501,6 +7549,17 @@ addEventListener('keydown', e=>{
   // startWarnTest() so the keyup handler can mirror the same checks.
   if (e.code==='KeyT' && e.shiftKey){ startWarnTest(); return; }
   if (e.code==='KeyT' && !e.shiftKey) state.todHours = (state.todHours + 1) % 24;
+  // Shift+K toggles the pre-flight checklist overlay. Plain K opens the
+  // transponder squawk keypad (handled in setupSquawkUi() below) and is
+  // also tied to the pitch-down control via the global `keys` map, so we
+  // gate strictly on `e.shiftKey` here. togglePreflight() owns the
+  // open/close + screen-state safety checks (no opening over intro,
+  // replay, photo, pause, or a crashed wreck).
+  if (e.code==='KeyK' && e.shiftKey){
+    e.preventDefault();
+    togglePreflight();
+    return;
+  }
   if (e.code==='KeyI'){
     // Cold-start ignition. Fires when either the ground cold-start sequence
     // is armed (state.coldStart) or the in-air deadstick restart is armed
@@ -9014,6 +9073,137 @@ function stopWarnTest(){
   state.warnTest = null;
   // No "aborted" toast — a quick early release on the last chime shouldn't
   // nag, and showStatus() auto-clears the existing TESTING: line on its own.
+}
+// ====== PRE-FLIGHT CHECKLIST (Shift+K) ======
+// Compact left-side panel that lists the six items a real pilot would scan
+// before takeoff: canopy CLOSED, parking brake SET, fuel CHECK, trim
+// NEUTRAL, flaps SET, pitot/mixture READY. Each row auto-ticks green as
+// its condition becomes true; pending rows stay amber. Every fresh tick
+// fires a soft sine pip (via the existing playCalloutChime path) so the
+// player gets audible feedback as they walk the panel.
+//
+// Toggles with Shift+K. Closes itself automatically on takeoff or any
+// unsafe screen state (intro / replay / photo / crashed). Strictly a HUD
+// overlay: does not pause the sim, does not block input, does not appear
+// in isAnyOtherModalOpen() so Esc still goes to the pause menu cleanly.
+//
+// Panel state lives on state.preflightOpen (visible flag) and
+// state.preflightPipMask (6-bit mask of which rows already pipped this
+// session). Mask resets on resetPlane() and on every open/close so the
+// next session re-arms the chimes from scratch.
+const PREFLIGHT_ROWS = [
+  // Each row: id, DOM ids, label, evaluator (returns { ok, state }).
+  { id:'canopy', row:'pfCanopy', state:'pfCanopyState',
+    check: () => ({ ok: !state.canopyOpen, state: state.canopyOpen ? 'OPEN' : 'CLOSED' }) },
+  { id:'brake',  row:'pfBrake',  state:'pfBrakeState',
+    check: () => ({ ok: !!state.parkingBrake, state: state.parkingBrake ? 'SET' : 'OFF' }) },
+  { id:'fuel',   row:'pfFuel',   state:'pfFuelState',
+    check: () => {
+      const pct = Math.round((state.fuel || 0) * 100);
+      // "CHECK" passes at ≥ 25% so a low-fuel hop has to refuel first.
+      return { ok: (state.fuel || 0) >= 0.25, state: pct + '%' };
+    } },
+  { id:'trim',   row:'pfTrim',   state:'pfTrimState',
+    check: () => {
+      const t = state.trim || 0;
+      const pct = Math.round(t * 100);
+      return { ok: Math.abs(t) < 0.05,
+               state: Math.abs(t) < 0.05 ? 'NEUTRAL' : (t > 0 ? 'NOSE-UP ' + pct + '%' : 'NOSE-DN ' + pct + '%') };
+    } },
+  { id:'flaps',  row:'pfFlaps',  state:'pfFlapsState',
+    check: () => {
+      const f = state.flaps || 0;
+      // Any non-zero flap detent reads as "set for takeoff".
+      return { ok: f >= 1, state: 'STAGE ' + f };
+    } },
+  { id:'pitot',  row:'pfPitot',  state:'pfPitotState',
+    check: () => {
+      // Pitot heat ON + engine has fuel and isn't dead. Combined read so
+      // one row covers both the airspeed-source check and the engine
+      // mixture/ready cue the cold-start ritual culminates in.
+      const pitotOk = !!state.pitotHeatOn;
+      const mixtureOk = (state.fuel || 0) > 0.05 && !state.engineOut;
+      const ok = pitotOk && mixtureOk;
+      let label;
+      if (!pitotOk) label = 'PITOT OFF';
+      else if (!mixtureOk) label = 'MIXTURE LEAN';
+      else label = 'READY';
+      return { ok, state: label };
+    } },
+];
+function setPreflightOpen(open){
+  open = !!open;
+  if (state.preflightOpen === open) return;
+  state.preflightOpen = open;
+  state.preflightPipMask = 0;
+  const panel = document.getElementById('preflight');
+  if (panel) panel.classList.toggle('show', open);
+  if (open){
+    // Render the rows immediately so the panel doesn't flash a one-frame
+    // "all rows pending" state before updatePreflight() runs.
+    updatePreflight(true);
+  }
+}
+function togglePreflight(){
+  if (state.preflightOpen){ setPreflightOpen(false); return; }
+  // Block the open on screen states that own their own modal flow. The
+  // panel is non-modal so it would technically render fine on top of
+  // photo/pause/replay/intro, but those screens have their own purpose
+  // and a stray Shift+K shouldn't sprout a checklist over them.
+  if (state.introOpen || state.replayActive || state.photoMode || state.paused) return;
+  if (state.crashed) return;
+  setPreflightOpen(true);
+  if (typeof showStatus === 'function'){
+    showStatus('PRE-FLIGHT CHECKLIST', 'walk the panel — Shift+K to close', 'good');
+  }
+}
+function updatePreflight(force){
+  const panel = document.getElementById('preflight');
+  if (!panel) return;
+  // Auto-close on unsafe states so the panel never lingers across photo
+  // captures, replays, the main menu, or after a crash.
+  if (state.preflightOpen && (state.introOpen || state.replayActive
+        || state.photoMode || state.crashed || !state.onGround)){
+    setPreflightOpen(false);
+    return;
+  }
+  if (!state.preflightOpen && !force) return;
+  let done = 0;
+  for (let i = 0; i < PREFLIGHT_ROWS.length; i++){
+    const def = PREFLIGHT_ROWS[i];
+    const rowEl = document.getElementById(def.row);
+    const stEl  = document.getElementById(def.state);
+    if (!rowEl) continue;
+    let res;
+    try { res = def.check(); } catch(e){ res = { ok:false, state:'—' }; }
+    const ok = !!res.ok;
+    if (ok) done++;
+    const wasOk = rowEl.classList.contains('ok');
+    if (ok !== wasOk){
+      rowEl.classList.toggle('ok', ok);
+      const boxEl = rowEl.querySelector('.box');
+      if (boxEl) boxEl.textContent = ok ? '✓' : '☐';
+      // Soft sine pip the first time a row transitions to OK during this
+      // session. preflightPipMask gates re-pipping so a flaps-up,
+      // flaps-down, flaps-up dance only chimes once.
+      const bit = 1 << i;
+      if (ok && !(state.preflightPipMask & bit)){
+        state.preflightPipMask |= bit;
+        if (typeof playCalloutChime === 'function'){
+          try { playCalloutChime(); } catch(e){ /* audio off */ }
+        }
+      }
+    }
+    if (stEl) stEl.textContent = res.state || '—';
+  }
+  const foot = document.getElementById('pfFoot');
+  if (foot){
+    if (done === PREFLIGHT_ROWS.length){
+      foot.innerHTML = '<span class="done">✓ READY FOR TAKEOFF<\/span> · Shift+K to close';
+    } else {
+      foot.innerHTML = done + ' / ' + PREFLIGHT_ROWS.length + ' complete · Shift+K to close';
+    }
+  }
 }
 // Cabin chime: the iconic two-note seatbelt ding (high → low sine pair) that
 // fires once when the autopilot captures the target altitude in cruise. Uses
@@ -15394,6 +15584,11 @@ function loop(now){
       // through stall / gear / GPWS / fire / oil pressure if armed. Idle
       // when state.warnTest is null so non-test frames pay nothing.
       tickWarnTest(dt);
+      // Pre-flight checklist (Shift+K) repaint. No-op when the panel
+      // isn't open (early-returns inside updatePreflight after the
+      // auto-close gate), so non-checklist frames also pay basically
+      // nothing. Called after step() so it sees the latest control state.
+      updatePreflight(false);
       // Record after the physics step so the buffered frame matches what was just rendered.
       recordReplayFrame(now);
       // Ring-chase ghost: sample the live run after physics, then place the
@@ -16727,6 +16922,9 @@ updateCamModeUi();
   addEventListener('keydown', e => {
     if (e.repeat) return;
     if (e.code === 'KeyK'){
+      // Shift+K is the pre-flight checklist toggle (handled elsewhere); let
+      // it through without opening the squawk panel.
+      if (e.shiftKey) return;
       if (state.sqkeypadOpen){ e.preventDefault(); closePanel(); return; }
       if (!canOpen()) return;
       e.preventDefault();
