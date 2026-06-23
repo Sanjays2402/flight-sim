@@ -5987,6 +5987,127 @@ function updateVortexTrails(strength){
   }
 }
 
+// ====== WINGTIP CONDENSATION STREAMERS ======
+// Short trailing wisp of white sprite puffs that spawn from each wingtip
+// whenever AOA exceeds ~6° AND a humidity proxy is high (rain on OR within
+// ~10 in-sim minutes of dawn/dusk). Two small per-side pools mirror the
+// reverser-dust pool pattern (~32 each) so memory cost stays bounded. Pure
+// visual flavor — no physics side-effects. Emission is gated against
+// photo / pause / replay / intro / crashed / on-ground so frozen frames and
+// saved PNGs stay clean (sprites are scene meshes, not DOM, so the standard
+// PHOTO_HIDE_IDS list doesn't reach them — the emission gate is what keeps
+// photo mode pristine, matching the airshow smoke + reverser dust pattern).
+const WTC_PER_SIDE_MAX = 32;
+const WTC_LIFE = 0.8;          // seconds before a puff fully fades
+const WTC_START_R = 0.18;      // initial sprite radius (m)
+const WTC_GROW = 0.55;         // additional radius growth over lifetime (m)
+const WTC_PEAK_OPACITY = 0.65; // peak alpha; eases out as the puff ages
+const WTC_AOA_MIN_DEG = 6;     // start spawning past this AOA
+const WTC_AOA_FULL_DEG = 14;   // peak emit rate at/above this AOA
+const WTC_EMIT_HZ_MIN = 8;     // puffs per second per wingtip at AOA_MIN
+const WTC_EMIT_HZ_MAX = 28;    // puffs per second per wingtip at AOA_FULL+
+const WTC_DAWN_HOUR = 6;       // canonical sunrise in todHours
+const WTC_DUSK_HOUR = 18;      // canonical sunset in todHours
+const WTC_HUMID_WINDOW_H = 1/6; // ~10 in-sim minutes either side of dawn/dusk
+const wtcTipsLocal = [
+  new THREE.Vector3(-VORTEX_TIP_OFFSET, VORTEX_TIP_Y, VORTEX_TIP_Z),
+  new THREE.Vector3( VORTEX_TIP_OFFSET, VORTEX_TIP_Y, VORTEX_TIP_Z)
+];
+const wtcPools = [[], []];
+const wtcHeads = [0, 0];
+const wtcEmitAccum = [0, 0];
+for (let side = 0; side < 2; side++){
+  for (let i = 0; i < WTC_PER_SIDE_MAX; i++){
+    const mat = new THREE.SpriteMaterial({
+      map: airshowTex, transparent: true, depthWrite: false,
+      opacity: 0, color: 0xffffff
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.scale.setScalar(WTC_START_R);
+    spr.visible = false;
+    scene.add(spr);
+    wtcPools[side].push({ spr, mat, life: 0 });
+  }
+}
+const _wtcTmpTip = new THREE.Vector3();
+const _wtcTmpBack = new THREE.Vector3();
+function wtcHumidProxy(){
+  // Rain is the obvious humid case. Dawn/dusk windows simulate the cool,
+  // dewy air near sunrise/sunset where real wingtip condensation reads
+  // most often (warm wet day + cool wing pressure drop = visible vapor).
+  if (settings.rain) return true;
+  const h = ((state.todHours % 24) + 24) % 24;
+  const distDawn = Math.min(Math.abs(h - WTC_DAWN_HOUR), 24 - Math.abs(h - WTC_DAWN_HOUR));
+  const distDusk = Math.min(Math.abs(h - WTC_DUSK_HOUR), 24 - Math.abs(h - WTC_DUSK_HOUR));
+  return distDawn < WTC_HUMID_WINDOW_H || distDusk < WTC_HUMID_WINDOW_H;
+}
+function emitWingtipCondensation(side){
+  const p = wtcPools[side][wtcHeads[side]];
+  wtcHeads[side] = (wtcHeads[side] + 1) % WTC_PER_SIDE_MAX;
+  // Spawn just behind the wingtip so the puff reads as flowing off the tip,
+  // not glued to the wing leading edge. Small random spread keeps the trail
+  // from looking like a perfectly even bead line.
+  _wtcTmpTip.copy(wtcTipsLocal[side]);
+  _wtcTmpTip.z += 0.15 + Math.random() * 0.25; // a touch aft of the tip
+  _wtcTmpTip.y += (Math.random() - 0.5) * 0.06;
+  _wtcTmpBack.copy(_wtcTmpTip).applyMatrix4(plane.matrixWorld);
+  p.spr.position.copy(_wtcTmpBack);
+  p.spr.scale.setScalar(WTC_START_R);
+  p.mat.opacity = WTC_PEAK_OPACITY;
+  p.spr.visible = true;
+  p.life = WTC_LIFE;
+}
+function updateWingtipCondensation(dt, aoaDeg){
+  const live = !state.photoMode && !state.paused && !state.replayActive
+               && !state.introOpen && !state.crashed && !state.onGround;
+  const absAoa = Math.abs(aoaDeg);
+  const shouldEmit = live && absAoa >= WTC_AOA_MIN_DEG && wtcHumidProxy();
+  if (shouldEmit){
+    const t = Math.max(0, Math.min(1,
+      (absAoa - WTC_AOA_MIN_DEG) / (WTC_AOA_FULL_DEG - WTC_AOA_MIN_DEG)));
+    const emitHz = WTC_EMIT_HZ_MIN + (WTC_EMIT_HZ_MAX - WTC_EMIT_HZ_MIN) * t;
+    for (let side = 0; side < 2; side++){
+      wtcEmitAccum[side] += dt * emitHz;
+      while (wtcEmitAccum[side] >= 1){
+        emitWingtipCondensation(side);
+        wtcEmitAccum[side] -= 1;
+      }
+    }
+  } else {
+    // Decay any leftover emit credit so a brief flap-down doesn't spit a
+    // burst the moment humidity flips back on.
+    wtcEmitAccum[0] = wtcEmitAccum[1] = 0;
+  }
+  // Always age existing puffs so they fade out cleanly when emission stops.
+  for (let side = 0; side < 2; side++){
+    const pool = wtcPools[side];
+    for (const p of pool){
+      if (p.life <= 0){ if (p.spr.visible) p.spr.visible = false; continue; }
+      p.life -= dt;
+      const k = Math.max(0, p.life / WTC_LIFE); // 1 → 0
+      p.mat.opacity = WTC_PEAK_OPACITY * k;
+      p.spr.scale.setScalar(WTC_START_R + WTC_GROW * (1 - k));
+      if (p.life <= 0) p.spr.visible = false;
+    }
+  }
+}
+function clearWingtipCondensation(){
+  // TDZ-safe: pools are declared above with `const`, but resetPlane() can
+  // run before this file finishes its top-level init on the very first
+  // load (mission setup → resetPlane). Mirrors clearReverseDust()'s guard.
+  try {
+    for (let side = 0; side < 2; side++){
+      for (const p of wtcPools[side]){
+        p.life = 0;
+        p.mat.opacity = 0;
+        p.spr.visible = false;
+      }
+      wtcHeads[side] = 0;
+      wtcEmitAccum[side] = 0;
+    }
+  } catch (_e) { /* pool not initialized yet — nothing to clear */ }
+}
+
 // ====== AI WAKE TURBULENCE ======
 // Faint vortex ribbons trailing off the AI plane's wingtips, plus a proximity
 // check that injects a brief roll+yaw kick (and a low rumble SFX) when the
@@ -9759,6 +9880,9 @@ function resetPlane(){
   state.reverserPrevActive = false;
   state.reverserDustT = 0;
   clearReverseDust();
+  // Wingtip condensation streamers — wipe any leftover puffs from the prior
+  // sortie so a fresh spawn doesn't start with stale wisps drifting around.
+  clearWingtipCondensation();
   // Exhaust flame state — clear the catch-pulse timer so the new sortie
   // starts dark, then ignition relights it. updateExhaustFlame() handles
   // the per-frame opacity from there.
@@ -13711,6 +13835,11 @@ function step(dt){
                        * (speed > 25 && !state.onGround ? 1 : 0);
   state.vortex = (state.vortex || 0) * 0.8 + vortexTarget * 0.2;
   updateVortexTrails(state.vortex);
+  // Wingtip condensation streamers — short white wisp puffs off each tip
+  // when AOA is high and the air is humid (rain on, or near dawn/dusk).
+  // Pure visual flavor; the function self-gates on photo/pause/replay/intro/
+  // crashed/onGround so frozen frames stay still and saved PNGs stay clean.
+  updateWingtipCondensation(dt, THREE.MathUtils.radToDeg(aoa));
 
   // High-altitude contrails — gated on altitude + throttle. Damage model TBD;
   // when it lands it can drive a separate strength boost into this call.
