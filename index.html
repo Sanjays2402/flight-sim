@@ -825,7 +825,7 @@
   <div class="row"><span class="lbl">G</span><span class="val"><span id="gnow">1.0</span> <span id="gpk" style="color:#6aa;font-weight:500">pk 1.0</span></span></div>
   <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
   <div class="row" id="rwyDistRow" style="display:none"><span class="lbl">RWY</span><span class="val"><span id="rwyDist">0.0 km</span><span id="rwyArrow" style="display:inline-block;margin-left:6px;color:#9ad8ff;font-weight:700;transform:rotate(0deg);transform-origin:50% 50%">↑</span></span></div>
-  <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%</span></div>
+  <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%<span id="thrLockPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Throttle friction lock — Shift+\ to release">🔒</span></span></div>
   <div class="row"><span class="lbl">FLP</span><span class="val"><span id="flp">0</span>°</span></div>
   <div class="row"><span class="lbl">GEAR</span><span class="val" id="gear">DOWN</span></div>
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
@@ -943,7 +943,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -1366,7 +1366,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh' };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh' };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1471,6 +1471,7 @@ try {
     if (typeof saved.carbHeat === 'boolean') settings.carbHeat = saved.carbHeat;
     if (typeof saved.lastMixture === 'number' && isFinite(saved.lastMixture)) settings.lastMixture = Math.max(0, Math.min(1, saved.lastMixture));
     if (typeof saved.cowlFlaps === 'boolean') settings.cowlFlaps = saved.cowlFlaps;
+    if (typeof saved.frictionLock === 'boolean') settings.frictionLock = saved.frictionLock;
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
     if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
     if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
@@ -5783,6 +5784,22 @@ const throttleKnob = new THREE.Mesh(
 );
 throttleKnob.position.y = 0.165;
 throttleLeverPivot.add(throttleKnob);
+// Friction-lock brass collar: thin gold-ish torus around the throttle shaft
+// that visually pinches the lever in place when state.frictionLock is on.
+// Parented to the lever pivot so it tilts with the lever, never moves
+// relative to the shaft. Visibility is gated per-frame by the same
+// cockpit-cam-only logic as throttleGroup, plus state.frictionLock so the
+// collar only shows when the lock is actually engaged.
+const throttleLockCollar = new THREE.Mesh(
+  new THREE.TorusGeometry(0.020, 0.0055, 8, 16),
+  new THREE.MeshLambertMaterial({ color: 0xc9a24a, emissive: 0x3a2d0a })
+);
+throttleLockCollar.position.y = 0.115;
+// Torus default lies in XY — rotate so the ring wraps around the lever
+// shaft (which runs along the local Y axis).
+throttleLockCollar.rotation.x = Math.PI / 2;
+throttleLockCollar.visible = false;
+throttleLeverPivot.add(throttleLockCollar);
 throttlePivot.add(throttleLeverPivot);
 throttleGroup.add(throttlePivot);
 // Mixture knob: tiny red knob silhouette beside the throttle lever so the
@@ -8169,6 +8186,27 @@ function toggleCarbHeat(){
   if (state.carbHeatOn) state.carbHeatRpmDip = 80;
   showStatus('CARB HEAT ' + (state.carbHeatOn ? 'ON' : 'OFF'), null, state.carbHeatOn ? 'good' : 'hard');
 }
+// Throttle quadrant friction lock (Shift+\). Mirrors the carb-heat /
+// pitot-heat pattern: persistent pilot setting, status banner confirms each
+// press, soft ratchet click on toggle (re-uses the parking-brake click).
+// While the lock is set the per-frame throttle input path in step() ignores
+// W/S taps and held keys AND pins the touch-slider readback so a stray drag
+// can't slide the lever either — cruise power stays exactly where the
+// pilot parked it. PILOT ATC line on engage so the radio matches the
+// cockpit action; release stays banner-only so toggling off mid-flight
+// doesn't spam the strip.
+function toggleFrictionLock(){
+  state.frictionLock = !state.frictionLock;
+  settings.frictionLock = state.frictionLock;
+  saveSettings();
+  if (typeof playParkingBrakeClick === 'function') playParkingBrakeClick(state.frictionLock);
+  if (state.frictionLock){
+    showStatus('THROTTLE LOCKED', 'cruise hold engaged', 'good');
+    if (typeof pushATC === 'function') pushATC('Friction lock set.', { tag:'PILOT', now:true });
+  } else {
+    showStatus('THROTTLE UNLOCKED', null, 'hard');
+  }
+}
 // Mixture adjust (Minus = lean, Equal = rich). Mirrors carb-heat in spirit:
 // persistent pilot setting, status toast confirms each press. Steps by
 // MIX_STEP (5%) so a few taps takes the lever from full-rich to a high-alt
@@ -9624,6 +9662,13 @@ const state = {
   // ground speed without holding B. Auto-releases above ~5 km/h so a
   // forgotten parking brake can't kill a takeoff roll.
   parkingBrake: false,
+  // Throttle quadrant friction lock: Shift+Backslash toggles a latch that
+  // freezes the throttle lever in place so cruise power can't drift from a
+  // stray W/S tap or a held key. Mirrors the real-world friction lock on
+  // a Cessna throttle quadrant. Persists across resets via
+  // settings.frictionLock; seeded here from that setting so a player who
+  // habitually flies with the lock set gets it back on every restart.
+  frictionLock: !!settings.frictionLock,
   // Cockpit warning-chime self-test (Shift+T on the ground with the parking
   // brake set). Cycles stall horn / gear horn / GPWS / fire chirp / oil
   // pressure low so the pilot can verify audio settings before takeoff.
@@ -10686,7 +10731,19 @@ addEventListener('keydown', e=>{
     return;
   }
   if (e.code==='KeyF' && !e.shiftKey) cycleFlaps();
-  if (e.code==='Backslash') toggleCanopy();
+  // Shift+Backslash toggles the throttle friction lock — pilot-set latch
+  // that freezes the throttle lever so cruise power can't drift from a
+  // stray W/S tap or a held key. Gate through introOpen so a stray key on
+  // the main menu can't latch the toggle, matching the carb-heat (Shift+C)
+  // and parking-brake (Shift+B) pattern. Plain Backslash still toggles the
+  // canopy below.
+  if (e.code==='Backslash' && e.shiftKey){
+    if (state.introOpen) return;
+    e.preventDefault();
+    toggleFrictionLock();
+    return;
+  }
+  if (e.code==='Backslash' && !e.shiftKey) toggleCanopy();
   // Shift+B toggles the parking brake. Plain B is hold-to-brake (handled in
   // step() via keys map), so we only trigger the latch when Shift is held
   // and we're not already mid-air. Engaging plays a soft ratchet click; the
@@ -16965,6 +17022,11 @@ function step(dt){
     } else if (state.engineOut){
       // Engine out — no throttle response; bleed any commanded throttle to zero.
       state.throttle = Math.max(0, state.throttle - 1.0*dt);
+    } else if (state.frictionLock){
+      // Friction lock set (Shift+\). Throttle lever is mechanically pinned
+      // — ignore W/S keys, the touch slider readback, and any held key, so
+      // cruise power stays exactly where the pilot parked it. Releasing the
+      // lock returns control to the same input paths below.
     } else if (touch.throttle !== null){
       // Touch slider sets throttle directly — no ramping, the slider IS the lever.
       state.throttle = touch.throttle;
@@ -18238,6 +18300,11 @@ function step(dt){
         // the lever top toward -Z = toward the pilot's seat.
         throttleLeverPivot.rotation.x = THROTTLE_FWD_MAX_RAD
           - throttleLeverAnim * (THROTTLE_FWD_MAX_RAD + THROTTLE_BACK_MAX_RAD);
+        // Brass friction-lock collar only shows when the lock is engaged so
+        // the cockpit visual matches the HUD pill + the input gating.
+        if (typeof throttleLockCollar !== 'undefined' && throttleLockCollar){
+          throttleLockCollar.visible = !!state.frictionLock;
+        }
         // Mixture knob lerps from forward (lean cutoff at mix=0) to back
         // (full rich at mix=1) using the same axis convention as throttle.
         // No smoothing — mixture changes only on discrete keypress so the
@@ -18975,6 +19042,12 @@ function step(dt){
   // damp conditions lets the ice pill rise.
   const carbHeatPillEl = document.getElementById('carbHeatPill');
   if (carbHeatPillEl) carbHeatPillEl.style.display = state.carbHeatOn ? 'inline' : 'none';
+  // Friction-lock pill (THR row) — small 🔒 next to the throttle readout
+  // whenever the Shift+\ toggle is on so the pilot can see at a glance that
+  // the throttle lever is mechanically pinned and W/S taps are being ignored.
+  // Hidden in photo mode so saved PNGs stay clean.
+  const thrLockPillEl = document.getElementById('thrLockPill');
+  if (thrLockPillEl) thrLockPillEl.style.display = (state.frictionLock && !state.photoMode) ? 'inline' : 'none';
   // Carb ice pill (WIND row) — amber whenever the iced fraction is over the
   // show floor so brief excursions don't flash on and off. Hidden in photo
   // mode so saved PNGs stay clean.
