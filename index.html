@@ -867,7 +867,7 @@
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
-  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span></span></div>
+  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span><span id="fuelStarved" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700" title="Tank nearly dry — engine is surging on the dregs">⚠ FUEL STARVED</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
   <div class="row" id="emrRow" style="display:none"><span class="lbl">EMR</span><span class="val" id="emrReadout" style="color:#ff6cf7;font-weight:700">—</span></div>
@@ -6954,6 +6954,68 @@ function playFuelMisfirePop(){
   src.start(t0);
   src.stop(t0 + dur + 0.02);
 }
+// Fuel-starvation sputter SFX — the harsher cousin of playFuelMisfirePop
+// that fires when the tank is under 2% and the carb is sucking the last
+// drops out. Modeled as a longer low-passed noise burst (the wet splatter
+// of unburned fuel) layered with a brief square chirp at the prop
+// frequency (the cylinders firing way out of time). Reuses sfxReady() so
+// no new audio hardware nodes are allocated; volume tracks settings.volume
+// like every other one-shot. propRpm defaults to a cruise-ish ~1800 RPM
+// if the caller doesn't pass a live RPM (covers ground / low-throttle
+// surges where the engine is barely turning).
+function playFuelSputter(propRpm){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.4 * settings.volume;
+  if (vol <= 0) return;
+  // Wet, splattery low-passed noise burst — ~360ms (longer than the misfire
+  // pop's 90ms) so it actually overlaps the ~0.5s thrust dropout window and
+  // the player hears the engine fighting, not a single tap.
+  const dur = 0.36;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  // Two-stage envelope baked into the buffer: a sharp wet attack, a brief
+  // hold, then a long tail-off so the noise sounds like fuel coughing
+  // through the intake instead of a flat hiss.
+  for (let i=0;i<data.length;i++){
+    const t = i / data.length;
+    const env = (t < 0.05) ? (t / 0.05) : Math.pow(1 - (t - 0.05) / 0.95, 1.6);
+    data[i] = (Math.random()*2-1) * env;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 380;
+  lp.Q.value = 0.8;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(vol * 0.85, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(ng).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+  // Square chirp at the prop firing frequency — a stuttering, out-of-time
+  // cylinder fire. Four-cylinder engine fires twice per revolution, so the
+  // chirp pitch is (RPM / 60) * 2 = RPM / 30. Clamp to a sane audible range
+  // so a deadstick windmill at 200 RPM doesn't drop below the speaker
+  // bottom-out and a screaming 2800 RPM doesn't pierce.
+  const baseRpm = (typeof propRpm === 'number' && propRpm > 0) ? propRpm : 1800;
+  const chirpHz = Math.max(40, Math.min(280, baseRpm / 30));
+  const sq = ctx.createOscillator();
+  sq.type = 'square';
+  // Drift the chirp pitch down a touch over its life so the cylinder reads
+  // as "dying mid-fire" rather than a clean note.
+  sq.frequency.setValueAtTime(chirpHz, t0);
+  sq.frequency.exponentialRampToValueAtTime(Math.max(30, chirpHz * 0.7), t0 + 0.18);
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(0.0, t0);
+  sg.gain.linearRampToValueAtTime(vol * 0.55, t0 + 0.012);
+  sg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.20);
+  sq.connect(sg).connect(ctx.destination);
+  sq.start(t0);
+  sq.stop(t0 + 0.22);
+}
 // Windshield splatter canvas — separate from #rainOverlay so the two effects
 // can layer freely (e.g. flying through birds in the rain). Only visible in
 // cockpit cam; updateBirdSplat both fades the smears and toggles the show
@@ -9820,6 +9882,22 @@ const state = {
   misfireUntil: 0,
   misfireNextAt: 0,
   misfireActive: false,
+  // Fuel-starvation surge — a second, harsher stage layered under the
+  // misfire scheduler that arms once fuel drops below FUEL_STARVED_THRESHOLD
+  // (2%). At this point the carb is sucking the last drops out of the tank,
+  // so the engine doesn't just cough — it surges: ~0.5s thrust dropouts
+  // every 3–6s with a wet-sputter SFX (low-pass noise burst + square chirp
+  // at the prop frequency). state.fuelStarvedUntil holds the perfNow ms
+  // timestamp the current surge releases at (0 = no active surge);
+  // state.fuelStarvedNextAt schedules the next one on the same clock;
+  // state.fuelStarvedActive mirrors the live window for thrust/RPM dips and
+  // the FUEL row pill. state.fuelStarvedAtcLatch fires the one-shot PILOT
+  // "Engine surging, fuel low" the first frame we slide under the threshold,
+  // re-armed in resetPlane() / on refuel above the upper hysteresis bound.
+  fuelStarvedUntil: 0,
+  fuelStarvedNextAt: 0,
+  fuelStarvedActive: false,
+  fuelStarvedAtcLatch: false,
   // Engine instrument startup self-test. Triggered only on ground cold-start
   // crank (not in-air restart) when settings.coldStart is on; -1 = idle,
   // >=0 = seconds elapsed since ignition. drawCockpitPanel() reads this to
@@ -12524,6 +12602,13 @@ function resetPlane(){
   state.misfireUntil = 0;
   state.misfireNextAt = 0;
   state.misfireActive = false;
+  // Fuel-starvation surge latches mirror the misfire reset above so a fresh
+  // sortie re-arms the harsher <2% stage from scratch (including the one-shot
+  // PILOT ATC line).
+  state.fuelStarvedUntil = 0;
+  state.fuelStarvedNextAt = 0;
+  state.fuelStarvedActive = false;
+  state.fuelStarvedAtcLatch = false;
   // Bingo-fuel auto-divert latch: one-shot per sortie so a fresh take-off
   // re-arms. Clears here on resetPlane and also re-arms inside step() once
   // the range cushion grows back past 1.6× the distance to the nearest field.
@@ -17609,6 +17694,54 @@ function step(dt){
     state.misfireUntil = 0;
   }
   state.misfireActive = state.misfireUntil > _perfNow;
+  // Fuel-starvation surge scheduler (the harsher <2% stage). Reuses the same
+  // _perfNow + _misfireSuppress guards as the 5% misfire above so a
+  // photo/replay/pause/intro/crash/engineOut/coldStart/refuel/onGround can't
+  // fire a phantom surge. While armed, a surge holds for ~0.5s every 3–6s:
+  // longer thrust dropout than a misfire pop, with a louder wet-sputter
+  // SFX (low-pass noise burst + square chirp at the prop firing frequency).
+  // First arm also fires a one-shot PILOT ATC "Engine surging, fuel low".
+  const FUEL_STARVED_THRESHOLD = 0.02;
+  // Re-arm the ATC latch once fuel climbs back above ~4% so a partial refuel
+  // that drains again still earns a fresh call.
+  if (state.fuelStarvedAtcLatch && state.fuel >= 0.04){
+    state.fuelStarvedAtcLatch = false;
+  }
+  if (!_misfireSuppress && state.fuel > 0 && state.fuel <= FUEL_STARVED_THRESHOLD){
+    // One-shot ATC the first frame we slide under 2%. PILOT tag matches the
+    // existing "Fuel exhausted" + bird-strike calls so the same voice speaks
+    // out of the cockpit.
+    if (!state.fuelStarvedAtcLatch){
+      state.fuelStarvedAtcLatch = true;
+      if (typeof pushATC === 'function'){
+        pushATC('Engine surging, fuel low.', { tag:'PILOT', now:true });
+      }
+    }
+    // Seed the first surge ~2–4s in so it doesn't step on the ATC line we
+    // just fired (the misfire scheduler's own lead-in already covers the
+    // light pops; this is the heavy stage layered on top).
+    if (state.fuelStarvedNextAt <= 0){
+      state.fuelStarvedNextAt = _perfNow + (2000 + Math.random() * 2000);
+    }
+    if (_perfNow >= state.fuelStarvedNextAt){
+      // Surge window: ~0.5s (400–650ms) so the thrust collapse is felt as a
+      // sustained cough, not a stutter. Next gap 3–6s as specified.
+      const surgeMs = 400 + Math.random() * 250;
+      state.fuelStarvedUntil = _perfNow + surgeMs;
+      state.fuelStarvedNextAt = _perfNow + surgeMs + (3000 + Math.random() * 3000);
+      // Pass live engine RPM to the SFX so the square chirp pitches the way
+      // the actual engine is turning right now (~1800 RPM cruise = 60 Hz,
+      // idle ~600 RPM = 20 Hz floored to the 40 Hz audible floor).
+      const liveRpm = 600 + state.throttle * 2200;
+      playFuelSputter(liveRpm);
+    }
+  } else if (state.fuelStarvedNextAt > 0 || state.fuelStarvedUntil > 0){
+    // Above the threshold or any suppressed state: wipe the scheduler so the
+    // next slide under 2% gets a fresh lead-in delay.
+    state.fuelStarvedNextAt = 0;
+    state.fuelStarvedUntil = 0;
+  }
+  state.fuelStarvedActive = state.fuelStarvedUntil > _perfNow;
   // Bingo fuel auto-suggest divert. Mirrors the cockpit FUEL FLOW gph curve
   // and the mini-map fuel range ring so the three readouts stay coherent:
   // when our straight-line range at current burn drops under 1.2× the
@@ -17770,13 +17903,21 @@ function step(dt){
   // window so this multiplier doesn't need its own gating beyond reading
   // state.misfireActive.
   const misfireMul = state.misfireActive ? 0.30 : 1;
+  // Fuel-starvation surge dip layered on top of the misfire dip. When the
+  // surge window is live (<2% fuel, every ~3–6s, ~0.5s), available thrust
+  // collapses to ~10% so the engine reads as actively dying instead of
+  // merely coughing. Multiplied with misfireMul so a misfire pop that lands
+  // mid-surge bottoms out to a single small floor (0.10 * 0.30 = 0.03)
+  // rather than double-dipping below zero. Same gating as misfireMul — the
+  // engineLive ternary below still owns true engine-out at 0% fuel.
+  const starvedMul = state.fuelStarvedActive ? 0.10 : 1;
   // Density altitude thrust loss: hot-and-high air is thin, the engine
   // can't pull as much oxygen through it, prop bites less air. The
   // multiplier is computed each frame in updateDensityAltitude() so the
   // cockpit DA gauge reading and the felt thrust are the same source of
   // truth.
   const densityMul = state.densityAltMul || 1;
-  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul * mixMul * misfireMul * densityMul : 0;
+  const thrustMag = engineLive ? state.throttle * MAX_THRUST * (1 - 0.5 * dmg) * carbMul * roughMul * mixMul * misfireMul * starvedMul * densityMul : 0;
   const accel = new THREE.Vector3();
   accel.addScaledVector(fwd, thrustMag / MASS);
   accel.addScaledVector(liftDir, liftMag / MASS);
@@ -19367,6 +19508,19 @@ function step(dt){
         || state.engineOut || state.coldStart;
     const _starveOn = !_hideStarve && state.fuel > 0 && state.fuel <= 0.05;
     fuelStarveEl.style.display = _starveOn ? 'inline' : 'none';
+  }
+  // FUEL-row pill — the harsher <2% "⚠ FUEL STARVED" stage. Lit between
+  // surges too (otherwise it would strobe on/off in step with each surge)
+  // so the pilot reads it as a steady warning that the tank is critically
+  // dry. Same suppress mask as the FUEL STARVATION pill above so a
+  // photo/replay/pause/intro/crash/engine-out/cold-start never lights it.
+  const fuelStarvedPillEl = document.getElementById('fuelStarved');
+  if (fuelStarvedPillEl){
+    const _hideStarved = state.photoMode || state.crashed || state.replayActive
+        || state.introOpen || state.paused
+        || state.engineOut || state.coldStart;
+    const _starvedOn = !_hideStarved && state.fuel > 0 && state.fuel <= 0.02;
+    fuelStarvedPillEl.style.display = _starvedOn ? 'inline' : 'none';
   }
   // Mixture pill (WIND row) — always shows the live mixture percentage so
   // the player has a constant readout of the lever position. Color biases
@@ -23352,6 +23506,14 @@ function drawCockpitRpm(speedKmh, rpmOverride){
   // the existing windmilling needle math instead of double-dipping.
   if (engineLive && state.misfireActive){
     rpm = Math.max(0, rpm - 900 + (Math.random() * 2 - 1) * 140);
+  }
+  // Fuel-starvation surge slump — deeper than the misfire dip above so the
+  // <2% surge reads as the engine almost quitting outright (gauge sags into
+  // the lower third with a coarse flutter). Layered with the misfire dip
+  // when both fire on the same frame, clamped at 0 so the needle can't go
+  // negative on a low-throttle surge.
+  if (engineLive && state.fuelStarvedActive){
+    rpm = Math.max(0, rpm - 1400 + (Math.random() * 2 - 1) * 220);
   }
   ctx.strokeStyle = '#dfe';
   ctx.fillStyle = '#dfe';
