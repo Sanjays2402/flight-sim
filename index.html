@@ -485,6 +485,7 @@
   <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
   <div class="row"><span id="engout" class="warn" style="display:none">⚠ ENGINE OUT</span></div>
   <div class="row"><span id="reverser" style="display:none;color:#9ad8ff;font-weight:700">◀ REV</span></div>
+  <div class="row"><span id="catapult" style="display:none;color:#ffd166;font-weight:700"></span></div>
   <div class="row"><span id="landingLight" style="display:none;color:#fff3a8;font-weight:700">💡 LIGHT</span></div>
   <div class="row"><span id="pbrake" style="display:none;color:#ffd166;font-weight:700">🅿 BRK</span></div>
   <div class="row"><span id="gearStress" style="display:none">⚠ FLARE</span></div>
@@ -523,7 +524,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift = fine) · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>T</kbd> +1h · <kbd>J</kbd> jump airport · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -6274,6 +6275,16 @@ const state = {
   // the first trap inside the touchdown box so the fanfare only fires once.
   carrierTraps: 0,
   carrierDone: false,
+  // Steam catapult (carrier deck launch ritual). Hold O while parked on the
+  // deck pointed toward the bow to arm; catArmT counts seconds held up to
+  // CAT_ARM_S. Releasing before arm resets to 0. When armed, catFireT flips
+  // from -1 to 0 and counts CAT_FIRE_S seconds of forward speed lerp from 0
+  // to CAT_TARGET_KMH while the ship plays a one-shot whoosh + clunk and
+  // emits steam puffs in front of the nose. Hidden in photo/replay/pause/
+  // intro/crash via the existing gates so frozen frames stay clean.
+  catArmT: 0,
+  catFireT: -1,
+  catSteamT: 0,
   // Wingman mission state. AI plane breaks out of its home-field circuit and
   // flies a 3-airport route; the player has to stay within WING_LOCK_RADIUS
   // of the lead. A formation-lock bar drains while the player is outside the
@@ -6505,7 +6516,7 @@ const keys = {};
 // one-shot events that reuse the same handlers as their keyboard equivalents.
 const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
-  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
+  if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -7333,6 +7344,12 @@ function resetPlane(){
   state.reverserPrevActive = false;
   state.reverserDustT = 0;
   clearReverseDust();
+  // Steam catapult: clear arm/fire timers + steam puff cooldown so a fresh
+  // sortie starts on the deck without an inherited launch in progress.
+  state.catArmT = 0;
+  state.catFireT = -1;
+  state.catSteamT = 0;
+  clearCatSteam();
   state.onGround = true;
   state.crashed = false;
   state.landed = false;
@@ -8228,6 +8245,222 @@ function clearReverseDust(){
     for (const p of revDustPool){ p.life = 0; p.mat.opacity = 0; p.spr.visible = false; }
     revDustHead = 0;
   } catch (_e) { /* pool not initialized yet — nothing to clear */ }
+}
+
+// ====== CARRIER STEAM CATAPULT ======
+// Hold O while parked stationary on the carrier deck inside the touchdown box
+// and pointed within ±20° of the deck heading. catArmT counts seconds held
+// up to CAT_ARM_S; reaching it kicks off CAT_FIRE_S seconds of forward speed
+// lerp from 0 to CAT_TARGET_KMH while a one-shot whoosh + clunk plays and
+// steam puffs bloom in front of the nose. Release O before arm completes,
+// drift off the box, or rotate the nose past ±20° and the arm resets.
+// Pure physics override (state.vel set each frame during firing) so no force
+// solver hacks; engine throttle is left alone so the player still controls
+// thrust once the cat releases at the bow. Disabled outside the carrier deck.
+const CAT_ARM_S = 1.0;
+const CAT_FIRE_S = 2.0;
+const CAT_TARGET_KMH = 180;
+const CAT_HEADING_TOL = 20 * Math.PI / 180; // ±20° around deck heading
+const CAT_MAX_GROUND_KMH = 3.0;             // stationary gate before arming
+const CAT_STEAM_MAX = 8;
+const CAT_STEAM_LIFE = 0.9;        // seconds before a puff fully fades
+const CAT_STEAM_START_R = 1.1;     // initial radius (m)
+const CAT_STEAM_GROW = 3.2;        // additional radius growth over lifetime (m)
+const CAT_STEAM_FWD_OFFSET = 6.0;  // meters ahead of the nose to spawn puffs
+const catSteamPool = [];
+let catSteamHead = 0;
+for (let i = 0; i < CAT_STEAM_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xf2f6fa
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(CAT_STEAM_START_R);
+  spr.visible = false;
+  scene.add(spr);
+  catSteamPool.push({ spr, mat, life: 0 });
+}
+function emitCatSteam(){
+  // Spawn one puff just ahead of the nose so the steam bloom reads as the
+  // catapult shuttle releasing pressure. Use the plane's current forward
+  // axis so the puff sits in front no matter which deck end you're aiming.
+  const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+  const p = catSteamPool[catSteamHead];
+  catSteamHead = (catSteamHead + 1) % CAT_STEAM_MAX;
+  p.spr.position.set(
+    plane.position.x + fwdN.x * CAT_STEAM_FWD_OFFSET,
+    plane.position.y + 0.4,
+    plane.position.z + fwdN.z * CAT_STEAM_FWD_OFFSET
+  );
+  p.spr.scale.setScalar(CAT_STEAM_START_R);
+  p.mat.opacity = 0.7;
+  p.spr.visible = true;
+  p.life = CAT_STEAM_LIFE;
+}
+function updateCatSteam(dt){
+  for (const p of catSteamPool){
+    if (p.life <= 0){ if (p.spr.visible) p.spr.visible = false; continue; }
+    p.life -= dt;
+    const t = Math.max(0, p.life / CAT_STEAM_LIFE); // 1 → 0
+    p.mat.opacity = 0.7 * t;
+    p.spr.scale.setScalar(CAT_STEAM_START_R + CAT_STEAM_GROW * (1 - t));
+    // Drift upward so the bloom looks like venting steam, not settling dust.
+    p.spr.position.y += 1.2 * dt;
+    if (p.life <= 0) p.spr.visible = false;
+  }
+}
+function clearCatSteam(){
+  // TDZ guard — catSteamPool is declared with `const` further down so it's
+  // unavailable during the very first resetPlane() call at script load.
+  try {
+    for (const p of catSteamPool){ p.life = 0; p.mat.opacity = 0; p.spr.visible = false; }
+    catSteamHead = 0;
+  } catch (_e) { /* pool not initialized yet */ }
+}
+// Cat-shot SFX: rising low whoosh (the steam release / shuttle travel) layered
+// with a sharp clunk pop at the start (launch bar engaging). Mirrors the
+// reverser whoosh pattern — cheap WebAudio nodes, no long-lived state.
+function playCatapultLaunch(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.42 * settings.volume;
+  if (vol <= 0) return;
+  const dur = CAT_FIRE_S;
+  // Launch-bar clunk: low triangle thump at engagement.
+  const clunk = ctx.createOscillator();
+  clunk.type = 'triangle';
+  clunk.frequency.setValueAtTime(75, t0);
+  clunk.frequency.exponentialRampToValueAtTime(45, t0 + 0.18);
+  const cg = ctx.createGain();
+  cg.gain.setValueAtTime(0.0, t0);
+  cg.gain.linearRampToValueAtTime(vol * 0.9, t0 + 0.015);
+  cg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+  clunk.connect(cg).connect(ctx.destination);
+  clunk.start(t0);
+  clunk.stop(t0 + 0.25);
+  // Steam whoosh: bandpassed noise sweep over the full launch.
+  const noiseLen = Math.ceil(ctx.sampleRate * (dur + 0.2));
+  const buf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < noiseLen; i++) ch[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.value = 0.9;
+  bp.frequency.setValueAtTime(420, t0);
+  bp.frequency.linearRampToValueAtTime(1100, t0 + dur * 0.85);
+  bp.frequency.linearRampToValueAtTime(700, t0 + dur);
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0, t0);
+  ng.gain.linearRampToValueAtTime(vol * 0.75, t0 + 0.12);
+  ng.gain.linearRampToValueAtTime(vol * 0.95, t0 + dur * 0.85);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.18);
+  noise.connect(bp).connect(ng).connect(ctx.destination);
+  noise.start(t0);
+  noise.stop(t0 + dur + 0.2);
+  // Low rumble bed: sub sine for the chest-thump end of the launch.
+  const rumble = ctx.createOscillator();
+  rumble.type = 'sine';
+  rumble.frequency.setValueAtTime(55, t0);
+  rumble.frequency.linearRampToValueAtTime(38, t0 + dur);
+  const rg = ctx.createGain();
+  rg.gain.setValueAtTime(0.0, t0);
+  rg.gain.linearRampToValueAtTime(vol * 0.55, t0 + 0.18);
+  rg.gain.setValueAtTime(vol * 0.55, t0 + dur * 0.85);
+  rg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.15);
+  rumble.connect(rg).connect(ctx.destination);
+  rumble.start(t0);
+  rumble.stop(t0 + dur + 0.2);
+}
+// Centralized check: is the plane in a state where the catapult is eligible?
+// Used both to gate arming and to abort an in-progress arm if the player
+// drifts off the box / nose swings past tolerance. Doesn't gate firing —
+// once the cat releases, the launch runs to completion regardless of where
+// the deck went (in practice it doesn't move, but the firing branch shouldn't
+// re-check geometry each frame and randomly abort mid-shot).
+function catapultEligible(){
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return false;
+  if (state.crashed) return false;
+  if (!state.onGround) return false;
+  // Must be on the carrier deck (not just any runway).
+  const dh = carrierDeckHeight(plane.position.x, plane.position.z);
+  if (dh === null) return false;
+  // Inside the touchdown box (±boxHalfLen of midship). Same metric the
+  // carrier mission win condition uses, so the launch lane matches the trap
+  // lane visually.
+  const cs = Math.cos(-CARRIER.hdg), sn = Math.sin(-CARRIER.hdg);
+  const dx = plane.position.x - CARRIER.x, dz = plane.position.z - CARRIER.z;
+  const lz = dx*sn + dz*cs;
+  if (Math.abs(lz) > CARRIER.boxHalfLen) return false;
+  // Stationary. Real catapult launches start from a dead stop in the holdback.
+  const gspKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+  if (gspKmh > CAT_MAX_GROUND_KMH) return false;
+  // Pointed toward the bow within tolerance. The deck's +local-z axis is
+  // the bow direction; in world coordinates that's (sin(hdg), 0, cos(hdg))
+  // since carrierDeckHeight() applies the inverse rotation to put +local-z
+  // toward the bow ID painted at +a.len/2. Plane body forward is -Z; we
+  // compare via dot product so it works regardless of how hdg encodes onto
+  // the HUD compass. Plane facing the bow → fwdN ≈ bow axis → dot ≈ 1.
+  const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+  const bowAxisX = Math.sin(CARRIER.hdg), bowAxisZ = Math.cos(CARRIER.hdg);
+  const dot = fwdN.x * bowAxisX + fwdN.z * bowAxisZ;
+  // dot >= cos(tol) means within ±tol of pointing toward the bow.
+  if (dot < Math.cos(CAT_HEADING_TOL)) return false;
+  return true;
+}
+function updateCatapult(dt){
+  // Firing branch: tick the launch clock and override forward velocity.
+  // Engine throttle is left alone so the pilot still controls climb power
+  // once the cat releases at the bow.
+  if (state.catFireT >= 0){
+    state.catFireT += dt;
+    const ft = Math.min(1, state.catFireT / CAT_FIRE_S);
+    const targetMs = (CAT_TARGET_KMH / 3.6) * ft;
+    const fwdN = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+    // Override only horizontal velocity — leave vertical to ground collision
+    // so the plane skips off the bow into a clean climb instead of being
+    // pinned to deck height while still on the strip.
+    state.vel.x = fwdN.x * targetMs;
+    state.vel.z = fwdN.z * targetMs;
+    if (state.vel.y < 0) state.vel.y = 0;
+    // Steam puffs every ~0.12s during the run for a sustained bloom.
+    state.catSteamT -= dt;
+    if (state.catSteamT <= 0){
+      emitCatSteam();
+      state.catSteamT = 0.12;
+    }
+    if (state.catFireT >= CAT_FIRE_S){
+      // Cat released at the bow — plane is now flying at target speed.
+      state.catFireT = -1;
+      state.catArmT = 0;
+      state.catSteamT = 0;
+      pushATC('Cat shot, cleared for takeoff.', { tag:'TWR', now:true });
+      showStatus('CAT SHOT', 'cleared for takeoff', 'good');
+    }
+    return;
+  }
+  // Arming branch: hold O while eligible to charge the cat. Drop the hold or
+  // lose eligibility and the arm resets.
+  if (keys['KeyO'] && catapultEligible()){
+    state.catArmT = Math.min(CAT_ARM_S, state.catArmT + dt);
+    if (state.catArmT >= CAT_ARM_S){
+      // Trip the cat: fire SFX, ATC, start firing clock.
+      state.catFireT = 0;
+      state.catSteamT = 0;
+      playCatapultLaunch();
+      pushATC('Cat firing, hang on.', { tag:'PILOT', now:true });
+      showStatus('CAT FIRING', 'launching off the bow', 'good');
+      // Burn one steam puff immediately so the bloom is visible the same
+      // frame the SFX punches in.
+      emitCatSteam();
+    }
+  } else {
+    // Decay the arm timer so a brief slip off the box doesn't instantly
+    // strand the player on a quarter-charged shuttle next time around.
+    if (state.catArmT > 0) state.catArmT = Math.max(0, state.catArmT - dt * 2);
+  }
 }
 
 // ====== PHYSICS ======
@@ -9474,6 +9707,11 @@ function step(dt){
   propGroup.rotation.x = state.reverserT * 0.35;
   propGroupL.rotation.x = propGroupR.rotation.x = propGroup.rotation.x;
   updateReverseDust(dt);
+  // Steam catapult tick: handles both the hold-O arm timer and the firing
+  // velocity override + steam puff bloom. Runs after physics so the velocity
+  // override sticks; geometry gates live in catapultEligible().
+  updateCatapult(dt);
+  updateCatSteam(dt);
   // Ease flaps + gear toward target. flapAnimRad chases flapRad at FLAP_RATE,
   // gearAnim chases 0/1 at GEAR_RATE so the gear hauls up and tucks into the
   // belly instead of popping out of existence. gearGrp.visible stays true
@@ -9721,6 +9959,28 @@ function step(dt){
   // Reverse-thrust HUD pill: visible while the visual lerp is non-zero so it
   // tracks the ease-in/out rather than snapping when the player releases Z.
   document.getElementById('reverser').style.display = (state.reverserT > 0.05) ? 'inline' : 'none';
+  // Catapult HUD pill: shows CAT ARMED while the player charges the shuttle,
+  // and CAT FIRING during the 2s launch run. Hidden in photo mode so saved
+  // PNGs stay clean. Countdown reads time-remaining so the pilot knows how
+  // close they are to the cat releasing.
+  {
+    const catEl = document.getElementById('catapult');
+    if (state.photoMode){
+      catEl.style.display = 'none';
+    } else if (state.catFireT >= 0){
+      const remain = Math.max(0, CAT_FIRE_S - state.catFireT);
+      catEl.style.display = 'inline';
+      catEl.style.color = '#7ee787';
+      catEl.textContent = '▶ CAT FIRING ' + remain.toFixed(1) + 's';
+    } else if (state.catArmT > 0.05){
+      const remain = Math.max(0, CAT_ARM_S - state.catArmT);
+      catEl.style.display = 'inline';
+      catEl.style.color = '#ffd166';
+      catEl.textContent = '⚡ CAT ARMED ' + remain.toFixed(1) + 's';
+    } else {
+      catEl.style.display = 'none';
+    }
+  }
 
   // Landing-light HUD pill: visible whenever the light is on so pilots can
   // see at a glance the bulb is still burning (easy to forget after taxi-in).
