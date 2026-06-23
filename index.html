@@ -637,7 +637,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">⚠ CARB ICE</span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -702,7 +702,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>H</kbd> autopilot · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+<kbd>M</kbd> reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Y</kbd> ribbon · <kbd>~</kbd> airshow smoke · <kbd>O</kbd> catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -763,6 +763,11 @@
       <div class="top"><span class="name">WIPERS</span><span class="val" id="setWiperV">AUTO</span></div>
       <select id="setWiper"></select>
       <div class="hint">Cockpit windshield wipers. <kbd>N</kbd> cycles OFF/SLOW/FAST in flight. AUTO runs them while rain is on.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">COWL FLAPS</span><span class="val" id="setCowlV">CLOSED</span></div>
+      <button id="setCowlBtn" type="button" style="width:100%">TOGGLE COWL FLAPS</button>
+      <div class="hint">Engine cooling louvers. Open drops CHT ~25°C under load (helps on long climbs) but adds ~4% drag in cruise. <kbd>Shift</kbd>+<kbd>F</kbd> toggles in flight.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">VOICE</span><span class="val" id="setVoiceV">RADIO</span></div>
@@ -1069,7 +1074,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, aerobaticBest: 0, voice: 'radio', nightPanel: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, fog: 'off', trailColor: 'livery', coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, aerobaticBest: 0, voice: 'radio', nightPanel: false };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1136,6 +1141,7 @@ try {
     if (typeof saved.wipers === 'string' && ['off','slow','fast','auto'].indexOf(saved.wipers) !== -1) settings.wipers = saved.wipers;
     if (typeof saved.pitotHeat === 'boolean') settings.pitotHeat = saved.pitotHeat;
     if (typeof saved.carbHeat === 'boolean') settings.carbHeat = saved.carbHeat;
+    if (typeof saved.cowlFlaps === 'boolean') settings.cowlFlaps = saved.cowlFlaps;
     if (typeof saved.aerobaticBest === 'number' && isFinite(saved.aerobaticBest) && saved.aerobaticBest >= 0) settings.aerobaticBest = Math.floor(saved.aerobaticBest);
     if (typeof saved.voice === 'string' && ['off','radio','full'].indexOf(saved.voice) !== -1) settings.voice = saved.voice;
     if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
@@ -6519,6 +6525,22 @@ function toggleCarbHeat(){
   if (state.carbHeatOn) state.carbHeatRpmDip = 80;
   showStatus('CARB HEAT ' + (state.carbHeatOn ? 'ON' : 'OFF'), null, state.carbHeatOn ? 'good' : 'hard');
 }
+// Cowl flaps (Shift+F). Toggleable cooling lever: open biases the engine
+// thermal target down ~25°C at any throttle (CHT runs cooler under load)
+// but adds ~4% parasite drag so cruise speed visibly drops. Closed is the
+// default and the legacy behavior. Persistent pilot choice via
+// settings.cowlFlaps, mirroring carb/pitot heat. Closing flips the latch
+// for the overheat auto-suggest so a fresh hot event can fire again.
+function toggleCowlFlaps(){
+  state.cowlFlapsOpen = !state.cowlFlapsOpen;
+  settings.cowlFlaps = state.cowlFlapsOpen;
+  saveSettings();
+  // Closing in flight re-arms the auto-suggest latch so a future overheat
+  // can prompt the player again. Opening clears it (player already heard
+  // the call or just opened pre-emptively).
+  state.cowlAtcLatch = !!state.cowlFlapsOpen;
+  showStatus('COWL FLAPS ' + (state.cowlFlapsOpen ? 'OPEN' : 'CLOSED'), null, state.cowlFlapsOpen ? 'good' : 'hard');
+}
 // Manual wiper cycle: off → slow → fast → off. Auto stays parked in the
 // settings panel so a stray keypress can't unexpectedly latch the auto mode.
 // Persists the new mode to settings + flashes a status toast so the player
@@ -6702,6 +6724,17 @@ const ENG_TEMP_OVERHEAT_SECS = 15; // sustained seconds above redline before dam
 const ENG_TEMP_DAMAGE_PER_SEC = 0.003; // ~0.3% airframe per second while cooked
 const ENG_TEMP_WARMUP_RATE   = 18; // °C/s heating coefficient toward target
 const ENG_TEMP_COOLDOWN_RATE = 22; // °C/s cooling coefficient toward target
+// Cowl flaps cooling lever. Open = louvers dump airflow over the cylinders.
+// The CHT drop is subtracted from the engine thermal target inside
+// updateEngineTemp; the drag bump (matching CANOPY_DRAG_BUMP style) gets
+// added to the aero `cd` term in the lift/drag block. The auto-suggest
+// trigger fires once when CHT crosses past the warm band (one-shot ATC
+// nudge so the player learns the lever exists); cowlAtcLatch re-arms when
+// the player closes the flaps again so a future overheat can re-prompt.
+const COWL_FLAP_CHT_DROP     = 25;     // °C subtracted from CHT target when cowl flaps open
+const COWL_FLAP_DRAG_BUMP    = 0.04;   // +4% drag while cowl flaps open in flight
+const COWL_FLAP_SUGGEST_C    = 200;    // CHT threshold (°C) for the one-shot "open cowl flaps" auto-suggest
+const COWL_FLAP_SUGGEST_CLEAR = 170;   // CHT below this re-arms the auto-suggest
 function updateEngineTemp(dt){
   // Skip thermal sim while paused / replaying / sitting on the intro screen so
   // the engine doesn't quietly cook itself while the player is reading menus.
@@ -6728,6 +6761,12 @@ function updateEngineTemp(dt){
     // Density / altitude effect: thinner air cools worse. plane.position.y is m.
     const alt = Math.max(0, plane.position.y - MAIN_AP.elev);
     target += Math.min(35, alt * 0.006);
+    // Cowl flaps open = louvers spilling air over the cylinders, so the
+    // thermal target drops a meaningful chunk at any throttle. Tuned to
+    // ~25°C so a midpoint cruise that would normally run around 180°C
+    // settles around 155°C with flaps open — enough to keep a long climb
+    // out of the redline if the player remembers to pull the lever.
+    if (state.cowlFlapsOpen) target -= COWL_FLAP_CHT_DROP;
   }
   // Cooling is faster than heating so backing off the throttle actually
   // recovers the gauge in a reasonable window. Asymmetric rates feel right
@@ -6759,6 +6798,21 @@ function updateEngineTemp(dt){
     if (state.engineTempWarnLatch && state.engineTempC <= ENG_TEMP_REDLINE - ENG_TEMP_WARN_HYST){
       state.engineTempWarnLatch = false;
     }
+  }
+  // Cowl-flap auto-suggest: first frame CHT crosses into the warm band
+  // (above the cruise target, well before the redline), nudge the player
+  // toward the lever. One-shot per overheat event — cowlAtcLatch re-arms
+  // in the toggle / on reset / when CHT cools back below the hysteresis
+  // threshold. Skipped when flaps are already open (the lever is already
+  // doing its job) and while the engine is dead / on the ground / paused /
+  // replaying (already self-gated above) so the call doesn't fire stale.
+  if (!state.cowlFlapsOpen && !state.cowlAtcLatch && state.engineTempC >= COWL_FLAP_SUGGEST_C && !state.crashed && !state.onGround){
+    state.cowlAtcLatch = true;
+    if (typeof pushATC === 'function') pushATC('Open cowl flaps, cooling marginal.', { tag:'PILOT', now:true });
+    if (typeof showStatus === 'function') showStatus('COWL FLAPS · open to cool', null, 'hard');
+  } else if (state.cowlAtcLatch && !state.cowlFlapsOpen && state.engineTempC <= COWL_FLAP_SUGGEST_CLEAR){
+    // Hysteresis re-arm so a quick dip-and-rebound doesn't re-fire the call.
+    state.cowlAtcLatch = false;
   }
 }
 
@@ -7917,6 +7971,16 @@ const state = {
   carbIce: 0,
   carbIceAtcLatch: false,
   carbHeatRpmDip: 0,
+  // Cowl flaps (Shift+F). Open = the engine cooling cowl louvers are open,
+  // dropping the CHT target ~25°C but costing ~4% parasite drag (visible
+  // airspeed dip in cruise). Closed = legacy behavior, no drag, no extra
+  // cooling. Seeded from settings.cowlFlaps so the player's last setting
+  // rides across reloads, mirroring carbHeatOn/pitotHeatOn. cowlAtcLatch is
+  // the one-shot "open cowl flaps, cooling marginal" auto-suggest that
+  // fires once when CHT crosses into the warm band; it re-arms when the
+  // player closes the flaps again so future hot events can prompt.
+  cowlFlapsOpen: !!settings.cowlFlaps,
+  cowlAtcLatch: !!settings.cowlFlaps,
   // Next earliest random-fire eligibility timestamp (ms). Bumped after each
   // fire (or each spawn) so we don't roll the dice every frame for nothing.
   nextFireRollMs: 0,
@@ -8356,7 +8420,16 @@ addEventListener('keyup', e=>{
 addEventListener('keydown', e=>{
   if (e.repeat) return;
   if (e.code==='KeyG') toggleGear();
-  if (e.code==='KeyF') cycleFlaps();
+  // Shift+F toggles cowl flaps. Plain F cycles wing flaps (the line below).
+  // Gate through introOpen so a stray key on the main menu can't latch the
+  // toggle, matching the carb-heat (Shift+C) and night-mode (Shift+;) pattern.
+  if (e.code==='KeyF' && e.shiftKey){
+    if (state.introOpen) return;
+    e.preventDefault();
+    toggleCowlFlaps();
+    return;
+  }
+  if (e.code==='KeyF' && !e.shiftKey) cycleFlaps();
   if (e.code==='Backslash') toggleCanopy();
   // Shift+B toggles the parking brake. Plain B is hold-to-brake (handled in
   // step() via keys map), so we only trigger the latch when Shift is held
@@ -9778,6 +9851,13 @@ function resetPlane(){
   state.carbIce = 0;
   state.carbIceAtcLatch = false;
   state.carbHeatRpmDip = 0;
+  // Cowl-flap auto-suggest mirrors the carb/pitot latches: re-arm it on
+  // every fresh sortie so a future overheat in this flight can fire the
+  // "open cowl flaps" prompt once. If the player already had them open at
+  // reset time we suppress the latch (they already know about the lever).
+  // cowlFlapsOpen itself is intentionally preserved — it's a pilot setting,
+  // not a per-flight state, matching the carbHeatOn / pitotHeatOn pattern.
+  state.cowlAtcLatch = !!state.cowlFlapsOpen;
   state.stall = 0;
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
@@ -12967,6 +13047,12 @@ function step(dt){
   // mode actually has consequences in flight. Scaled by the rendered
   // canopyAnim so a half-open canopy doesn't slam the cruise speed.
   const dCDcanopy = CANOPY_DRAG_BUMP * state.canopyAnim;
+  // Cowl flaps open = louvers in the airflow, +4% parasite drag so cruise
+  // speed visibly drops. No animation curve here — the lever is binary, so
+  // the drag is on the moment the toggle is on. Pairs with the CHT drop
+  // applied inside updateEngineTemp(); together they form a real systems
+  // tradeoff (cooler engine vs. lower speed) the pilot has to think about.
+  const dCDcowl = state.cowlFlapsOpen ? COWL_FLAP_DRAG_BUMP : 0;
   let cl;
   if (Math.abs(aoa) < STALL_AOA){
     cl = CL0 + CL_SLOPE * aoa + dCLflap;
@@ -12977,7 +13063,7 @@ function step(dt){
   } else {
     cl = (CL0 * 0.3) * Math.sign(aoa || 1);
   }
-  const cd = CD0 + K_INDUCED*cl*cl + dCDflap + dCDgear + dCDcanopy;
+  const cd = CD0 + K_INDUCED*cl*cl + dCDflap + dCDgear + dCDcanopy + dCDcowl;
 
   const qDyn = 0.5 * RHO * speed * speed;
   const liftMag = qDyn * WING_AREA * cl;
@@ -14275,6 +14361,11 @@ function step(dt){
   // mode so saved PNGs stay clean.
   const carbIcePillEl = document.getElementById('carbIcePill');
   if (carbIcePillEl) carbIcePillEl.style.display = ((state.carbIce || 0) > CARB_ICE_SHOW_MIN && !state.photoMode) ? 'inline' : 'none';
+  // Cowl flaps pill (WIND row) — cyan reminder the lever is open. Lit
+  // whenever cowlFlapsOpen is true, hidden in photo mode so saved PNGs
+  // stay clean.
+  const cowlPillEl = document.getElementById('cowlPill');
+  if (cowlPillEl) cowlPillEl.style.display = (state.cowlFlapsOpen && !state.photoMode) ? 'inline' : 'none';
   // Bailout pill (WIND row) — cyan reminder that Shift+P will work right
   // now. Lit whenever bailoutArmed() returns true (engine fire / heavy
   // damage / fuel exhaustion / inverted-low) and hidden in photo mode +
@@ -19008,6 +19099,8 @@ addEventListener('keydown', e => {
   const coldV = document.getElementById('setColdV');
   const twinBtn = document.getElementById('setTwinBtn');
   const twinV = document.getElementById('setTwinV');
+  const cowlBtn = document.getElementById('setCowlBtn');
+  const cowlV = document.getElementById('setCowlV');
   const trailSel = document.getElementById('setTrail');
   const trailV = document.getElementById('setTrailV');
   const wiperSel = document.getElementById('setWiper');
@@ -19114,6 +19207,11 @@ addEventListener('keydown', e => {
       twinBtn.textContent = settings.twinEngine ? 'TWIN ENGINE: ON' : 'TWIN ENGINE: OFF';
       twinBtn.classList.toggle('primary', settings.twinEngine);
     }
+    if (cowlV) cowlV.textContent = settings.cowlFlaps ? 'OPEN' : 'CLOSED';
+    if (cowlBtn){
+      cowlBtn.textContent = settings.cowlFlaps ? 'COWL FLAPS: OPEN' : 'COWL FLAPS: CLOSED';
+      cowlBtn.classList.toggle('primary', settings.cowlFlaps);
+    }
     if (trailSel) trailSel.value = settings.trailColor;
     if (trailV){
       const tc = TRAIL_COLORS.find(t => t.id === settings.trailColor) || TRAIL_COLORS[0];
@@ -19191,6 +19289,17 @@ addEventListener('keydown', e => {
       applyEngineConfig();
       syncInputs();
       saveSettings();
+    });
+  }
+  if (cowlBtn){
+    cowlBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      // Route through toggleCowlFlaps() so the settings click and the
+      // Shift+F key path share the same state-mutation rules (status
+      // banner, latch re-arm, persisted save). syncInputs() re-reads
+      // settings.cowlFlaps so the button label flips in place.
+      toggleCowlFlaps();
+      syncInputs();
     });
   }
   if (trailSel){
