@@ -9362,6 +9362,43 @@ function drawCompass(hdgDeg, bugDeg){
   compassCtx.fillText(String(Math.round(hdgDeg)%360).padStart(3,'0') + '°', cx, 11);
 }
 
+// ====== Compass click-to-bug ======
+// Click anywhere on the compass strip to drop the magenta heading bug onto
+// the bearing under the click. Mirrors the `[` / `]` nudge behavior — the AP
+// picks up the new bug on the next tick when heading-hold is engaged, and a
+// manual click breaks the waypoint-follow lock (pilot is taking aim). 6 px
+// per degree matches `drawCompass`'s PX_PER_DEG so the bug lands exactly
+// where the pilot pointed. Off-strip clicks (outside the canvas) can't reach
+// this handler at all, so no extra bounds check is needed.
+(function setupCompassClickBug(){
+  if (!compassCv) return;
+  function liveHdgDeg(){
+    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(plane.quaternion);
+    let h = Math.atan2(fwd.x, -fwd.z) * 180/Math.PI;
+    if (h < 0) h += 360;
+    return h;
+  }
+  compassCv.addEventListener('click', e => {
+    if (state.introOpen) return;
+    if (state.replayActive) return;
+    if (state.photoMode) return;
+    const r = compassCv.getBoundingClientRect();
+    // CSS px → internal canvas px (canvas is 720 wide displayed at ~356).
+    const sx = (e.clientX - r.left) * (compassCv.width / r.width);
+    const cx = compassCv.width / 2;
+    const PX_PER_DEG = 6; // matches drawCompass
+    const offsetDeg = (sx - cx) / PX_PER_DEG;
+    const newBug = ((liveHdgDeg() + offsetDeg) % 360 + 360) % 360;
+    state.ap.hdgBug = Math.round(newBug);
+    if (state.ap.on){
+      state.ap.hdgRad = state.ap.hdgBug * Math.PI/180;
+    }
+    state.ap.wpFollow = false;
+  });
+  compassCv.style.cursor = 'pointer';
+  compassCv.style.touchAction = 'manipulation';
+})();
+
 // ====== Vertical-speed needle ======
 const vsiCv = document.getElementById('vsiCv');
 const vsiCtx = vsiCv.getContext('2d');

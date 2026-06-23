@@ -163,10 +163,10 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 
 - [x] Engine start checklist toast — first cold-start `I` press now fires a 3-line `📋 PREFLIGHT — FUEL ON ✓ / MIXTURE RICH ✓ / MAGS BOTH ✓` toast that fades over ~2.5s while the starter is spooling. Pure flavor over the existing cold-start ritual — no physics, no extra gating — just gated to `state.coldStart` (skips in-air deadstick restarts) and hidden in photo / replay / pause via the same pattern as the bird-strike splatter so saved PNGs and frozen frames stay clean. Reuses the achievement DOM host + base style with a tighter `achFade` delay so the card clears before the engine actually catches at `COLD_START_SPOOL_S`.
 
+- [x] Compass card click-to-bug — clicking anywhere on the compass strip at the top of the HUD now drops the heading bug onto the bearing under the click (snapping to the nearest degree). CSS-px → internal-canvas-px scale matches `drawCompass`'s 6 px/deg so the bug lands exactly under the cursor; AP heading-hold picks up the new bug on the same frame and waypoint-follow auto-disengages so the pilot is back in manual aim. Gated off intro/replay/photo for the same reasons as the keyboard nudges; `touch-action: manipulation` makes phone taps register cleanly without a 300ms zoom delay.
+
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
-
-- [ ] Compass card click-to-bug — clicking anywhere on the compass strip at the top of the HUD now drops the heading bug onto the bearing under the click (snapping to the nearest degree). Pairs with the existing `[` / `]` nudges so pilots can either fine-tune with keys or drop a coarse bug with a tap. Tiny LOC (single click handler + getBoundingClientRect math), massive UX win for mouse + touch players.
 
 - [ ] Runway numbers painted on the threshold — each runway gets its two-digit designator (`27`, `09`, `36`, etc.) painted in large white block letters at both ends, centered between the centerline stripes about 30 m in from the threshold. Uses the existing `runwayDesignator()` helper so the numbers always match the ATC callouts. Free immersion upgrade on every approach, makes "land on 27" actually mean something visually instead of just being a number in the ticker.
 
