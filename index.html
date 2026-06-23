@@ -5266,6 +5266,129 @@ function tickNavLights(dt){
 }
 tickNavLights(0); // prime so first frame doesn't ship un-lit nav lights
 
+// ====== RUNWAY END IDENTIFIER LIGHTS (REIL) ======
+// A pair of bright synchronized white strobes flanking each runway threshold
+// (and the carrier deck's approach end), double-flashing in lockstep with
+// the aircraft nav strobes so the threshold pops from 8+ km out on final at
+// night. Pure additive — emissive disc + glare sprite per strobe, no point
+// lights, no shadow casting. Dusk-gated on the same sun-altitude curve the
+// runway edge lights / airport beacons / PAPI bars use so they fade in and
+// out together with the rest of the night lighting (off at noon, glowing at
+// dusk, blinding at midnight). Reuses navStrobePhase + NAV_STROBE_* so the
+// cadence stays locked to the player's own strobes — every airport blinks
+// in sync with your wings.
+const REIL_NIGHT_FALLOFF = 0.35;       // matches AIRPORT_BEACON_NIGHT_FALLOFF / edge lights
+const REIL_OUTBOARD = 12;              // metres outboard of the runway edge
+const REIL_HEIGHT = 1.6;               // metres above the runway surface
+const REIL_GLARE_SCALE = 6.5;          // sprite scale; reads from ~8 km out without overpowering the PAPI bars
+const reilStrobes = [];                // [{ headMat, glareMat, baseColor }] — flat list, all double-flash together
+const _reilGlareTex = (() => {
+  // Soft additive disc — same flavour as the beacon glare so REIL reads as
+  // part of the same night-lighting family.
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const cx = cv.getContext('2d');
+  const g = cx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.40, 'rgba(255,255,255,0.45)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  cx.fillStyle = g; cx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+function _addReilStrobe(parent, x, y, z){
+  // Tiny emissive disc as the visible "bulb" — sits flush above the strobe
+  // post so it still reads close-up after the glare sprite dims down.
+  const headGeo = new THREE.SphereGeometry(0.28, 8, 6);
+  const headMat = new THREE.MeshLambertMaterial({
+    color: 0xeeeeee, emissive: new THREE.Color(0x111111)
+  });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.set(x, y, z);
+  parent.add(head);
+  // Slim white pole so the strobe doesn't look like it's floating on grass.
+  const post = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.10, y, 5),
+    new THREE.MeshLambertMaterial({ color: 0xdddddd })
+  );
+  post.position.set(x, y / 2, z);
+  parent.add(post);
+  // Additive glare sprite — what actually carries the strobe from 6-8 km out.
+  // Driven per-frame by tickReilStrobes.
+  const glareMat = new THREE.SpriteMaterial({
+    map: _reilGlareTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xffffff, blending: THREE.AdditiveBlending, fog: false
+  });
+  const glare = new THREE.Sprite(glareMat);
+  glare.scale.setScalar(REIL_GLARE_SCALE);
+  head.add(glare);
+  reilStrobes.push({
+    headMat, glareMat, baseColor: new THREE.Color(0xffffff)
+  });
+}
+// Build a strobe pair at each runway threshold for every ground airport.
+// Strobes sit outboard of the edge lights at both ends so the pattern
+// punches from either approach direction. Fresh group per airport, rotated
+// to runway heading so positions are runway-local.
+for (let ai = 0; ai < AIRPORTS.length; ai++){
+  const a = AIRPORTS[ai];
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  const halfW = a.w / 2 + REIL_OUTBOARD;
+  const halfL = a.len / 2;
+  // +z threshold strobes (pilot landing flies -z, approaches this end)
+  _addReilStrobe(grp, -halfW, REIL_HEIGHT,  halfL);
+  _addReilStrobe(grp,  halfW, REIL_HEIGHT,  halfL);
+  // -z threshold strobes (pilot landing flies +z, approaches this end)
+  _addReilStrobe(grp, -halfW, REIL_HEIGHT, -halfL);
+  _addReilStrobe(grp,  halfW, REIL_HEIGHT, -halfL);
+}
+// Carrier deck gets a single strobe pair at the stern (approach end) — real
+// carriers don't use REIL but the visual cue at night for an offshore deck
+// is huge, and it pairs with the existing carrier deck mission lighting.
+if (typeof CARRIER !== 'undefined' && CARRIER){
+  const cgrp = new THREE.Group();
+  cgrp.position.set(CARRIER.x, CARRIER.elev, CARRIER.z);
+  cgrp.rotation.y = CARRIER.hdg;
+  scene.add(cgrp);
+  const chalfW = CARRIER.w / 2 + 3;   // tighter outboard offset — deck has no apron
+  const chalfL = CARRIER.len / 2;
+  // Approach end is the stern: pilot lands flying +z toward midship, so the
+  // -z end of the deck is the threshold they cross first.
+  _addReilStrobe(cgrp, -chalfW, REIL_HEIGHT + 0.4, -chalfL);
+  _addReilStrobe(cgrp,  chalfW, REIL_HEIGHT + 0.4, -chalfL);
+}
+function tickReilStrobes(dt){
+  // Same double-flash waveform the aircraft nav strobes use, so airport
+  // REIL pops in lockstep with the player's wingtips. Cadence comes from
+  // navStrobePhase (advanced in tickNavLights), NAV_STROBE_PERIOD,
+  // NAV_STROBE_GAP, NAV_STROBE_PULSE.
+  const dir = sunDirFor(state.todHours);
+  const nightT = Math.max(0, Math.min(1, 1 - (dir.y - (-0.05)) / REIL_NIGHT_FALLOFF));
+  const _pulse = (t) => {
+    const x = t / NAV_STROBE_PULSE;
+    return Math.max(0, 1 - x * x);
+  };
+  const sp1 = _pulse(navStrobePhase - 0.00);
+  const sp2 = _pulse(navStrobePhase - NAV_STROBE_GAP);
+  const sp1w = _pulse(navStrobePhase - NAV_STROBE_PERIOD);
+  const pulse = Math.max(sp1, sp2, sp1w);
+  // Faint base glow at night so the bulb is visible between pops; daytime
+  // stays completely off so the strobes don't read as random white dots on
+  // the grass when the airport is sunlit.
+  const baseGlow = 0.08 * nightT;
+  const emitK = baseGlow + 6.0 * pulse * Math.max(0.30, nightT);
+  const glareO = Math.min(1, 0.06 * nightT + 1.15 * pulse * (0.35 + 0.65 * nightT));
+  for (let i = 0; i < reilStrobes.length; i++){
+    const s = reilStrobes[i];
+    s.headMat.emissive.copy(s.baseColor).multiplyScalar(emitK);
+    s.glareMat.opacity = glareO;
+  }
+}
+tickReilStrobes(0); // prime so the first rendered frame doesn't ship un-lit REIL
+
 // Pattern geometry — left-hand circuit at MAIN_AP. Lengths in metres along
 // the runway's local axes (lz = along runway, lx = across, +lx is the
 // pattern side). Altitudes are AGL above MAIN_AP.elev.
@@ -17087,6 +17210,7 @@ function step(dt){
   tickStarDome(dt, (_tod && _tod.nightT) || 0);
   tickAirportBeacons(dt);
   tickNavLights(dt);
+  tickReilStrobes(dt);
   tickLandingLight(dt);
   tickPapiLights(dt);
   tickCanopy(dt);
