@@ -528,11 +528,11 @@
      centered along the bottom. Only shown in cockpit cam (state.cam===1) so the
      view actually feels like sitting behind a panel. Drawn on small canvases so
      needles can sweep smoothly without DOM thrash. */
-  #cockpitPanel { position:fixed; left:50%; bottom:54px; transform:translateX(-50%); display:none; gap:12px; padding:10px 14px; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:10px; backdrop-filter:blur(8px); z-index:7; }
+  #cockpitPanel { --duskAmt:0; position:fixed; left:50%; bottom:54px; transform:translateX(-50%); display:none; gap:12px; padding:10px 14px; background:rgba(8,14,22,.78); border:1px solid #1e3548; border-radius:10px; backdrop-filter:blur(8px); z-index:7; transition:box-shadow .35s ease, border-color .35s ease, background .35s ease; }
   #cpPitotHeat { pointer-events:none; }
   #cockpitPanel.show { display:flex; }
   #cockpitPanel .gauge { display:flex; flex-direction:column; align-items:center; }
-  #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); transition:filter .25s ease, border-color .25s ease; }
+  #cockpitPanel canvas { display:block; width:110px; height:110px; border-radius:50%; background:#05080c; border:2px solid #1e3548; box-shadow:inset 0 0 8px rgba(0,0,0,.7); transition:filter .25s ease, border-color .25s ease, box-shadow .35s ease; }
   #cockpitPanel .glbl { margin-top:4px; font-size:10px; letter-spacing:2px; color:#6aa; font-weight:700; transition:color .25s ease, text-shadow .25s ease; }
   /* Night-mode (Shift+;): tint every gauge canvas + the panel chrome red so the
      instruments stay readable without nuking the pilot's night vision. CSS filter
@@ -541,6 +541,25 @@
   #cockpitPanel.night canvas { filter: saturate(.15) sepia(1) hue-rotate(-45deg) brightness(.85) contrast(1.15); border-color:#5a1818; }
   #cockpitPanel.night { box-shadow: 0 0 22px rgba(220,40,30,.45), inset 0 0 12px rgba(140,10,10,.35); border-color:#5a1818; background:rgba(14,4,4,.78); }
   #cockpitPanel.night .glbl { color:#d56a6a; text-shadow:0 0 6px rgba(220,50,40,.45); }
+  /* Dusk/dawn/night instrument lighting: the gauges pick up a warm amber
+     backlight glow that fades in as the sun drops below the horizon (same
+     dusk gate as the runway edge lights). Implemented via box-shadow + label
+     tint only — no canvas `filter` change, so this composes cleanly with the
+     existing .night (Shift+;) red panel and the .alt-fail / .alt-dark dim
+     passes. --duskAmt (0..1, set per-frame in drawCockpitPanel) drives the
+     intensity so the fade is smooth instead of a hard class flip. The .night
+     override below wins when both lights are on so the Shift+; red panel
+     stays red at midnight. */
+  #cockpitPanel.dusk canvas { box-shadow: inset 0 0 8px rgba(0,0,0,.7), 0 0 calc(14px * var(--duskAmt)) rgba(232, 160, 74, calc(.55 * var(--duskAmt))); border-color: rgb(calc(30 + 60 * var(--duskAmt)), calc(53 + 35 * var(--duskAmt)), calc(72 - 18 * var(--duskAmt))); }
+  #cockpitPanel.dusk { box-shadow: 0 0 calc(18px * var(--duskAmt)) rgba(232, 160, 74, calc(.32 * var(--duskAmt))), inset 0 0 calc(10px * var(--duskAmt)) rgba(180, 110, 40, calc(.22 * var(--duskAmt))); border-color: rgb(calc(30 + 60 * var(--duskAmt)), calc(53 + 35 * var(--duskAmt)), calc(72 - 18 * var(--duskAmt))); background: rgba(calc(8 + 20 * var(--duskAmt)), calc(14 + 8 * var(--duskAmt)), calc(22 - 4 * var(--duskAmt)), .78); }
+  #cockpitPanel.dusk .glbl { color: rgb(calc(102 + 110 * var(--duskAmt)), calc(170 + 0 * var(--duskAmt)), calc(170 - 80 * var(--duskAmt))); text-shadow: 0 0 calc(5px * var(--duskAmt)) rgba(232, 160, 74, calc(.55 * var(--duskAmt))); }
+  /* When the red night-vision panel (Shift+;) is on, suppress the amber dusk
+     wash on the chrome/labels so the two lighting moods don't fight. The
+     canvas filter chain is already owned by .night so no extra rule needed
+     on the gauge faces. */
+  #cockpitPanel.dusk.night { box-shadow: 0 0 22px rgba(220,40,30,.45), inset 0 0 12px rgba(140,10,10,.35); border-color:#5a1818; background:rgba(14,4,4,.78); }
+  #cockpitPanel.dusk.night canvas { box-shadow: inset 0 0 8px rgba(0,0,0,.7); border-color:#5a1818; }
+  #cockpitPanel.dusk.night .glbl { color:#d56a6a; text-shadow:0 0 6px rgba(220,50,40,.45); }
   /* Alternator-failure dim pass. Composes with .night (filters multiply via the
      compositor) so a night-flight alt-fail still reads as red panel + dimmed.
      Brightness drops the gauge faces ~25%, opacity drops the HUD readouts the
@@ -20108,6 +20127,11 @@ const cpFfCv  = document.getElementById('cpFf');
 const cpChrCv = document.getElementById('cpChr');
 const cpVorCv = document.getElementById('cpVor');
 const cpDaCv  = document.getElementById('cpDa');
+// Smoothed cockpit panel "dusk lighting" intensity (0..1). Lazy-eased toward
+// the live runway-edge-light dusk gate inside drawCockpitPanel() each frame
+// so the amber post-light wash fades in/out glassily across sunrise/sunset.
+// CSS-side .dusk rules read this through the --duskAmt custom property.
+let _cockpitDuskT = 0;
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
@@ -21302,6 +21326,31 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // in updateDensityAltitude()) so the gauge tracks live OAT + altitude
   // without any extra plumbing. Self-test override sweeps the dial.
   drawCockpitDa(state.densityAltFt, daOverride);
+  // Cockpit panel night lighting: when the sun drops toward the horizon,
+  // the panel chrome + labels pick up a warm amber wash so the instruments
+  // read like real GA cockpit post-lights at dusk/dawn/night instead of
+  // sinking into the black sky. Same dusk gate as the runway edge lights
+  // (sunDirFor + the (-0.05, 0.25) sun-altitude window). Smoothed via a
+  // lazy module-level scalar so the fade is glassy on either side of the
+  // threshold; intensity is published as a CSS custom property
+  // (--duskAmt, 0..1) so the .dusk rules in the cockpit panel CSS can drive
+  // box-shadow + label color smoothly without rapid class toggles.
+  // Composes cleanly with the existing .night (Shift+; red panel) and the
+  // .alt-fail / .alt-dark electrical dim because none of the .dusk rules
+  // touch the canvas filter chain those classes already own.
+  try {
+    const _dirY = (typeof sunDirFor === 'function')
+      ? sunDirFor(state.todHours).y
+      : 1.0;
+    const _targetDusk = Math.max(0, Math.min(1, 1 - (_dirY - (-0.05)) / 0.3));
+    // Glassy fade either direction: per-frame ease tied to dt so the
+    // transition reads the same on 30 fps phones and 120 fps desktops.
+    const _ease = Math.min(1, (dt || 0.016) * 0.7);
+    _cockpitDuskT += (_targetDusk - _cockpitDuskT) * _ease;
+    if (_cockpitDuskT < 0.001) _cockpitDuskT = 0;
+    cpEl.style.setProperty('--duskAmt', _cockpitDuskT.toFixed(3));
+    cpEl.classList.toggle('dusk', _cockpitDuskT > 0.01);
+  } catch(e){}
 }
 
 // ====== Camera ======
