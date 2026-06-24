@@ -1142,6 +1142,11 @@
       <div class="hint">Streaks across the screen and a moodier, dimmer sky.</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">LIGHTNING STATIC</span><span class="val" id="setLightStaticV">ON</span></div>
+      <button id="setLightStaticBtn" type="button" style="width:100%">TOGGLE LIGHTNING STATIC</button>
+      <div class="hint">Adds a short scratchy radio crackle (and a brief <kbd>📻</kbd> SQUELCH note on the cockpit ATIS strip) the instant a distant lightning flash fires. OFF keeps the flash visually silent.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">SNOW</span><span class="val" id="setSnowV">OFF</span></div>
       <select id="setSnow"></select>
       <div class="hint">Falling flakes, snow-glazed runways, and a brutal friction penalty for braking. Mutually exclusive with RAIN.</div>
@@ -1550,7 +1555,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false, approachPlate: true };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false, approachPlate: true, lightningStatic: true };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1665,6 +1670,7 @@ try {
     if (typeof saved.fuelSelector === 'string' && ['BOTH','LEFT','RIGHT'].indexOf(saved.fuelSelector) !== -1) settings.fuelSelector = saved.fuelSelector;
     if (typeof saved.cockpitClockZulu === 'boolean') settings.cockpitClockZulu = saved.cockpitClockZulu;
     if (typeof saved.approachPlate === 'boolean') settings.approachPlate = saved.approachPlate;
+    if (typeof saved.lightningStatic === 'boolean') settings.lightningStatic = saved.lightningStatic;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -11358,6 +11364,11 @@ const state = {
   // flash on far cells. Everything resets on resetPlane() so a mission
   // restart re-rolls the storm timeline cleanly.
   lightning: { nextStrikeMs: 0, flashT: 0, flashDur: 0, peakAlpha: 0, pendingThunder: [] },
+  // Performance.now() cutoff for the radio-static SQUELCH annotation on the
+  // ATIS strip. Set the moment a strike fires (gated by settings.lightningStatic)
+  // and read each frame by updateAtisStrip() to flip the .sub text to
+  // "📻 SQUELCH" while the cockpit cam is active. 0 = nothing pending.
+  lightningStaticUntil: 0,
   // Storm cells visualized on the weather radar. Each entry is a cell drifting
   // on the wind: { x, z, r, sev, age, ttl, fade }. sev 0..1 picks amber→red
   // tint, fade 0..1 eases in on spawn + eases out when rain toggles off so
@@ -13732,7 +13743,16 @@ function updateAtisStrip(force){
   const info = _atisInfoLetter();
   setT('atisStripId', ap.id);
   setT('atisStripInfo', 'INFO ' + info);
-  setT('atisStripSub', (ap.name || 'automatic terminal information') + ' · ATIS');
+  // Radio-static SQUELCH annotation: while the lightning crackle is still
+  // within its 600 ms cutoff AND the pilot is in the cockpit cam (the only
+  // view that hears the panel radio), overwrite the normal subtitle line
+  // with the annotation so the audio + visual line up. Next-frame paint
+  // restores the regular text the instant the cutoff expires.
+  if (state.lightningStaticUntil && performance.now() < state.lightningStaticUntil && state.cam === 1){
+    setT('atisStripSub', '📻 SQUELCH · STATIC');
+  } else {
+    setT('atisStripSub', (ap.name || 'automatic terminal information') + ' · ATIS');
+  }
   setT('atisStripRwy', _atisRunwayInUse(ap));
   setT('atisStripWind', _atisStripWindStr());
   const altim = (typeof _atisAltimeterInHg === 'number') ? _atisAltimeterInHg : 30.06;
@@ -14417,6 +14437,9 @@ function resetPlane(){
     state.lightning.peakAlpha = 0;
     state.lightning.pendingThunder.length = 0;
   }
+  // Drop any pending radio-static SQUELCH overlay so a hot reset doesn't
+  // carry a half-faded annotation into the fresh ATIS strip.
+  state.lightningStaticUntil = 0;
   // Storm cells — wipe the radar painted cells + reset the spawn scheduler
   // so a fresh sortie starts with a clean scope. If rain is on, the next
   // updateStormCells() tick will seed a fresh set within ~1s.
@@ -29216,6 +29239,50 @@ const lightningEl = document.getElementById('lightning');
 // Volume + filter centre frequency scale with distance so close cells crack
 // crisply and far cells reduce to a soft mumble. Reuses the shared sfxReady()
 // WebAudio context — zero new long-lived audio nodes per strike.
+// Radio static crackle layered on the visible lightning flash. The strike
+// induces a brief carrier interference on the cockpit radio (band-passed
+// 1.2–3.5 kHz white noise with two short envelope dips so it reads as a
+// scratchy radio pop, not a sustained hiss). Distance-attenuated so close
+// strikes pop louder, far strikes scratch lightly. Reuses the shared
+// sfxReady() WebAudio context — no new hardware nodes, no new assets.
+function playLightningStaticCrackle(distance){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  // Same distance fade curve as the thunder rumble so close cells crackle
+  // louder than far ones. Pair this with the lightning peak so the audio
+  // intensity tracks the visible flash strength the player just saw.
+  const dN = Math.max(0, Math.min(1, ((+distance || LIGHTNING_MIN_DIST_M) - LIGHTNING_MIN_DIST_M) / Math.max(1, (LIGHTNING_MAX_DIST_M - LIGHTNING_MIN_DIST_M))));
+  const distFade = 0.90 - 0.55 * dN;
+  const vol = 0.16 * (settings.volume || 0) * distFade;
+  if (vol <= 0) return;
+  // 200 ms of band-passed white noise. Burst is short so it never fights
+  // the queued thunder rumble that lands seconds later.
+  const dur = 0.20;
+  const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2300; // center of the 1.2–3.5 kHz radio voice band
+  bp.Q.value = 0.65;          // wide enough to read as carrier noise, not a tone
+  const g = ctx.createGain();
+  // Two envelope dips so the burst reads as a SCRATCH — pop, dip, pop —
+  // instead of a flat hiss. Anchors at 0/0.06/0.10/0.16/0.20 s.
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol * 1.0,  t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol * 0.18), t0 + 0.060);
+  g.gain.linearRampToValueAtTime(vol * 0.75, t0 + 0.085);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol * 0.20), t0 + 0.130);
+  g.gain.linearRampToValueAtTime(vol * 0.45, t0 + 0.155);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+}
+
 function playThunderRumble(distance){
   const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
   if (!ctx) return;
@@ -29458,6 +29525,18 @@ function tickLightning(dt){
   // Cap the pending queue so a long stormy session can't grow unbounded if
   // the player parked the tab and rumbles never fired through the gate.
   if (L.pendingThunder.length > 6) L.pendingThunder.splice(0, L.pendingThunder.length - 6);
+  // Radio-static crackle layered ON the visible flash (gated by the per-
+  // session settings.lightningStatic toggle so silent-flash fans can mute
+  // just the radio pop). The crackle fires inline with the flash because
+  // EM interference travels at light-speed — only the thunder rumble waits
+  // out the queued speed-of-sound delay. Frozen-frame gate above already
+  // returned us early, so we don't need to re-check here. The 600 ms ATIS
+  // strip annotation cutoff lives in state so updateAtisStrip() can flip
+  // the .sub text without coupling to a separate timer.
+  if (settings.lightningStatic !== false){
+    try { playLightningStaticCrackle(dist); } catch(e){ /* never let audio kill the storm tick */ }
+    state.lightningStaticUntil = now + 600;
+  }
   // Re-roll the next strike window.
   L.nextStrikeMs = now + LIGHTNING_MIN_GAP_MS + Math.random() * (LIGHTNING_MAX_GAP_MS - LIGHTNING_MIN_GAP_MS);
 }
@@ -30558,6 +30637,8 @@ addEventListener('keydown', e => {
   const livV = document.getElementById('setLivV');
   const rainBtn = document.getElementById('setRainBtn');
   const rainV = document.getElementById('setRainV');
+  const lightStaticBtn = document.getElementById('setLightStaticBtn');
+  const lightStaticV   = document.getElementById('setLightStaticV');
   const snowSel = document.getElementById('setSnow');
   const snowV = document.getElementById('setSnowV');
   const fogSel = document.getElementById('setFog');
@@ -30703,6 +30784,12 @@ addEventListener('keydown', e => {
       rainBtn.textContent = settings.rain ? 'RAIN: ON' : 'RAIN: OFF';
       rainBtn.classList.toggle('primary', settings.rain);
     }
+    if (lightStaticV) lightStaticV.textContent = (settings.lightningStatic !== false) ? 'ON' : 'OFF';
+    if (lightStaticBtn){
+      const on = settings.lightningStatic !== false;
+      lightStaticBtn.textContent = on ? 'LIGHTNING STATIC: ON' : 'LIGHTNING STATIC: OFF';
+      lightStaticBtn.classList.toggle('primary', on);
+    }
     if (coldV) coldV.textContent = settings.coldStart ? 'ON' : 'OFF';
     if (coldBtn){
       coldBtn.textContent = settings.coldStart ? 'COLD START: ON' : 'COLD START: OFF';
@@ -30798,6 +30885,18 @@ addEventListener('keydown', e => {
         settings.snow = 'off';
       }
       applyRainVisible();
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (lightStaticBtn){
+    lightStaticBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.lightningStatic = !(settings.lightningStatic !== false);
+      // Flipping OFF mid-strike clears the live SQUELCH annotation so the
+      // ATIS strip subtitle restores to its normal text on the next frame
+      // instead of waiting out the remaining cutoff.
+      if (!settings.lightningStatic) state.lightningStaticUntil = 0;
       syncInputs();
       saveSettings();
     });
