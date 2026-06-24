@@ -6547,6 +6547,24 @@ const THROTTLE_BACK_MAX_RAD = 0.85;
 // not twitchy" feel.
 let throttleLeverAnim = 0;        // 0..1, smoothed throttle for the lever
 
+// ====== THROTTLE QUADRANT DETENTS ======
+// Soft click-stops at 0% / 25% / 50% / 75% / 100% so dragging the throttle
+// past a detent boundary fires a single short tick. Pure feel layer — no
+// flight model touch, no new keybinding — just the click-stop personality
+// every real piston throttle has. tickThrottleDetents() walks the array
+// each frame and emits a click whenever the live throttle crosses one of
+// these thresholds in either direction. The 0% and 100% endpoints are
+// included so a slam from cruise to idle (or a firewall punch to full)
+// still gets a tactile thump at the bookend. A tiny cooldown plus a
+// per-detent epsilon kills float-jitter machine-gunning if the throttle
+// stalls right on a threshold value.
+const THROTTLE_DETENTS = [0.0, 0.25, 0.50, 0.75, 1.0];
+const THROTTLE_DETENT_EPS = 0.004;   // ignore re-crosses inside this band
+const THROTTLE_DETENT_COOLDOWN_S = 0.06; // min gap between any two clicks
+let throttleDetentPrev = 0;
+let throttleDetentCooldown = 0;
+let throttleDetentInit = false;
+
 // ====== COCKPIT RUDDER PEDALS ======
 // Companion to the cockpit yoke + throttle quadrant — the third primary
 // control. Two small grey pedal blocks parented under the plane at the
@@ -16840,6 +16858,78 @@ function playParkingBrakeClick(setting){
     src.stop(ts + 0.035);
   }
 }
+function playThrottleDetentClick(){
+  // Soft tick when the throttle lever crosses a detent (0/25/50/75/100%).
+  // Single short bandpassed-noise burst at ~2.1 kHz so it reads as a
+  // mechanical click-stop rather than the brassier parking-brake ratchet.
+  // Held well under engine-bed level (vol 0.10) so it sits behind the
+  // engine rumble at cruise but is audible on a slow drag from idle.
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const vol = 0.10 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  const dur = 0.022;
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++){
+    // Decaying noise burst — sharper attack than the parking-brake click.
+    data[i] = (Math.random()*2-1) * Math.pow(1 - i/data.length, 1.6);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2100;
+  bp.Q.value = 1.6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.01);
+}
+function tickThrottleDetents(dt){
+  // Watches state.throttle for crossings of any THROTTLE_DETENTS value and
+  // emits a click. Skips the very first frame (so opening the sim with
+  // throttle = 0 doesn't pop a click) and skips cold-start / crashed /
+  // intro / replay / photo / pause frames so the gate matches every other
+  // cockpit-feel system. Bidirectional — a slam from cruise back to idle
+  // gets its own ladder of clicks, just like a real quadrant.
+  if (throttleDetentCooldown > 0) throttleDetentCooldown = Math.max(0, throttleDetentCooldown - dt);
+  const cur = Math.max(0, Math.min(1, state.throttle || 0));
+  if (!throttleDetentInit){
+    throttleDetentPrev = cur;
+    throttleDetentInit = true;
+    return;
+  }
+  // Gate against frozen / non-pilot-driven states so a paused screen or a
+  // crash-bleed-down doesn't fire phantom clicks.
+  if (state.crashed || state.coldStart || state.introOpen || state.paused
+      || state.replayActive || state.photoMode){
+    throttleDetentPrev = cur;
+    return;
+  }
+  const prev = throttleDetentPrev;
+  if (Math.abs(cur - prev) < THROTTLE_DETENT_EPS){
+    return; // float jitter while parked on a value
+  }
+  if (throttleDetentCooldown <= 0){
+    const lo = Math.min(prev, cur);
+    const hi = Math.max(prev, cur);
+    for (let i = 0; i < THROTTLE_DETENTS.length; i++){
+      const d = THROTTLE_DETENTS[i];
+      // Inclusive crossing test: a strict step that lands exactly ON a
+      // detent still fires (slam to idle / firewall punch to full).
+      if (d >= lo - 1e-6 && d <= hi + 1e-6 && Math.abs(d - prev) > THROTTLE_DETENT_EPS){
+        playThrottleDetentClick();
+        throttleDetentCooldown = THROTTLE_DETENT_COOLDOWN_S;
+        break; // one click per frame even if a slam crosses multiple detents
+      }
+    }
+  }
+  throttleDetentPrev = cur;
+}
 function playFlapWhoosh(){
   const ctx = sfxReady();
   if (!ctx) return;
@@ -21586,6 +21676,11 @@ function step(dt){
   } else {
     state.throttle = Math.max(0, state.throttle - 1.0*dt);
   }
+  // Emit a soft click whenever the throttle crosses one of the quadrant
+  // detents (0/25/50/75/100%). Tick AFTER every throttle update path above
+  // so a key tap, the mobile slider, the auto-bleed on engineOut, and the
+  // friction-lock hold all share the same crossing detector.
+  tickThrottleDetents(dt);
   state.brakes = !!keys['KeyB'] || !!touch.brake;
   // Parking brake: locks wheels at low speed so the pilot can sit on the
   // hold-short line hands-free. Auto-releases above ~5 km/h ground speed so
