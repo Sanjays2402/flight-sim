@@ -930,6 +930,17 @@
   #tutorial button.primary { background:rgba(40,90,55,.85); border-color:#7ee787; color:#7ee787; }
   #tutorial button:hover { background:rgba(40,80,110,.85); border-color:#7ee787; color:#7ee787; transform:translateY(-1px); }
   #tutorial button.primary:hover { background:rgba(60,120,75,.95); }
+  /* Quick-action radial menu (Q hold). Opens on Q hold >0.2s or via the
+     mobile mbQ corner-button long-press. 6 wedges arranged at 60° intervals
+     starting straight up at 12 o'clock. Pointer position (or arrow keys)
+     picks a wedge; release fires the action. Hidden by default + in photo
+     mode via PHOTO_HIDE_IDS so saved PNGs stay clean. */
+  #qradial { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:280px; height:280px; display:none; pointer-events:none; z-index:200; }
+  #qradial.show { display:block; }
+  #qradial .qhub { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:62px; height:62px; border-radius:50%; background:rgba(8,14,22,.85); border:1px solid #2a4a6a; color:#cfe; font-size:10px; letter-spacing:2px; font-weight:800; display:flex; align-items:center; justify-content:center; text-align:center; line-height:1.1; box-shadow:0 0 16px rgba(0,0,0,.55); }
+  #qradial .qwedge { position:absolute; left:50%; top:50%; width:78px; height:78px; margin-left:-39px; margin-top:-39px; border-radius:50%; background:rgba(8,14,22,.78); border:1px solid #2a4a6a; color:#cfe; font-size:10px; letter-spacing:1.5px; font-weight:700; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; line-height:1.15; transition:background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease; box-shadow:0 0 12px rgba(0,0,0,.45); }
+  #qradial .qwedge .qg { font-size:18px; line-height:1; margin-bottom:3px; }
+  #qradial .qwedge.hot { background:rgba(40,90,55,.92); border-color:#7ee787; color:#7ee787; box-shadow:0 0 24px rgba(126,231,135,.55); }
 </style>
 </head>
 <body>
@@ -1089,11 +1100,25 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw (hold <kbd>Q</kbd> = quick-action menu) · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
 <div id="cammode"><span class="lbl">CAM</span><span class="mode" id="cmName">CHASE</span></div>
+<!-- Quick-action radial menu (Q hold >0.2s). 6 wedges arranged at 60°
+     intervals starting at 12 o'clock and going clockwise: GEAR, FLAPS,
+     LIGHTS, BRAKES, AUTOPILOT, CAMERA. Pointer angle from center picks a
+     wedge; release Q to fire. Hidden by default + in photo/replay/pause/
+     intro via the keydown gate + PHOTO_HIDE_IDS so saved PNGs stay clean. -->
+<div id="qradial">
+  <div class="qwedge" data-qa="gear" style="transform:translate(0px,-110px)"><span class="qg">⤤</span>GEAR</div>
+  <div class="qwedge" data-qa="flaps" style="transform:translate(95px,-55px)"><span class="qg">⋮</span>FLAPS</div>
+  <div class="qwedge" data-qa="lights" style="transform:translate(95px,55px)"><span class="qg">💡</span>LIGHTS</div>
+  <div class="qwedge" data-qa="brakes" style="transform:translate(0px,110px)"><span class="qg">🅿</span>BRAKES</div>
+  <div class="qwedge" data-qa="ap" style="transform:translate(-95px,55px)"><span class="qg">✈</span>AUTOPILOT</div>
+  <div class="qwedge" data-qa="cam" style="transform:translate(-95px,-55px)"><span class="qg">🎥</span>CAMERA</div>
+  <div class="qhub">QUICK<br>ACTION</div>
+</div>
 <div id="cockpitPanel">
   <div id="cpPitotHeat" style="display:none;position:absolute;top:-18px;right:8px;font-size:9px;letter-spacing:1.5px;color:#ff9e3d;font-weight:800;text-shadow:0 0 6px rgba(255,158,61,.55)">● PITOT HEAT</div>
   <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl" id="cpAsiLbl">AIRSPEED km/h</div></div>
@@ -1321,6 +1346,7 @@
     <button id="mbCam">CAM</button>
     <button id="mbIgn">IGN</button>
     <button id="mbLight">LIGHT</button>
+    <button id="mbQ" title="Hold for quick-action menu">QUICK</button>
   </div>
 </div>
 <div id="status"></div>
@@ -12997,6 +13023,209 @@ function updateReplay(dt){
 }
 
 const keys = {};
+// ====== QUICK-ACTION RADIAL MENU (Q hold) ======
+// Hold Q for QRADIAL_OPEN_S to pop the 6-wedge circular overlay (GEAR, FLAPS,
+// LIGHTS, BRAKES, AUTOPILOT, CAMERA). Pointer position from the screen
+// center picks a wedge; arrow keys can also pick one when the player is on
+// keyboard-only. Release Q to fire the selected action. Tap Q (release
+// before QRADIAL_OPEN_S) keeps the legacy yaw behavior wired through the
+// `keys` map below. Pure UI wrapper around existing toggles — no new physics,
+// no new audio path. Gated against intro / replay / photo / pause / crashed
+// so it never opens at the wrong moment.
+const QRADIAL_OPEN_S = 0.20;
+const qradialState = {
+  el: null,
+  wedges: null,
+  holding: false,
+  open: false,
+  holdT: 0,
+  hot: null,        // currently-selected wedge id ('gear'/'flaps'/...)
+  selKey: null,     // keyboard arrow override; sticks until pointer moves again
+  pointerX: 0,
+  pointerY: 0,
+  pointerSeen: false,
+  // Compass position of each wedge (in radians, measured clockwise from
+  // straight-up = 12 o'clock). Matches the inline transform on each wedge
+  // div so the highlight always lines up with the visual layout.
+  angles: [
+    { id:'gear',   ang:0 },
+    { id:'flaps',  ang:Math.PI/3 },
+    { id:'lights', ang:2*Math.PI/3 },
+    { id:'brakes', ang:Math.PI },
+    { id:'ap',     ang:4*Math.PI/3 },
+    { id:'cam',    ang:5*Math.PI/3 },
+  ],
+};
+function qradialBlocked(){
+  // Same gate every other windshield-style overlay uses. Also bail in the
+  // settings panel / sqkeypad / timekeypad / etc. modal contexts via the
+  // standard introOpen / paused / replayActive / photoMode / crashed checks.
+  return !!(state.crashed || state.replayActive || state.photoMode || state.introOpen || state.paused);
+}
+function qradialPickFromPointer(){
+  if (!qradialState.pointerSeen) return null;
+  const el = qradialState.el; if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const dx = qradialState.pointerX - cx;
+  const dy = qradialState.pointerY - cy;
+  // Dead-zone in the hub so the player can hold dead-center to cancel a
+  // selection. Distance is in screen px; the hub is 62px wide so ~36px
+  // radius keeps the cancel disc small but reachable.
+  if (Math.hypot(dx, dy) < 36) return null;
+  // atan2 returns the angle measured counter-clockwise from +x; convert to
+  // the same clockwise-from-12 convention the wedge angles use.
+  let ang = Math.atan2(dx, -dy);
+  if (ang < 0) ang += Math.PI * 2;
+  let best = null, bestDelta = Infinity;
+  for (const w of qradialState.angles){
+    let d = Math.abs(ang - w.ang);
+    if (d > Math.PI) d = Math.PI * 2 - d;
+    if (d < bestDelta){ bestDelta = d; best = w.id; }
+  }
+  return best;
+}
+function qradialPickHot(){
+  // Keyboard override wins until the pointer moves again so a player on
+  // arrow keys doesn't fight a stale mouse position.
+  if (qradialState.selKey) return qradialState.selKey;
+  return qradialPickFromPointer();
+}
+function qradialUpdateHighlight(){
+  if (!qradialState.open || !qradialState.wedges) return;
+  const hot = qradialPickHot();
+  qradialState.hot = hot;
+  for (const w of qradialState.wedges){
+    if (w.dataset.qa === hot) w.classList.add('hot');
+    else w.classList.remove('hot');
+  }
+}
+function qradialOpenNow(){
+  if (qradialBlocked()) return;
+  if (qradialState.open) return;
+  if (!qradialState.el){
+    qradialState.el = document.getElementById('qradial');
+    if (qradialState.el) qradialState.wedges = Array.from(qradialState.el.querySelectorAll('.qwedge'));
+  }
+  if (!qradialState.el) return;
+  qradialState.open = true;
+  qradialState.selKey = null;
+  qradialState.el.classList.add('show');
+  // Suppress yaw the moment the menu pops so a long Q press doesn't drag
+  // the rudder hard left while the player is aiming at a wedge.
+  keys['KeyQ'] = false;
+  qradialUpdateHighlight();
+}
+function qradialClose(){
+  if (qradialState.el) qradialState.el.classList.remove('show');
+  if (qradialState.wedges){
+    for (const w of qradialState.wedges) w.classList.remove('hot');
+  }
+  qradialState.open = false;
+  qradialState.hot = null;
+  qradialState.selKey = null;
+}
+function qradialFire(id){
+  if (!id) return;
+  // Each wedge is a pure wrapper around an existing toggle so the menu
+  // never invents new behavior — it just exposes the keymap to one-finger
+  // players. Wrapped in try/catch so an exception in any one toggle can't
+  // strand the overlay open or skip the close path on the caller.
+  try {
+    if (id === 'gear'){
+      if (typeof toggleGear === 'function') toggleGear();
+    } else if (id === 'flaps'){
+      if (typeof cycleFlaps === 'function') cycleFlaps();
+    } else if (id === 'lights'){
+      if (typeof toggleLandingLight === 'function') toggleLandingLight();
+    } else if (id === 'brakes'){
+      // Mirror the Shift+B keydown path so the parking brake toggle plays
+      // the same ratchet click + status toast a keyboard press would.
+      state.parkingBrake = !state.parkingBrake;
+      if (typeof playParkingBrakeClick === 'function') playParkingBrakeClick(state.parkingBrake);
+      if (typeof showStatus === 'function') showStatus(state.parkingBrake ? 'PARKING BRAKE SET' : 'PARKING BRAKE RELEASED', null, 'good');
+    } else if (id === 'ap'){
+      // Re-dispatch a synthetic KeyH keydown so the autopilot path's full
+      // engage/disengage logic (ALT capture, hdg bug snap, ATC line, status
+      // toast) runs untouched. Avoids duplicating the entire AP setup block
+      // here and stays a thin wrapper around the existing keymap.
+      try {
+        const ev = new KeyboardEvent('keydown', { code:'KeyH', key:'h', bubbles:true });
+        dispatchEvent(ev);
+      } catch(err){}
+    } else if (id === 'cam'){
+      state.cam = (state.cam + 1) % CAM_NAMES.length;
+      if (typeof updateCamModeUi === 'function') updateCamModeUi();
+    }
+  } catch(err){}
+}
+function qradialReleased(){
+  // Q released. If the menu opened, fire the highlighted wedge (if any) and
+  // close. If we never crossed the open threshold, this was a yaw tap and
+  // the keys map already saw the keyup — nothing to do.
+  if (qradialState.open){
+    const id = qradialPickHot();
+    qradialClose();
+    if (id) qradialFire(id);
+  }
+  qradialState.holding = false;
+  qradialState.holdT = 0;
+}
+function qradialTick(dt){
+  // Per-frame drive from the main update loop. Counts the Q-hold timer and
+  // pops the menu at QRADIAL_OPEN_S, keeps the wedge highlight live while
+  // the menu is up, and closes the menu the moment any blocking gate kicks
+  // in (pause / photo / replay / crash) so it can't stay open across a
+  // pause overlay or replay banner.
+  if (qradialState.open && qradialBlocked()){
+    qradialClose();
+    qradialState.holding = false;
+    qradialState.holdT = 0;
+    return;
+  }
+  if (qradialState.holding && !qradialState.open){
+    qradialState.holdT += dt;
+    if (qradialState.holdT >= QRADIAL_OPEN_S) qradialOpenNow();
+  }
+  if (qradialState.open) qradialUpdateHighlight();
+}
+// Pointer tracking for the radial menu. We always listen so the very first
+// frame the menu opens already has a fresh pointer position. The handler is
+// passive (just stores last x/y) so it adds no perceptible cost on non-radial
+// frames.
+addEventListener('pointermove', e => {
+  qradialState.pointerX = e.clientX;
+  qradialState.pointerY = e.clientY;
+  qradialState.pointerSeen = true;
+  // Pointer movement clears the arrow-key override so the cursor takes the
+  // wheel back the instant the player nudges the mouse.
+  qradialState.selKey = null;
+});
+// Arrow-key wedge picker. Only active while the menu is open so it doesn't
+// fight other shortcuts elsewhere in the sim.
+addEventListener('keydown', e => {
+  if (!qradialState.open) return;
+  let want = null;
+  if (e.code === 'ArrowUp')        want = 'gear';
+  else if (e.code === 'ArrowRight') want = 'flaps';
+  else if (e.code === 'ArrowDown')  want = 'brakes';
+  else if (e.code === 'ArrowLeft')  want = 'ap';
+  if (want){
+    e.preventDefault();
+    qradialState.selKey = want;
+    qradialUpdateHighlight();
+  }
+});
+// Window blur safety: if focus leaves the page while the menu is up, abort
+// the hold so we don't strand it open across an alt-tab.
+addEventListener('blur', () => {
+  if (qradialState.open || qradialState.holding){
+    qradialClose();
+    qradialState.holding = false;
+    qradialState.holdT = 0;
+  }
+});
 // Mobile touch input. stickX / stickY are in [-1, 1] (centered = 0). throttle is
 // in [0, 1] when active, or null when the user isn't touching the slider (in
 // which case keyboard W/S still drives state.throttle as before). Buttons fire
@@ -13005,6 +13234,14 @@ const touch = { active:false, stickX:0, stickY:0, throttle:null };
 addEventListener('keydown', e=>{
   if (['Space','KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyL','KeyN','KeyO','KeyQ','KeyE','KeyR','KeyJ','KeyU','KeyV','BracketLeft','BracketRight','Semicolon','Quote','Backslash','Minus','Equal'].includes(e.code)) e.preventDefault();
   keys[e.code]=true;
+  // Start the radial-menu hold timer on the FIRST KeyQ keydown (e.repeat
+  // would otherwise re-fire the start every native auto-repeat tick). The
+  // per-frame qradialTick() pops the overlay once holdT crosses
+  // QRADIAL_OPEN_S so a quick yaw tap stays a yaw tap.
+  if (e.code === 'KeyQ' && !e.repeat && !qradialState.holding){
+    qradialState.holding = true;
+    qradialState.holdT = 0;
+  }
 });
 // Replay scrub controls. Active only while the post-landing replay banner is
 // up; otherwise these keys keep their normal in-flight roles (Space = nothing,
@@ -13028,6 +13265,13 @@ addEventListener('keydown', e=>{
 });
 addEventListener('keyup', e=>{
   keys[e.code]=false;
+  // Q release closes the quick-action radial menu if it was opened by the
+  // hold, firing whichever wedge the pointer / arrow keys had highlighted.
+  // A bare tap that never crossed QRADIAL_OPEN_S falls through with no
+  // side effects — the legacy yaw on the keys map already saw the keyup.
+  if (e.code === 'KeyQ'){
+    qradialReleased();
+  }
   // Shift+T warning-chime test is hold-to-run — releasing either key
   // aborts immediately so a stray tap doesn't cycle through every chime
   // when the player just wanted a quick sample.
@@ -13932,6 +14176,37 @@ function findEmergencyLandingSite(){
     bBrk.addEventListener('pointerup', release);
     bBrk.addEventListener('pointerleave', release);
     bBrk.addEventListener('pointercancel', release);
+  }
+  // Quick-action radial menu (mobile): the QUICK corner button mirrors the
+  // Q-hold keyboard behavior. Press-and-hold opens the same 6-wedge
+  // overlay; the player drags their finger across a wedge and releases to
+  // fire. Pointer position is already tracked by the global pointermove
+  // listener so the highlight follows the finger without any extra work
+  // here, exactly the way the keyboard path works.
+  const bQ = document.getElementById('mbQ');
+  if (bQ){
+    const qPress = e => {
+      e.preventDefault();
+      if (!qradialState.holding){
+        qradialState.holding = true;
+        qradialState.holdT = 0;
+      }
+      // Seed the pointer position from the touch start so the highlight is
+      // sensible the very first frame the menu opens — the finger may not
+      // have moved yet.
+      qradialState.pointerX = e.clientX;
+      qradialState.pointerY = e.clientY;
+      qradialState.pointerSeen = true;
+      qradialState.selKey = null;
+    };
+    const qRelease = e => {
+      e.preventDefault();
+      qradialReleased();
+    };
+    bQ.addEventListener('pointerdown', qPress);
+    bQ.addEventListener('pointerup', qRelease);
+    bQ.addEventListener('pointerleave', qRelease);
+    bQ.addEventListener('pointercancel', qRelease);
   }
 })();
 
@@ -20388,7 +20663,12 @@ function step(dt){
     if (keys['KeyK']) pIn += 1;
     if (keys['KeyA']) rIn -= 1;
     if (keys['KeyD']) rIn += 1;
-    if (keys['KeyQ']) yIn -= 1;
+    // Suppress the Q-key yaw contribution while the radial menu is open so
+    // the rudder doesn't drag hard left while the player is aiming at a
+    // wedge. The radial close() handler already wipes keys['KeyQ'], but
+    // this extra guard keeps things sane if the gate flickers on/off in
+    // the same frame.
+    if (keys['KeyQ'] && !qradialState.open) yIn -= 1;
     if (keys['KeyE']) yIn += 1;
     // Virtual stick adds on top of keyboard. Stick up (negative Y) = nose up,
     // stick right (positive X) = roll right. Clamp the sum so combined input
@@ -22084,6 +22364,11 @@ function step(dt){
   tickRidgeLift(dt);
   // Landing-gear warning horn: low + slow + descending with gear up = nag.
   tickGearHorn();
+  // Quick-action radial menu (Q hold): counts the Q-hold timer, pops the
+  // overlay at QRADIAL_OPEN_S, keeps the wedge highlight live while open,
+  // and closes the menu if any blocking gate (pause / photo / replay /
+  // intro / crash) kicks in mid-hold.
+  qradialTick(dt);
   // Bird flock altitude warning: in the band where a flock is drifting and
   // closing on it any quicker than a stroll, fire a one-shot ATC "BIRDS,
   // BIRDS — 11 O'CLOCK" with a clock-position bearing so the player has
@@ -31489,7 +31774,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate','qradial'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
