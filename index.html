@@ -16017,6 +16017,87 @@ function setStallAudio(active){
   }
 }
 
+// ====== Rain audio loop on the canopy ======
+// Soft synthesized pink-ish noise pad that lays under the engine while
+// `settings.rain` is on, so the existing rain visual finally has a matching
+// audio bed. Built off the shared sfxReady() WebAudio context so no new
+// hardware audio nodes leak. One looping AudioBufferSource (2 s pink noise
+// buffer) → 1.6 kHz lowpass (Q 0.7) → a high-pass-tilted second filter
+// stage (200 Hz HP) → a master gain that the per-frame setRainAudio()
+// lerps toward a target. Buffer is generated once, lazily on the first
+// arm — non-rain sessions pay nothing. Target gain = base * settings.volume
+// where base is `RAIN_GAIN_COCKPIT` (~10% master) in cockpit cam and
+// `RAIN_GAIN_OFF_CAM` (~3% master) outside (so the player still hears the
+// storm from chase / orbit / flyby but the cockpit pop is the obvious win).
+// Intensity also scales with airspeed: 0.55 at standstill ramping to 1.0
+// at `RAIN_SPD_FULL_MS` (~80 m/s ground speed) so a fast cruise reads as
+// more drumming on the canopy than a calm taxi. Pure additive — no new
+// keybinding, no flight model touch, no new audio path beyond this gain.
+let rainAudio = null;
+const RAIN_GAIN_COCKPIT = 0.10;     // ~10% master volume in cockpit cam
+const RAIN_GAIN_OFF_CAM = 0.03;     // ~3% master in chase / orbit / flyby
+const RAIN_SPD_FULL_MS  = 80;       // airspeed (m/s) at which intensity peaks
+const RAIN_SPD_FLOOR    = 0.55;     // minimum airspeed scalar (standstill)
+function initRainAudio(){
+  if (rainAudio) return;
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  try {
+    // 2 s pink-ish noise buffer (Voss-McCartney lite — running average of
+    // a handful of white-noise generators for a softer roll-off than pure
+    // white). One buffer reused via loop:true so we don't reallocate.
+    const sr = ctx.sampleRate;
+    const len = Math.floor(sr * 2.0);
+    const buf = ctx.createBuffer(1, len, sr);
+    const data = buf.getChannelData(0);
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for (let i = 0; i < len; i++){
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+      const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+      b6 = white * 0.115926;
+      data[i] = pink * 0.11;          // tame the level so peaks don't clip
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    // Two-stage filter: high-pass kills sub-bass rumble so it doesn't
+    // muddy the engine, low-pass tames the harsh top so it reads as
+    // "rain on glass" not "hiss".
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 200;
+    hp.Q.value = 0.7;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1600;
+    lp.Q.value = 0.7;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    src.connect(hp).connect(lp).connect(gain).connect(ctx.destination);
+    src.start(0);
+    rainAudio = { ctx, src, gain };
+  } catch(e){ /* audio not available — silently skip */ }
+}
+function setRainAudio(targetGain){
+  if (!rainAudio){
+    if (!(targetGain > 0)) return;   // never spin up for silence
+    initRainAudio();
+    if (!rainAudio) return;
+  }
+  const { ctx, gain } = rainAudio;
+  if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+  const t = Math.max(0, targetGain || 0);
+  // setTargetAtTime time constant: 0.18 s when fading in/out so toggling
+  // rain doesn't pop the bed in/out abruptly; the visual already eases.
+  gain.gain.setTargetAtTime(t, ctx.currentTime, 0.18);
+}
+
 // ====== Gear / flap one-shot SFX ======
 // Re-uses the same WebAudio context as the stall horn so we don't pile up
 // hardware audio nodes. Gear gives a low "clunk" (snap of filtered noise +
@@ -24017,6 +24098,27 @@ function step(dt){
   state.stall = state.stall * 0.6 + stallIntensity * 0.4;
   setStallAudio(stallActive);
   $('#stall').style.display = stallActive ? 'block' : 'none';
+  // Rain audio loop on the canopy. Plays a soft pink-noise pad while
+  // `settings.rain` is on, layered under the engine. Cockpit cam = ~10%
+  // master, off-cam = ~3% master so the storm is audible from chase /
+  // orbit / flyby but the cockpit pop is the obvious win. Intensity also
+  // scales with airspeed so a fast cruise drums harder than a calm taxi.
+  // Standard cleanup gate (photo / replay / pause / intro / crashed)
+  // forces it silent so frozen frames stay silent. The setRainAudio()
+  // call itself early-exits when the rain pad has never been initialized
+  // and the target is 0, so non-rain sessions pay nothing.
+  {
+    const rainQuiet = state.photoMode || state.replayActive || state.paused
+                   || state.introOpen || state.crashed;
+    let rainTarget = 0;
+    if (settings.rain && !rainQuiet){
+      const base = (state.cam === 1) ? RAIN_GAIN_COCKPIT : RAIN_GAIN_OFF_CAM;
+      const spdT = Math.max(0, Math.min(1, speed / RAIN_SPD_FULL_MS));
+      const spdMul = RAIN_SPD_FLOOR + (1 - RAIN_SPD_FLOOR) * spdT;
+      rainTarget = base * spdMul * (settings.volume || 0);
+    }
+    setRainAudio(rainTarget);
+  }
 
   const spdEl = document.getElementById('spd');
   // ASI lie detection: when the icing model has dragged the indicated reading
@@ -32283,6 +32385,7 @@ function loop(now){
       propGroupL.rotation.z = propGroupR.rotation.z = propGroup.rotation.z;
       updateCamera(dt);
       setStallAudio(false);
+      setRainAudio(0);
     } else if (state.replayActive){
       // Replay mode: stop simulating, just play back the buffer.
       updateReplay(dt);
@@ -33772,6 +33875,7 @@ updateCamModeUi();
     // Quiet the horn so its last gain target doesn't hang while step()
     // isn't running to retrigger it.
     setStallAudio(false);
+    setRainAudio(0);
   }
   function closePause(){
     if (!state.paused) return;
@@ -33805,6 +33909,7 @@ updateCamModeUi();
     state.introOpen = true;
     if (missionEl) missionEl.style.display = 'none';
     setStallAudio(false);
+    setRainAudio(0);
     if (intro) intro.style.display = 'flex';
     if (typeof refreshRankPill === 'function') refreshRankPill();
   });
