@@ -1179,6 +1179,7 @@
   <div class="gauge"><canvas id="cpVor" width="220" height="220" title="Click around the dial to set OBS course · Right-click to center on current bearing"></canvas><div class="glbl">VOR / CDI</div></div>
   <div class="gauge"><canvas id="cpClk" width="220" height="220" title="Cockpit clock — click the dial to toggle ZULU / LOCAL"></canvas><div class="glbl">CLOCK</div></div>
   <div class="gauge"><canvas id="cpDa"  width="220" height="220" title="Pressure altitude vs density altitude · amber over +2000ft DA, red over +4000ft"></canvas><div class="glbl">DENSITY ALT ft</div></div>
+  <div class="gauge"><canvas id="cpOat" width="220" height="220" title="Outside Air Temperature · blue ≤ +4°C icing risk · amber > +30°C high-DA territory"></canvas><div class="glbl">OAT °C</div></div>
   <div class="gauge"><canvas id="cpAdf" width="220" height="220" title="NDB / ADF · pointer aims at tuned beacon · click to cycle stations"></canvas><div class="glbl">ADF / NDB</div></div>
 </div>
 <button id="setbtn" title="Settings ( , )">⚙</button>
@@ -28304,6 +28305,7 @@ const cpChrCv = document.getElementById('cpChr');
 const cpVorCv = document.getElementById('cpVor');
 const cpClkCv = document.getElementById('cpClk');
 const cpDaCv  = document.getElementById('cpDa');
+const cpOatCv = document.getElementById('cpOat');
 const cpAdfCv = document.getElementById('cpAdf');
 const cpEngCv = document.getElementById('cpEng');
 const cpEngCtx = cpEngCv && cpEngCv.getContext('2d');
@@ -28329,6 +28331,7 @@ const cpChrCtx = cpChrCv && cpChrCv.getContext('2d');
 const cpVorCtx = cpVorCv && cpVorCv.getContext('2d');
 const cpClkCtx = cpClkCv && cpClkCv.getContext('2d');
 const cpDaCtx  = cpDaCv  && cpDaCv.getContext('2d');
+const cpOatCtx = cpOatCv && cpOatCv.getContext('2d');
 const cpAdfCtx = cpAdfCv && cpAdfCv.getContext('2d');
 // Click on the chronograph gauge to start/stop, right-click to record a lap
 // split, double-click to reset both clocks. Pure visual instrument — every
@@ -30600,6 +30603,99 @@ function drawCockpitDa(daFt, daOverride){
     ctx.fillText('XW ' + Math.round(_xwKt) + 'kt ' + _xwSide, cx, cy + R*0.86);
   }
 }
+function drawCockpitOat(oatOverride){
+  // Outside Air Temperature dial. Pure derived readout off `_oatForAltC()`
+  // — the same lapse-rate model the density-alt / carb-ice / pitot-ice
+  // systems already use — so the gauge agrees with the existing systems
+  // by construction. Self-test override sweeps the needle from the hot
+  // end of the dial back to the live value, matching the matched-set
+  // power-up dance the rest of the cluster does.
+  if (!cpOatCtx) return;
+  const W = cpOatCv.width, H = cpOatCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpOatCtx;
+  _cpBezel(ctx, W, H);
+  // Scale -40..+50 °C across the same 240° sweep used by the rest of the
+  // panel so it reads as a matched set. Range covers high-altitude
+  // cruise cold soak (-40) through a hot desert ramp (+50).
+  const T_MIN = -40, T_MAX = 50, T_SPAN = T_MAX - T_MIN;
+  const sweep = Math.PI * 4/3;
+  const startA = -Math.PI - Math.PI/6;
+  // Live OAT off the standard lapse-rate model + time-of-day cycle.
+  let oat = (typeof oatOverride === 'number')
+    ? oatOverride
+    : _oatForAltC(plane.position.y);
+  if (typeof oat !== 'number' || !isFinite(oat)) oat = 0;
+  ctx.strokeStyle = '#dfe';
+  ctx.fillStyle = '#dfe';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 12px ui-monospace, monospace';
+  // Major ticks every 10 °C with labels, minor every 5 °C. 0 °C gets a
+  // slightly thicker tick so the freezing reference reads at a glance.
+  for (let v = T_MIN; v <= T_MAX; v += 5){
+    const a = startA + ((v - T_MIN) / T_SPAN) * sweep;
+    const major = (v % 10 === 0);
+    const r1 = R - 6;
+    const r2 = major ? R - 22 : R - 14;
+    ctx.lineWidth = (v === 0) ? 3 : (major ? 2.5 : 1.2);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+    if (major){
+      const rt = R - 36;
+      ctx.fillText(String(v), cx + Math.cos(a) * rt, cy + Math.sin(a) * rt);
+    }
+  }
+  // Color band arcs: blue cold-zone (T_MIN..+4 — carb / structural icing
+  // risk territory), green normal (+4..+30), amber hot-zone (+30..T_MAX
+  // — high-density-alt territory).
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#5cc2ff';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((T_MIN - T_MIN) / T_SPAN) * sweep,
+    startA + ((4 - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#7ee787';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((4 - T_MIN) / T_SPAN) * sweep,
+    startA + ((30 - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  ctx.strokeStyle = '#ffb020';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 28,
+    startA + ((30 - T_MIN) / T_SPAN) * sweep,
+    startA + ((T_MAX - T_MIN) / T_SPAN) * sweep);
+  ctx.stroke();
+  // Unit hint up top so the dial reads like the rest of the cluster.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.fillText('°C', cx, cy - R*0.35);
+  // Needle.
+  const t = Math.max(T_MIN, Math.min(T_MAX, oat));
+  const a = startA + ((t - T_MIN) / T_SPAN) * sweep;
+  _cpNeedle(ctx, cx, cy, a + Math.PI/2, R - 14, '#ffd166', 5);
+  // Digital readout. Color matches the band the live value sits in so the
+  // central number echoes the arc: blue when icing-possible, green normal,
+  // amber hot. Sign is always shown so a quick glance never confuses +5
+  // with -5.
+  ctx.fillStyle = (oat <= 4) ? '#5cc2ff' : (oat >= 30 ? '#ffb020' : '#7ee787');
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  const sign = (oat >= 0) ? '+' : '';
+  ctx.fillText(sign + Math.round(oat) + '°', cx, cy + R*0.42);
+  // Micro-caption: when OAT lands in the cold/icing zone, a small
+  // `❄ ICING POSSIBLE` legend pops under the readout so the pilot connects
+  // the gauge to the existing CARB ICE / PITOT HEAT / COWL pills on the
+  // WIND row. Suppressed during the avionics self-test so the power-up
+  // ritual stays clean (the sweep can dip below +4 mid-settle).
+  if (oat <= 4 && state.selfTestT < 0){
+    ctx.fillStyle = '#5cc2ff';
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.fillText('❄ ICING POSSIBLE', cx, cy + R*0.68);
+  }
+}
 function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
   const cpEl = document.getElementById('cockpitPanel');
@@ -30621,6 +30717,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   let aiQ  = plane.quaternion;
   let ffOverride;         // undefined = let drawCockpitFuelFlow derive from state
   let daOverride;         // undefined = let drawCockpitDa derive from state
+  let oatOverride;        // undefined = let drawCockpitOat derive from _oatForAltC()
   let fuelLOverride;      // undefined = let drawCockpitFuel derive from state
   let fuelROverride;      // undefined = let drawCockpitFuel derive from state
   if (state.selfTestT >= 0){
@@ -30639,6 +30736,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
     const SWEEP_FF  = 18;      // GPH near the over-burn band
     const SWEEP_DA  = 10000;   // top of the DA dial
     const SWEEP_TANK = 1.0;    // 100% on the fuel-quantity dial
+    const SWEEP_OAT = 50;      // top of the OAT dial (hot end)
     if (t < 0.5){
       asiV = SWEEP_ASI * upPhase;
       altV = SWEEP_ALT * upPhase;
@@ -30651,6 +30749,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
       daOverride = SWEEP_DA * upPhase;
       fuelLOverride = SWEEP_TANK * upPhase;
       fuelROverride = SWEEP_TANK * upPhase;
+      oatOverride = SWEEP_OAT * upPhase;
     } else {
       asiV = SWEEP_ASI * (1 - settle) + indicatedKmh * settle;
       altV = SWEEP_ALT * (1 - settle) + altM * settle;
@@ -30668,6 +30767,10 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
       // 0..100% gauge.
       fuelLOverride = SWEEP_TANK * (1 - settle) + (state.fuelL || 0) * 2 * settle;
       fuelROverride = SWEEP_TANK * (1 - settle) + (state.fuelR || 0) * 2 * settle;
+      // OAT settles from the hot-end sweep down to the live atmospheric
+      // temperature so the dial finishes pointing at the real OAT once the
+      // power-up completes.
+      oatOverride = SWEEP_OAT * (1 - settle) + _oatForAltC(plane.position.y) * settle;
     }
     // Attitude indicator wobble: synthesize a small pitch swing so the
     // horizon line visibly moves during the self-test, then ease back to the
@@ -30772,6 +30875,12 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // in updateDensityAltitude()) so the gauge tracks live OAT + altitude
   // without any extra plumbing. Self-test override sweeps the dial.
   drawCockpitDa(state.densityAltFt, daOverride);
+  // Outside Air Temperature: pure derived readout off `_oatForAltC()` (same
+  // lapse-rate + time-of-day model the density-alt / carb-ice / pitot-ice
+  // systems already use), so this gauge agrees with the existing systems
+  // by construction. Sits next to DA so the OAT → DA relationship reads
+  // at a glance: cold day, low DA; hot day, high DA.
+  drawCockpitOat(oatOverride);
   // Cockpit panel night lighting: when the sun drops toward the horizon,
   // the panel chrome + labels pick up a warm amber wash so the instruments
   // read like real GA cockpit post-lights at dusk/dawn/night instead of
