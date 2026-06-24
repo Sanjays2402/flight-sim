@@ -11614,7 +11614,16 @@ const state = {
   // trusting the steady wind readout. phase: 'idle' | 'active'. triggered
   // latches per approach so we don't multi-fire; clears once AGL climbs
   // back above 200m (matches the approachArmed pattern for radalt callouts).
-  shear: { phase: 'idle', endsAt: 0, triggered: false, savedTargetX: 0, savedTargetZ: 0, rwyDesignator: '' },
+  shear: { phase: 'idle', endsAt: 0, triggered: false, savedTargetX: 0, savedTargetZ: 0, rwyDesignator: '', detected: false },
+  // Detected wind shear — separate from the synthetic shear above. Watches the
+  // steady wind vector and fires a one-shot alert when the wind slams over by
+  // >30° direction OR >5 m/s magnitude inside a rolling 3 s window while the
+  // plane is on short final (within 2 km of a runway, gear down, AGL <200 m).
+  // Re-arms on AGL >250 m or after touchdown so each fresh approach gets one
+  // shot. samples is a tiny ring buffer of {t, x, z} sampled at ~10 Hz; armed
+  // gates the one-shot; lastFireAt holds the burst end so the existing
+  // shearWarn pill stays lit for SHEAR_DETECT_HOLD_MS.
+  shearDetect: { samples: [], armed: true, lastFireAt: 0 },
   // Lightning + thunder over distant storm cells. Pure scenery — fires only
   // while settings.rain is on (the rain weather IS the storm). Scheduler
   // picks a fresh random point 4-8 km from the plane every 3-6 min, lights
@@ -14699,6 +14708,14 @@ function resetPlane(){
     state.shear.endsAt = 0;
     state.shear.triggered = false;
     state.shear.rwyDesignator = '';
+    state.shear.detected = false;
+  }
+  // Detected-shear watcher: wipe the sample buffer + re-arm so the next
+  // approach can fire a fresh alert.
+  if (state.shearDetect){
+    state.shearDetect.samples.length = 0;
+    state.shearDetect.armed = true;
+    state.shearDetect.lastFireAt = 0;
   }
   // Lightning scheduler — wipe any pending thunder + flash so a fresh
   // mission start doesn't inherit a half-played strike from the previous
@@ -17938,7 +17955,13 @@ function tickWindShear(){
   if (sh.phase === 'active'){
     if (performance.now() >= sh.endsAt){
       sh.phase = 'idle';
-      pickWindTarget();
+      // Detected bursts piggyback on the shearWarn pill for their hold window
+      // but never overrode windTarget — don't re-roll it back, or the live wind
+      // will snap to a random new vector that has nothing to do with the gust
+      // the player just felt. Synthetic bursts (the original code path) DO
+      // override windTarget on entry, so they still need the gentle re-roll.
+      if (!sh.detected) pickWindTarget();
+      sh.detected = false;
     }
     return;
   }
@@ -18015,6 +18038,129 @@ function tickWindShear(){
     pushATC('Wind shear escape \u2014 max power, pitch for climb.', { tag:'PILOT', now:true });
   }
   if (typeof showShearEscape === 'function') showShearEscape();
+}
+
+// ====== WIND SHEAR DETECTOR (short-final monitor) ======
+// Watches the steady wind vector while the player is on short final. If the
+// wind direction swings >SHEAR_DETECT_DIR_DEG or magnitude jumps
+// >SHEAR_DETECT_SPD_MS inside a SHEAR_DETECT_WINDOW_MS rolling window, fires
+// a one-shot red ⚠ WIND SHEAR pill + TWR "Wind shear reported on final RWY
+// <DD>, use caution." call. Reuses the existing #shearWarn DOM pill via the
+// shear.phase='active' hook so no new HUD element is needed. Re-arms once
+// AGL climbs back above 250 m OR after touchdown so each fresh approach
+// gets exactly one shot. Carrier deck is excluded — steel decks don't get
+// shear calls.
+const SHEAR_DETECT_WINDOW_MS  = 3000;   // rolling sample window
+const SHEAR_DETECT_DIR_DEG    = 30;     // direction swing trigger
+const SHEAR_DETECT_SPD_MS     = 5;      // magnitude change trigger
+const SHEAR_DETECT_RANGE_M    = 2000;   // within 2 km of a runway threshold
+const SHEAR_DETECT_AGL_MAX_M  = 200;    // fires below this AGL
+const SHEAR_DETECT_REARM_AGL  = 250;    // climb back above this to re-arm
+const SHEAR_DETECT_HOLD_MS    = 5000;   // pill stays lit this long after fire
+const SHEAR_DETECT_SAMPLE_MS  = 100;    // sample at ~10 Hz
+const SHEAR_DETECT_MIN_SPD_MS = 2;      // dead-band: ignore tiny wind direction swings
+function tickShearDetect(){
+  const sd = state.shearDetect;
+  if (!sd) return;
+  // Hard gates: never fire in non-live states. Mirrors the synthetic shear
+  // gating so the two paths can't argue about who owns the pill.
+  if (state.crashed || state.onGround || state.replayActive || state.photoMode || state.introOpen || state.paused) {
+    // Even off-gate, drain the buffer so stale samples can't trip on resume.
+    if (sd.samples.length) sd.samples.length = 0;
+    return;
+  }
+  if (!state.gearDown) return;
+  // Find the nearest runway threshold (either end), excluding the carrier
+  // deck per spec — steel decks don't get shear calls.
+  let nearestRi = null, nearestDist = 1e9, nearestEndIsSouth = true;
+  for (const ri of runwayInfos){
+    if (ri.ap && (ri.ap === CARRIER || ri.ap.id === 'CV01')) continue;
+    const dxS = plane.position.x - ri.aimX;
+    const dzS = plane.position.z - ri.aimZ;
+    const dS = Math.hypot(dxS, dzS);
+    const nx = ri.ap.x - Math.sin(ri.ap.hdg) * (ri.ap.len/2);
+    const nz = ri.ap.z - Math.cos(ri.ap.hdg) * (ri.ap.len/2);
+    const dxN = plane.position.x - nx;
+    const dzN = plane.position.z - nz;
+    const dN = Math.hypot(dxN, dzN);
+    const d = Math.min(dS, dN);
+    if (d < nearestDist){ nearestDist = d; nearestRi = ri; nearestEndIsSouth = dS <= dN; }
+  }
+  if (!nearestRi) return;
+  // Re-arm latch on climb-out: matches the radalt callout re-arm pattern so a
+  // missed approach + climb back through 250 m gives the pilot a fresh alert
+  // on the next attempt.
+  const agl = plane.position.y - nearestRi.ap.elev - GEAR_H;
+  if (agl > SHEAR_DETECT_REARM_AGL){
+    sd.armed = true;
+    if (sd.samples.length) sd.samples.length = 0;
+    return;
+  }
+  // Only sample inside the short-final cone so the buffer stays cheap.
+  if (nearestDist > SHEAR_DETECT_RANGE_M) {
+    if (sd.samples.length) sd.samples.length = 0;
+    return;
+  }
+  if (agl < 0 || agl > SHEAR_DETECT_AGL_MAX_M) return;
+  // Sample the steady wind (windTarget, not the live gust-jittered wind) at
+  // ~10 Hz — gusts are noise, the spec watches the underlying vector.
+  const now = performance.now();
+  const last = sd.samples.length ? sd.samples[sd.samples.length - 1] : null;
+  if (!last || (now - last.t) >= SHEAR_DETECT_SAMPLE_MS){
+    sd.samples.push({ t: now, x: state.windTarget.x, z: state.windTarget.z });
+  }
+  // Drop samples older than the window so the buffer never grows unbounded.
+  const cutoff = now - SHEAR_DETECT_WINDOW_MS;
+  while (sd.samples.length && sd.samples[0].t < cutoff) sd.samples.shift();
+  // Need at least one sample at the trailing edge of the window to compare.
+  if (!sd.armed) return;
+  if (sd.samples.length < 2) return;
+  const oldest = sd.samples[0];
+  // Only compare against samples that have actually aged through the window;
+  // a fresh boot inside the gate would otherwise compare two near-identical
+  // points and never fire.
+  if ((now - oldest.t) < (SHEAR_DETECT_WINDOW_MS * 0.7)) return;
+  const oldSpd = Math.hypot(oldest.x, oldest.z);
+  const newSpd = Math.hypot(state.windTarget.x, state.windTarget.z);
+  const dSpd = Math.abs(newSpd - oldSpd);
+  // Direction delta in degrees, dead-banded against tiny vectors so a
+  // near-calm wind doesn't trip the alert on numerical noise (atan2 on a
+  // 0.1 m/s wind is meaningless).
+  let dDeg = 0;
+  if (oldSpd > SHEAR_DETECT_MIN_SPD_MS && newSpd > SHEAR_DETECT_MIN_SPD_MS){
+    const oldDir = Math.atan2(oldest.x, oldest.z);
+    const newDir = Math.atan2(state.windTarget.x, state.windTarget.z);
+    let d = newDir - oldDir;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    dDeg = Math.abs(d) * 180 / Math.PI;
+  }
+  const tripDir = dDeg > SHEAR_DETECT_DIR_DEG;
+  const tripSpd = dSpd > SHEAR_DETECT_SPD_MS;
+  if (!tripDir && !tripSpd) return;
+  // Fire the alert. Reuse the existing #shearWarn pill by flipping the same
+  // shear.phase='active' hook the synthetic burst uses, marked detected=true
+  // so the burst-end handler doesn't re-roll windTarget (the wind is already
+  // where the world wants it — the detector just noticed it slammed).
+  sd.armed = false;
+  sd.lastFireAt = now;
+  if (state.shear){
+    state.shear.phase = 'active';
+    state.shear.endsAt = now + SHEAR_DETECT_HOLD_MS;
+    state.shear.detected = true;
+  }
+  // ATC call: name the runway end the player is actually shooting for, same
+  // pattern the synthetic shear path uses.
+  if (typeof pushATC === 'function'){
+    let rwyHdg = nearestRi.ap.hdg;
+    if (!nearestEndIsSouth) rwyHdg = rwyHdg + Math.PI;
+    const designator = (typeof runwayDesignator === 'function') ? runwayDesignator(rwyHdg, plane) : '';
+    const tail = designator ? (' RWY ' + designator) : '';
+    pushATC('Wind shear reported on final' + tail + ', use caution.', { tag:'TWR', now:true });
+  }
+  // Wipe the buffer so a single big slam can't immediately re-fire the
+  // moment we re-arm — we want fresh samples after the alert clears.
+  sd.samples.length = 0;
 }
 
 // ====== ACTIVE-RUNWAY CHANGE SUGGESTION ======
@@ -21393,6 +21539,11 @@ function step(dt){
   if (performance.now() > state.windNextChangeMs) pickWindTarget();
   // Wind shear hazard: may override windTarget for a 4-6s burst on short final.
   tickWindShear();
+  // Detected wind shear: watches the steady wind vector for sudden swings/jumps
+  // on short final and fires a one-shot alert. Pairs with the synthetic shear
+  // above so the WIND SHEAR pill lights for both engineered bursts and the
+  // genuinely surprising mid-approach wind slams a flying day actually throws.
+  tickShearDetect();
   // Active-runway change suggestion: when the wind-favoured end of the strip
   // the player is currently lined up on flips to the OPPOSITE threshold, fire
   // a one-shot amber toast + PILOT ATC "Wind shift — RWY <DD> in use." call.
