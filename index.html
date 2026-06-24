@@ -15922,6 +15922,10 @@ function resetPlane(){
   // Clear any in-flight airshow smoke puffs so reset doesn't leave colored
   // sprites drifting over the runway. The toggle state itself is preserved.
   clearAirshowSmoke();
+  // Wipe any active shooting-star meteors so a hot reset doesn't leave a
+  // half-faded streak hanging in the sky. Scheduler resets to 0 too so the
+  // next eligible night re-rolls a fresh wait window.
+  if (typeof clearShootingStars === 'function') clearShootingStars();
   // Wipe touchdown skidmarks so a fresh sortie starts on a clean runway
   // instead of inheriting marks from the last session's hard landings.
   clearSkidmarks();
@@ -32407,6 +32411,176 @@ function updateStormCells(dt){
   }
 }
 
+// ── Shooting stars ─────────────────────────────────────────────────────
+// Faint trail-and-fade meteors zip across the night sky between 22:00 and
+// 04:00 local TOD on a long random scheduler. Pure scenery polish, no
+// flight model touch, no audio. Reuses the existing airshowTex canvas so
+// we don't bake another sprite atlas. Pool of 3 sprites total — meteors
+// are rare and each one only lives 1.2 s, so we'll never need more in the
+// air at once. Hidden in photo / pause / replay / intro / crash via
+// standard frozen-frame gate, and in cockpit cam (a windshield streak
+// would look terrible from inside) per the spec.
+const METEOR_MAX = 3;
+const METEOR_LIFE_S = 1.2;
+const METEOR_FADE_IN_S = 0.2;
+const METEOR_FADE_OUT_S = 0.4;
+const METEOR_PEAK_ALPHA = 0.85;
+const METEOR_GAP_MIN_S = 25;
+const METEOR_GAP_MAX_S = 80;
+const METEOR_SKY_DIST = 4000;     // anchor distance from camera (sky-dome scale)
+const METEOR_LEN = 14;            // sprite long-axis scale (m), short-axis 0.35× for streak read
+const meteorPool = [];
+for (let i = 0; i < METEOR_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false, depthTest: false,
+    opacity: 0, color: 0xfff6d8
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(METEOR_LEN, METEOR_LEN * 0.35, 1);
+  spr.visible = false;
+  spr.renderOrder = 5;
+  scene.add(spr);
+  meteorPool.push({
+    spr, mat,
+    active: false,
+    age: 0,
+    // World-space start + per-second drift vector. Built fresh per spawn.
+    start: new THREE.Vector3(),
+    drift: new THREE.Vector3()
+  });
+}
+let meteorNextSpawnMs = 0;
+function clearShootingStars(){
+  // Init-order defense: resetPlane() runs at script load (line ~15972) before
+  // the meteor pool is defined further down the file, so the pool array can
+  // still be in the temporal dead zone the first time we get called. A bare
+  // `typeof meteorPool` would itself throw a ReferenceError in module strict
+  // mode, so wrap the whole body in a try/catch and silently no-op on the
+  // first init call — the pool is initialized empty anyway.
+  try {
+    for (const m of meteorPool){
+      m.active = false; m.age = 0;
+      m.mat.opacity = 0; m.spr.visible = false;
+    }
+    meteorNextSpawnMs = 0;
+  } catch (_e) { /* TDZ on first init call */ }
+}
+const _meteorTmpFwd = new THREE.Vector3();
+const _meteorTmpRight = new THREE.Vector3();
+const _meteorTmpUp = new THREE.Vector3();
+function _spawnShootingStar(){
+  // Find a free pool slot — meteors are rare enough that we should usually
+  // have one free, but if all 3 are mid-flight (very tight scheduler RNG)
+  // skip this spawn cleanly rather than clobbering an active streak.
+  let m = null;
+  for (let i = 0; i < METEOR_MAX; i++){ if (!meteorPool[i].active){ m = meteorPool[i]; break; } }
+  if (!m) return;
+  // Anchor to a point in front of the camera at sky-dome distance. We bias
+  // the spawn slightly above the horizon so meteors come out of the sky,
+  // not out of the ground. Pick a random screen-corner-ish offset using
+  // camera right + up basis vectors so the streak reads diagonally.
+  camera.getWorldDirection(_meteorTmpFwd);
+  _meteorTmpRight.set(_meteorTmpFwd.z, 0, -_meteorTmpFwd.x).normalize();
+  _meteorTmpUp.crossVectors(_meteorTmpRight, _meteorTmpFwd).normalize();
+  // Random screen-corner pick: choose left/right + top/bottom-skewed-toward-top
+  const lr = (Math.random() < 0.5) ? -1 : 1;
+  const tb = (Math.random() < 0.85) ? 1 : -1; // mostly upper half
+  // Random offset magnitudes — keep meteor within the visible cone so the
+  // player actually sees the streak instead of it firing off-screen.
+  const rightAmt = lr * (0.55 + Math.random() * 0.45);   // 0.55..1.0 of sky
+  const upAmt   = tb * (0.35 + Math.random() * 0.45);    // 0.35..0.80 of sky
+  const skyHalf = METEOR_SKY_DIST * 0.85; // half-width in m at anchor depth
+  m.start.copy(camera.position)
+    .addScaledVector(_meteorTmpFwd, METEOR_SKY_DIST)
+    .addScaledVector(_meteorTmpRight, rightAmt * skyHalf)
+    .addScaledVector(_meteorTmpUp, upAmt * skyHalf);
+  // Drift vector: pointed roughly toward the opposite screen edge, with a
+  // mild downward component so the streak feels like it's falling. Total
+  // travel ~30% of skyHalf over METEOR_LIFE_S so meteors visibly track
+  // across the sky without leaving the visible cone.
+  const travel = skyHalf * 0.30;
+  const dx = -lr * (0.7 + Math.random() * 0.4) * travel;
+  const dy = -(0.35 + Math.random() * 0.35) * travel;
+  m.drift.set(0,0,0)
+    .addScaledVector(_meteorTmpRight, dx)
+    .addScaledVector(_meteorTmpUp, dy);
+  m.drift.multiplyScalar(1 / METEOR_LIFE_S); // per-second velocity
+  m.spr.position.copy(m.start);
+  // Rotate the sprite so its long axis points along drift. Sprites face
+  // camera by default; rotate in screen-space via material.rotation.
+  const dxScreen = dx, dyScreen = dy;
+  m.mat.rotation = Math.atan2(dyScreen, dxScreen);
+  m.mat.opacity = 0;
+  m.spr.visible = true;
+  m.active = true;
+  m.age = 0;
+}
+function tickShootingStars(dt){
+  // Hard photo/pause/replay/intro/crash gate — saved PNGs and frozen frames
+  // stay clean, and a crashed sortie's debris pass doesn't earn a meteor.
+  const frozen = !!(state.photoMode || state.paused || state.introOpen
+                 || state.replayActive || state.crashed);
+  // Fade any active sprites smoothly to zero when frozen so a meteor doesn't
+  // hang at peak alpha on the pause overlay.
+  if (frozen){
+    for (const m of meteorPool){
+      if (!m.active) continue;
+      m.mat.opacity = 0; m.spr.visible = false;
+      m.active = false; m.age = 0;
+    }
+    return;
+  }
+  // Eligibility window: 22:00–04:00 local TOD, fog OFF, not cockpit cam.
+  const tod = ((state.todHours || 0) % 24 + 24) % 24;
+  const nightOk = (tod >= 22 || tod < 4);
+  const fogOff = !settings || !settings.fog || settings.fog === 'off';
+  const camOk = state.cam !== 1;
+  const eligible = nightOk && fogOff && camOk;
+  // Advance active meteors regardless of eligibility — once a meteor is
+  // already in the air we want it to finish its 1.2 s arc smoothly even if
+  // the player flips into cockpit cam mid-streak (rare; harmless).
+  for (const m of meteorPool){
+    if (!m.active) continue;
+    m.age += dt;
+    if (m.age >= METEOR_LIFE_S){
+      m.active = false; m.age = 0;
+      m.mat.opacity = 0; m.spr.visible = false;
+      continue;
+    }
+    // Position: start + drift * age. Drift was already divided by life so
+    // we get a clean linear traverse across the visible cone.
+    m.spr.position.copy(m.start).addScaledVector(m.drift, m.age);
+    // Alpha envelope: fade-in 0.2 s, hold (~0.6 s), fade-out 0.4 s. Linear
+    // for cheapness — at 1.2 s total it reads as a clean trail-and-fade.
+    let a;
+    if (m.age < METEOR_FADE_IN_S){
+      a = (m.age / METEOR_FADE_IN_S);
+    } else if (m.age > METEOR_LIFE_S - METEOR_FADE_OUT_S){
+      a = (METEOR_LIFE_S - m.age) / METEOR_FADE_OUT_S;
+    } else {
+      a = 1.0;
+    }
+    m.mat.opacity = Math.max(0, Math.min(1, a)) * METEOR_PEAK_ALPHA;
+  }
+  if (!eligible){
+    // Re-roll the next-spawn timer forward while ineligible so the moment
+    // the player crosses 22:00 (or turns fog off) doesn't fire an instant
+    // meteor from a stale schedule.
+    meteorNextSpawnMs = 0;
+    return;
+  }
+  // Random scheduler: 25..80 s between spawns.
+  const now = performance.now();
+  if (!meteorNextSpawnMs){
+    meteorNextSpawnMs = now + (METEOR_GAP_MIN_S + Math.random() * (METEOR_GAP_MAX_S - METEOR_GAP_MIN_S)) * 1000;
+    return;
+  }
+  if (now >= meteorNextSpawnMs){
+    _spawnShootingStar();
+    meteorNextSpawnMs = now + (METEOR_GAP_MIN_S + Math.random() * (METEOR_GAP_MAX_S - METEOR_GAP_MIN_S)) * 1000;
+  }
+}
+
 function tickLightning(dt){
   const L = state.lightning;
   if (!L || !lightningEl) return;
@@ -32784,6 +32958,7 @@ function loop(now){
   updateSunGlare(dt);
   updateStormCells(dt);
   tickLightning(dt);
+  tickShootingStars(dt);
   updatePlaneShadow(dt);
   updateEntityShadows(dt);
   updateGVision(dt);
