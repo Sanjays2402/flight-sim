@@ -6346,6 +6346,142 @@ function addNavLights(group){
 addNavLights(plane);
 addNavLights(aiPlane);
 
+// ====== AI PLANE LANDING-LIGHT GLINT ======
+// At full night, when the home-field AI plane is inside its 2 NM landing-light
+// arming radius AND the player's camera-forward vector sweeps within ±15° of
+// the AI plane's screen position, fire a single short additive glare flash
+// at the AI plane's billboard position (~80 ms attack / ~140 ms decay) so the
+// player catches a quick "hey, traffic" pop instead of a sustained dot. Pure
+// scenery — reuses the existing _navGlareTex additive disc, no new texture,
+// no new draw pass. Suppressed in fog (the fog overlay already greys distant
+// glints out, this would just fight that gradient), in photo / pause / replay
+// / intro / crashed, and in wingman mode (the lead isn't doing its home-field
+// circuit, so the 2-NM-from-MAIN_AP gate doesn't model where it is).
+const AI_GLINT_CONE_COS    = Math.cos(15 * Math.PI / 180); // ±15° of the camera-forward vector
+const AI_GLINT_RANGE_M     = 4000;                          // 4 km — same scale the AI strobe glare reads from
+const AI_GLINT_HOME_RADIUS = 3704;                          // 2 NM in metres — "always on within 2 NM" of MAIN_AP
+const AI_GLINT_ATTACK_S    = 0.080;                         // 80 ms ramp-in on the rising edge
+const AI_GLINT_DECAY_S     = 0.140;                         // 140 ms ramp-out after the pop
+const aiLandingLightGlintSpr = (() => {
+  // Single Sprite child on the AI plane group. Sized to read from ~4 km out
+  // (matches the existing strobe glare scale of ~11) without blowing out at
+  // 200 m. Anchored a touch forward of group origin so it tracks the
+  // forward-facing landing light — sprites always face the camera so this is
+  // pure translation, not orientation.
+  const m = new THREE.SpriteMaterial({
+    map: _navGlareTex,
+    transparent: true,
+    depthWrite: false,
+    opacity: 0,
+    color: 0xfff4c8,
+    blending: THREE.AdditiveBlending,
+    fog: false
+  });
+  const s = new THREE.Sprite(m);
+  s.scale.setScalar(9.5);
+  s.position.set(0, 0.10, -2.0); // just ahead of the nose so it pairs with the strobes
+  s.visible = false;
+  aiPlane.add(s);
+  return s;
+})();
+let aiGlintFlashT = -1;        // -1 = idle; >=0 = seconds since the latest flash started
+let aiGlintInCone = false;     // last-frame cone state — used to detect the rising edge
+const _aiGlintCamFwd = new THREE.Vector3(); // scratch vector reused per frame, no per-frame alloc
+function tickAILandingLightGlint(dt){
+  const m = aiLandingLightGlintSpr.material;
+  // Hard gates that should kill the sprite entirely — photo / pause / replay
+  // / intro / crashed / wingman mode / AI culled / fog on / not full night.
+  const hidden = !!state.photoMode || !!state.paused || !!state.replayActive
+              || !!state.introOpen || !!state.crashed
+              || (state && state.mode === 'wing')
+              || !aiPlane.visible
+              || (settings && settings.fog && settings.fog !== 'off');
+  if (hidden){
+    aiGlintFlashT = -1;
+    aiGlintInCone = false;
+    m.opacity = 0;
+    aiLandingLightGlintSpr.visible = false;
+    return;
+  }
+  // Night gate — same sun-altitude curve the airport beacons / nav lights use
+  // (dir.y < -0.05 = clearly nighttime).
+  const dir = sunDirFor(state.todHours);
+  if (dir.y >= -0.05){
+    aiGlintFlashT = -1;
+    aiGlintInCone = false;
+    m.opacity = 0;
+    aiLandingLightGlintSpr.visible = false;
+    return;
+  }
+  // 2 NM home-radius gate — the AI plane's landing light is "always on
+  // within 2 NM of its home airport in its existing circuit". Outside that
+  // ring (climb-out past the upwind waypoint sits at ~800 m past the end,
+  // so the pattern itself stays well inside 2 NM), the landing light is off
+  // and there's nothing to glint off.
+  const dxh = aiPlane.position.x - MAIN_AP.x;
+  const dzh = aiPlane.position.z - MAIN_AP.z;
+  if ((dxh*dxh + dzh*dzh) > (AI_GLINT_HOME_RADIUS * AI_GLINT_HOME_RADIUS)){
+    aiGlintFlashT = -1;
+    aiGlintInCone = false;
+    m.opacity = 0;
+    aiLandingLightGlintSpr.visible = false;
+    return;
+  }
+  // 4 km range gate — past this the glare disc would be sub-pixel anyway and
+  // the existing strobe glare already covers far-range "is there traffic".
+  const _aiDx = aiPlane.position.x - camera.position.x;
+  const _aiDy = aiPlane.position.y - camera.position.y;
+  const _aiDz = aiPlane.position.z - camera.position.z;
+  const dist = Math.sqrt(_aiDx*_aiDx + _aiDy*_aiDy + _aiDz*_aiDz);
+  if (dist > AI_GLINT_RANGE_M || dist < 1){
+    aiGlintFlashT = -1;
+    aiGlintInCone = false;
+    m.opacity = 0;
+    aiLandingLightGlintSpr.visible = false;
+    return;
+  }
+  // Cone gate — dot of camera-forward with normalized bearing to the AI plane.
+  // ±15° cone matches the spec; cos(15°) ≈ 0.966.
+  camera.getWorldDirection(_aiGlintCamFwd);
+  const invD = 1 / dist;
+  const dot = _aiGlintCamFwd.x * _aiDx * invD
+            + _aiGlintCamFwd.y * _aiDy * invD
+            + _aiGlintCamFwd.z * _aiDz * invD;
+  const inCone = dot >= AI_GLINT_CONE_COS;
+  // Rising-edge trigger — the moment the cone closes on the AI plane, start
+  // a fresh flash envelope. Held-on stays at zero (the spec calls for a
+  // single bright flash on the sweep, not a sustained glow).
+  if (inCone && !aiGlintInCone){
+    aiGlintFlashT = 0;
+  }
+  aiGlintInCone = inCone;
+  // Advance + render the envelope. Idle = nothing drawn. Attack ramps 0→1,
+  // decay ramps 1→0; once decay completes, drop back to idle so a held cone
+  // doesn't keep firing flashes — only fresh edges do.
+  if (aiGlintFlashT < 0){
+    m.opacity = 0;
+    aiLandingLightGlintSpr.visible = false;
+    return;
+  }
+  aiGlintFlashT += dt;
+  let env;
+  if (aiGlintFlashT <= AI_GLINT_ATTACK_S){
+    env = aiGlintFlashT / AI_GLINT_ATTACK_S;
+  } else if (aiGlintFlashT <= AI_GLINT_ATTACK_S + AI_GLINT_DECAY_S){
+    env = 1 - ((aiGlintFlashT - AI_GLINT_ATTACK_S) / AI_GLINT_DECAY_S);
+  } else {
+    aiGlintFlashT = -1;
+    m.opacity = 0;
+    aiLandingLightGlintSpr.visible = false;
+    return;
+  }
+  // Pop a touch brighter when the AI plane is close so a near pass actually
+  // reads as a flash; fade with range so distant glints feel softer.
+  const rangeK = Math.max(0.35, 1 - dist / AI_GLINT_RANGE_M);
+  m.opacity = Math.max(0, Math.min(1, env * rangeK));
+  aiLandingLightGlintSpr.visible = m.opacity > 0.01;
+}
+
 // ====== CO-PILOT WINGMAN ON CALL ======
 // Optional second AI plane the pilot can summon with the `O` key. Spawns ~3 km
 // behind + 100 m above and flies a loose chase formation ~80 m off the right
@@ -22873,6 +23009,11 @@ function step(dt){
 
   // AI traffic update (visual only, runs alongside player physics).
   updateAITraffic(dt);
+  // AI plane landing-light glint at night — a single short additive flash
+  // every time the player's camera sweeps the AI plane while it's inside its
+  // home-field landing-light radius. Runs immediately after updateAITraffic
+  // so the cone check sees the freshly-updated AI pose.
+  tickAILandingLightGlint(dt);
   // Co-pilot wingman on call — second AI plane the pilot summoned with `O`.
   // Bails fast when state.coPilotOn is false, so unused calls are cheap.
   // Runs immediately after updateAITraffic so both AI poses are fresh for
