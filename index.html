@@ -12407,6 +12407,17 @@ const state = {
   // Gated by settings.copilot so muted-cockpit pilots can disable.
   coPilotApAirport: null,
   coPilotArmed: { abeam: true, base: true, final: true },
+  // Co-pilot positive-rate / gear-up callout. On every fresh sortie, the
+  // climb-out detector watches for the first frame the plane is clearly
+  // airborne (gear still down, VSI > +1.5 m/s, AGL > 8 m, AGL < 600 m so
+  // the call doesn't fire mid-cruise) and fires the canonical
+  // "Positive rate — gear up." CP call. Once that's fired,
+  // `coPilotGearUpFollowup` arms the follow-up: the next time the player
+  // actually toggles the gear lever to UP, the co-pilot calls "Gear up."
+  // Both latches re-arm on every fresh sortie + every touchdown so each
+  // circuit of a touch-and-go pattern earns its own pair.
+  coPilotPosRateArmed: true,
+  coPilotGearUpFollowup: false,
   // Go-around detector: when the player slams throttle past 95% below 300m AGL
   // within 2 km of a runway with positive vertical speed and gear still down,
   // we fire a one-shot "GO-AROUND" toast + ATC call. `goAroundArmed` re-arms
@@ -15598,6 +15609,10 @@ function resetPlane(){
   state.coPilotArmed.abeam = true;
   state.coPilotArmed.base = true;
   state.coPilotArmed.final = true;
+  // Co-pilot positive-rate / gear-up callout: re-arm both latches on a
+  // fresh sortie so the first rotation off the deck gets the call.
+  state.coPilotPosRateArmed = true;
+  state.coPilotGearUpFollowup = false;
   // Gear warning horn: fresh sortie re-arms the latch so the first
   // low-and-slow gear-up approach in the new flight gets a fresh "gear,
   // gear" pulse + ATC call. Clear the active flag so the pill drops too.
@@ -17868,6 +17883,20 @@ function toggleGear(){
   state.gearDown = !state.gearDown;
   playGearClunk();
   pushATC(state.gearDown ? 'Gear down and locked.' : 'Positive rate, gear up.');
+  // Co-pilot gear-up follow-up: if the positive-rate call just fired and
+  // the player is now actually retracting the gear, the co-pilot calls
+  // "Gear up." with the standard CP tag + chirp. Latch consumed on the
+  // first matching toggle so re-extending and re-retracting later in the
+  // flight doesn't multi-fire. Re-armed on touchdown + resetPlane().
+  if (!state.gearDown && state.coPilotGearUpFollowup && settings.copilot
+      && !state.crashed && !state.introOpen && !state.photoMode
+      && !state.paused && !state.replayActive){
+    state.coPilotGearUpFollowup = false;
+    if (typeof pushATC === 'function'){
+      pushATC('Gear up.', { tag: 'CP', now: true });
+    }
+    if (typeof playCopilotChirp === 'function') playCopilotChirp();
+  }
 }
 function cycleFlaps(){
   state.flaps = (state.flaps + 1) % 3;
@@ -21789,6 +21818,11 @@ function step(dt){
     const wasFlying = !state.onGround;
 
     if (wasFlying){
+      // Co-pilot positive-rate / gear-up callout: re-arm both latches on the
+      // air→ground transition so the next rotation earns a fresh pair of
+      // calls (every pattern circuit of a touch-and-go gets its own set).
+      state.coPilotPosRateArmed = true;
+      state.coPilotGearUpFollowup = false;
       tmpE.setFromQuaternion(plane.quaternion, 'YXZ');
       const pitchDeg = THREE.MathUtils.radToDeg(tmpE.x);
       const rollDeg  = THREE.MathUtils.radToDeg(tmpE.z);
@@ -24568,6 +24602,38 @@ function step(dt){
       // Out of pattern range: drop the airport latch so the next approach
       // gets a fresh set even without crossing 200m AGL.
       state.coPilotApAirport = null;
+    }
+  }
+
+  // ====== CO-PILOT POSITIVE-RATE / GEAR-UP CALLOUT ======
+  // Climb-out moment-of-rotation call. Gated on settings.copilot (same as
+  // the abeam/base/final pattern callouts) so a muted-cockpit pilot can
+  // disable. Standard live-flight gate (no intro/photo/pause/replay/crash)
+  // + airborne + gear still down + climb-out band (positive VSI, low AGL).
+  // One-shot per sortie via `coPilotPosRateArmed`; re-armed at touchdown
+  // (the wheels-down branch) and in resetPlane() so every pattern circuit
+  // gets a fresh call.
+  if (settings.copilot && state.coPilotPosRateArmed
+      && !state.onGround && !state.crashed && !state.introOpen
+      && !state.photoMode && !state.paused && !state.replayActive
+      && state.gearDown){
+    // AGL above the nearest airport elevation when available; falls back to
+    // raw plane.position.y so off-field departures still trigger.
+    let prAp = null, prD = Infinity;
+    for (const a of AIRPORTS){
+      const dx = a.x - plane.position.x, dz = a.z - plane.position.z;
+      const d = dx*dx + dz*dz;
+      if (d < prD){ prD = d; prAp = a; }
+    }
+    const prRefElev = (prAp && prD < 5000*5000) ? prAp.elev : 0;
+    const prAgl = plane.position.y - prRefElev - GEAR_H;
+    if (state.vel.y > 1.5 && prAgl > 8 && prAgl < 600){
+      state.coPilotPosRateArmed = false;
+      state.coPilotGearUpFollowup = true;
+      if (typeof pushATC === 'function'){
+        pushATC('Positive rate — gear up.', { tag: 'CP', now: true });
+      }
+      if (typeof playCopilotChirp === 'function') playCopilotChirp();
     }
   }
 
