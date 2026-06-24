@@ -1089,7 +1089,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -9701,6 +9701,22 @@ const FIRE_MIN_THROTTLE = 0.7;              // random fires only roll above this
 const FIRE_REROLL_MS = 2000;                // gap between consecutive eligibility rolls
 const FIRE_COWL_OFFSET = new THREE.Vector3(0, 0.15, -3.4); // cowl/nose, plane-local
 const FIRE_BEEP_INTERVAL_MS = 500;          // chirp cadence while burning
+// Onboard extinguisher (Shift+X) tuning. The bottle is one-shot per sortie:
+// EXT_STARVE_WINDOW_S is how many seconds the player must have held throttle
+// below EXT_STARVE_THROTTLE before squeezing to count as "starving the
+// fire" — a clean discharge that puts the fire out for good. Squeeze
+// without satisfying that window and EXT_REIGNITE_S later the fire latches
+// back on (same triggerEngineFire path, reason "Reignited — throttle still
+// up") so the spec's re-ignite branch reads cleanly in the code. The
+// over-rev ignition path mirrors a real continuous-redline event: 4s past
+// the cockpit-RPM-gauge redline (throttle >= OVERREV_THROTTLE, which is the
+// throttle value that produces 2700+ RPM through the same
+// `600 + throttle*2200` math the gauge uses) trips the fire.
+const EXT_STARVE_THROTTLE = 0.20;
+const EXT_STARVE_WINDOW_S = 2.0;
+const EXT_REIGNITE_S      = 5.0;
+const OVERREV_THROTTLE    = 0.955; // matches RPM_MAX*0.9 in drawCockpitRpm (~2700 RPM)
+const OVERREV_LATCH_S     = 4.0;
 
 // ====== Engine cylinder-head temperature ======
 // Lightweight thermal model: lerp toward a target temperature each frame
@@ -10512,6 +10528,26 @@ function maybeRollEngineFire(dt){
   }
 }
 function updateEngineFire(dt){
+  // Roll the per-frame extinguisher bookkeeping (throttle history + over-rev
+  // latch) before the active-fire path so a discharge fired this same frame
+  // sees the freshest throttle window. tickExtCounters self-gates against
+  // the active-fire state inside its own body so a long sit on a wreck
+  // doesn't drift the counters.
+  if (typeof tickExtCounters === 'function') tickExtCounters(dt);
+  // Pending re-ignition from a non-starved discharge: relight the fire the
+  // first frame the clock crosses extReigniteAt. Skipped if any of the
+  // emergency-suppress conditions (intro / photo / pause / replay / crash /
+  // ground) are live so a discharge during pause-stack can't whip-out the
+  // fire when the sim un-pauses.
+  if (state.extReigniteAt > 0 && !state.engineFire){
+    const nowMs = performance.now();
+    if (nowMs >= state.extReigniteAt){
+      state.extReigniteAt = -1;
+      const suppressed = state.introOpen || state.photoMode || state.replayActive
+        || state.paused || state.crashed || state.onGround;
+      if (!suppressed) triggerEngineFire('Reignited — throttle still up');
+    }
+  }
   // Tick first: if a fire is burning, accumulate damage, advance the flicker
   // clock, emit smoke, and check the starve conditions for auto-out.
   if (state.engineFire){
@@ -10636,6 +10672,156 @@ function playFireWarnChirp(){
     osc.connect(g).connect(ctx.destination);
     osc.start(ts);
     osc.stop(ts + 0.12);
+  }
+}
+
+// Extinguisher discharge SFX — ~0.55s of band-passed noise that reads as a
+// dry-chemical bottle dumping into the cowl: short attack, sustained PSHH,
+// quick decay. Mirrors playFireWarnChirp's volume-scaling pattern so the
+// channel mixer + master mute path stays consistent. Safe no-op if the
+// WebAudio context isn't ready (same sfxReady() guard the other one-shots
+// use).
+function playExtinguisherDischarge(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.45 * settings.volume;
+  if (vol <= 0) return;
+  // White noise buffer — 0.6s is plenty for one squeeze.
+  const buflen = Math.floor(ctx.sampleRate * 0.6);
+  const buf = ctx.createBuffer(1, buflen, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < buflen; i++) data[i] = (Math.random() * 2 - 1) * 0.9;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  // Band-pass around 2.6kHz so the noise reads as compressed-gas hiss
+  // instead of generic shhh — same trick the carb-pump click + crank cough
+  // SFX use elsewhere in the file.
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(2600, t0);
+  bp.Q.setValueAtTime(0.85, t0);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.015);
+  g.gain.setValueAtTime(vol, t0 + 0.35);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+  src.connect(bp).connect(g).connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + 0.6);
+}
+
+// Dry-click SFX for an empty-bottle squeeze — a single soft tick so the
+// pilot's input isn't ignored silently. Quieter + drier than the discharge
+// so the two are easy to tell apart by ear.
+function playExtinguisherDryClick(){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = 0.22 * settings.volume;
+  if (vol <= 0) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(140, t0);
+  osc.frequency.exponentialRampToValueAtTime(80, t0 + 0.05);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.08);
+}
+
+// Player-facing extinguisher discharge handler bound to Shift+X. Branches:
+//   1. Empty bottle (`extUsed`): play the dry-click, show a status banner
+//      that names the spent state, leave fire (if any) burning.
+//   2. Bottle live but no engine fire: dry-click + "NO ENGINE FIRE" banner
+//      so the pilot doesn't blow the bottle by mistake on a quiet cruise.
+//   3. Bottle live + fire burning: dump the bottle. The fire visually goes
+//      out the same frame (extinguishEngineFire wipes flames + smoke + the
+//      starve counter) and the engine is permanently killed for the sortie
+//      so the pilot has to glide it to a forced landing. If throttle hasn't
+//      been below EXT_STARVE_THROTTLE for the previous EXT_STARVE_WINDOW_S
+//      seconds the fire re-ignites EXT_REIGNITE_S later (extReigniteAt is
+//      checked in updateEngineFire), modeling the real "you didn't starve
+//      the fuel" failure mode the spec calls out.
+function dischargeExtinguisher(){
+  // Same suppression list every other emergency hotkey uses so a stray tap
+  // during photo / pause / replay / intro / on a wreck can't fire.
+  if (state.introOpen || state.photoMode || state.replayActive || state.paused) return;
+  if (state.crashed) return;
+  if (state.extUsed){
+    if (typeof playExtinguisherDryClick === 'function') playExtinguisherDryClick();
+    showStatus('EXTINGUISHER EMPTY', 'one bottle per sortie — land it', 'bad');
+    return;
+  }
+  if (!state.engineFire){
+    if (typeof playExtinguisherDryClick === 'function') playExtinguisherDryClick();
+    showStatus('NO ENGINE FIRE', 'extinguisher armed — hold for fire', 'good');
+    return;
+  }
+  // Bottle dump path.
+  state.extUsed = true;
+  if (typeof playExtinguisherDischarge === 'function') playExtinguisherDischarge();
+  // Check whether the fire was "starved" enough to actually go out. The
+  // 2-second rolling window is maintained in tickExtThrottleHistory().
+  const starved = state.extLowThrottleT >= EXT_STARVE_WINDOW_S;
+  // Always pull the fire out visually so the player gets immediate feedback
+  // on the squeeze. If the fuel/throttle wasn't starved, schedule the
+  // re-ignition latch.
+  extinguishEngineFire();
+  if (starved){
+    // Clean kill — permanent engine-out for the sortie, exactly the spec.
+    state.extKilledEngine = true;
+    state.engineOut = true;
+    state.throttle = 0;
+    // Wipe any in-progress crank so the engine doesn't quietly relight
+    // mid-glide via the cold-start / air-restart paths.
+    state.coldStart = false;
+    state.airRestart = false;
+    state.ignitionT = -1;
+    showStatus('FIRE OUT', 'engine killed for the sortie — glide to a field', 'good');
+    if (typeof pushATC === 'function') pushATC('Fire out, engine secured, declaring emergency.', { tag:'PILOT', now:true });
+    state.extReigniteAt = -1;
+  } else {
+    // Throttle wasn't low enough long enough — fire will relight in 5s.
+    state.extReigniteAt = performance.now() + EXT_REIGNITE_S * 1000;
+    showStatus('BOTTLE DISCHARGED', 'throttle still up — fire may reignite', 'bad');
+    if (typeof pushATC === 'function') pushATC('Discharged, throttle still high, watch for reignition.', { tag:'PILOT', now:true });
+  }
+}
+
+// Per-frame: roll the "throttle below EXT_STARVE_THROTTLE for the previous
+// EXT_STARVE_WINDOW_S seconds" rolling counter and the sustained-over-rev
+// counter. Cheap (two adds + four compares) and self-clamped so a long
+// idle taxi doesn't let the counter drift toward infinity. Called from
+// updateEngineFire so it shares the same per-frame cadence as the existing
+// fire path.
+function tickExtCounters(dt){
+  // Throttle history: count up while throttle is low, snap to zero on the
+  // first frame it crosses back over the threshold. Capped a hair above
+  // EXT_STARVE_WINDOW_S so the rolling check stays cheap.
+  if (state.throttle <= EXT_STARVE_THROTTLE){
+    state.extLowThrottleT = Math.min(EXT_STARVE_WINDOW_S + 0.5, state.extLowThrottleT + dt);
+  } else {
+    state.extLowThrottleT = 0;
+  }
+  // Sustained over-rev: only fires when the engine is actually live (no
+  // count for a windmilling deadstick or a cold-start prop). Once the
+  // sustained-rev counter crosses OVERREV_LATCH_S, trigger a fresh fire
+  // and bail — triggerEngineFire's internal gate handles photo / pause /
+  // replay / ground / crashed and the engineFire latch so we can't
+  // accidentally re-fire while one is already burning.
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  if (engineLive && state.throttle >= OVERREV_THROTTLE){
+    state.overRevT += dt;
+    if (state.overRevT >= OVERREV_LATCH_S){
+      state.overRevT = 0;
+      triggerEngineFire('Sustained over-rev');
+    }
+  } else {
+    state.overRevT = 0;
   }
 }
 
@@ -11828,6 +12014,27 @@ const state = {
   engineFireT: 0,
   engineFireStarvedT: 0,
   engineFireBeepAt: 0,
+  // Onboard fire extinguisher — single bottle per sortie. `extUsed` latches
+  // true on the first Shift+X discharge so a second tap is a dry click +
+  // status banner. `extLowThrottleT` rolls forward each frame the throttle
+  // sits below 0.20, capped at 2.5s so the 2-second "prev 2s starved"
+  // discharge requirement is cheap to evaluate at fire time. `extReigniteAt`
+  // is set on a non-starved discharge (throttle wasn't low enough for 2s
+  // before the squeeze) so updateEngineFire() can relight the fire 5s later;
+  // -1 means "no pending re-ignite". `extKilledEngine` blocks the X-restart
+  // path for the rest of the sortie after a successful extinguish so the
+  // pilot has to glide to a forced landing, turning the existing engine-out
+  // glide loop into a real emergency story. `overRevT` accumulates seconds
+  // the engine is sustained past the cockpit-RPM-gauge redline (throttle
+  // >= 0.955 with a live engine); crossing 4s latches a fresh engine fire
+  // via triggerEngineFire('Sustained over-rev') for the over-rev ignition
+  // path the roadmap calls out. All five fields are wiped in resetPlane()
+  // so a fresh sortie walks in with a full bottle and a cold over-rev timer.
+  extUsed: false,
+  extLowThrottleT: 0,
+  extReigniteAt: -1,
+  extKilledEngine: false,
+  overRevT: 0,
   // Parachute bailout sub-state. phase 'idle' = airplane sim is normal; once
   // the player triggers Shift+P from a qualifying emergency, phase steps
   // through 'eject' (0.4s wind-up while the canopy blows), 'freefall' (~0.8s
@@ -12750,10 +12957,30 @@ addEventListener('keydown', e=>{
     if (state.introOpen) return;
     togglePitotHeat();
   }
+  if (e.code==='KeyX' && e.shiftKey){
+    // Shift+X = fire-extinguisher discharge. Always preventDefault so the
+    // browser doesn't steal the shifted variant for a find/cut shortcut on
+    // any OS. dischargeExtinguisher() owns the intro / photo / pause /
+    // replay / crash gate + the empty-bottle and no-fire branches, so this
+    // handler is pure routing.
+    e.preventDefault();
+    dischargeExtinguisher();
+    return;
+  }
   if (e.code==='KeyX'){
     // Toggle the engine. Lets the pilot deliberately practice deadstick approaches,
     // and also restart the engine on the ground if there's fuel left.
     if (state.engineOut){
+      // Fire-extinguisher kill latch: once the bottle has been dumped
+      // cleanly (throttle starved + fire out), the engine is permanently
+      // secured for the sortie so the pilot can't button-mash X back to
+      // life. The pilot has to glide it in, turning the existing engine-
+      // out loop into a real emergency story. Cleared in resetPlane().
+      if (state.extKilledEngine){
+        showStatus('ENGINE SECURED', 'extinguished — glide to a field', 'bad');
+        if (typeof pushATC === 'function') pushATC('Engine secured post-fire, gliding to landing.', { tag:'PILOT', now:true });
+        return;
+      }
       if (state.fuel > 0.001){
         // Cold-start setting routes restart through the same crank ritual as
         // mission start, so even a mid-flight emergency restart feels like
@@ -14422,6 +14649,15 @@ function resetPlane(){
   state.engineFireBeepAt = 0;
   state.nextFireRollMs = 0;
   clearEngineFireFx();
+  // Onboard extinguisher: refill the bottle, drop the discharge re-ignite
+  // timer, clear the post-extinguish engine-kill latch, and zero the
+  // throttle / over-rev rolling counters. A fresh sortie walks in with a
+  // full bottle, no pending fire schedule, and a cold over-rev clock.
+  state.extUsed = false;
+  state.extLowThrottleT = 0;
+  state.extReigniteAt = -1;
+  state.extKilledEngine = false;
+  state.overRevT = 0;
   // Damage smoke trail — wipe any active wisp so a hot reset on a wounded
   // bird doesn't inherit a phantom plume drifting on the old position.
   // Safe no-op when nothing is active so a reset on the apron pays nothing.
