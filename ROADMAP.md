@@ -68,6 +68,7 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 - [x] Crash report card — after a crash, a small panel pops up bottom-center with peak G, sink rate at impact, speed, AoA, the failure reason, and a one-line verdict ("STALLED ON FINAL", "GEAR-UP LANDING", "OVERSPEED IMPACT", etc.). Hidden in photo mode, click to dismiss, R restarts. Every wreck is now a lesson instead of just a replay.
 
 - [x] Heading bug on the compass strip — press `[` and `]` to nudge a magenta tick around the compass; autopilot heading hold uses the bug instead of current heading. Plain key = 5° coarse, Shift = 1° fine. Off-edge chevron shows which way to turn when the bug is past the visible strip.
+- [x] Altitude bug on the altimeter strip — slim vertical tape pinned just to the left of the VSI shows a ±400 m window around the live altitude with 50/100 m ticks and a magenta tick + stem pinning the AP target. Tape and bug both render in the same Kollsman-biased metres as the HUD #alt readout so the numbers agree without a mental conversion. While AP is engaged, `;` / `'` retarget from pitch-trim to nudging the altitude bug (±100 m coarse, Shift = ±10 m fine, clamped to GEAR_H+50 / GEAR_H+12000) and re-arm the cruise-capture chime so a fresh bug earns a new capture event. Off-edge chevron points toward the bug when it's past the visible window, mirroring the heading bug. Strip only renders when AP is on (display:none otherwise), hidden in photo mode via PHOTO_HIDE_IDS so saved PNGs stay clean. Pairs with the heading bug on the compass strip for a complete two-axis AP target preview.
 - [x] Engine RPM gauge in the cockpit panel — fourth small canvas next to airspeed/attitude/altimeter showing prop RPM scaled from throttle (drops with engine-out, climbs with throttle). Finishes the cockpit panel so it doesn't look lopsided.
 - [x] Sunrise / sunset toast — when the time-of-day cycle crosses sunrise or sunset, fire a quick golden-tinted toast ("🌅 Sunrise" / "🌇 Sunset") so the player actually notices the world changing instead of missing it mid-turn.
 - [x] Runway lights flare on touchdown — when the wheels actually kiss the runway, briefly pulse the runway edge/centerline lights brighter (yellow flash that decays over ~600ms). Tiny visual reward that makes every landing feel like a moment instead of just "score popup".
@@ -514,7 +515,6 @@ Single-file Three.js flight sim shipping to https://sanjays2402.github.io/flight
 ## NEXT — pick the top item each loop
 Ranked by impact-per-LOC. Top of the list wins next ship.
 
-- [ ] Altitude bug on the altimeter strip — magenta tick mark on the altimeter HUD strip showing the autopilot's target altitude (or the current waypoint's recommended altitude if waypoint-follow is active). Press `'` / `;` while AP is engaged to nudge the bug (+/- 100 m coarse, Shift = 10 m fine), AP altitude-hold tracks the bug instead of the captured value. Off-edge chevron when the bug is past the visible strip. Pairs with the existing heading bug for a complete two-axis AP target preview.
 
 ## How the ship loop works
 Every 5 min during awake hours, an isolated agent runs:

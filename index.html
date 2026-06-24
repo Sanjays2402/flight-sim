@@ -142,6 +142,18 @@
   @media (max-width: 760px){ #hobbs { left:auto; right:8px; transform:none; } }
   #vsi { position:fixed; top:160px; right:162px; width:46px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; }
   #vsi canvas { display:block; width:100%; height:100%; }
+  /* Altitude strip: slim vertical tape pinned immediately to the left of
+     the VSI. Mirrors the heading bug on the compass strip — a magenta tick
+     pins the autopilot's target altitude relative to the current altitude,
+     with off-edge chevrons when the bug is beyond the visible window.
+     Tape spans ±400 m around the live altitude with 100 m major ticks and
+     50 m minors, so the pilot can read "200 m to climb" at a glance. Only
+     visible while AP is engaged (it's a pure AP-target preview gauge);
+     drawAltStrip() flips display:block when active. Hidden in photo mode
+     via PHOTO_HIDE_IDS so saved screenshots stay clean. Pairs with the
+     heading bug on the compass strip for a complete two-axis AP preview. */
+  #altstrip { position:fixed; top:160px; right:218px; width:38px; height:140px; background:rgba(8,14,22,.72); border:1px solid #1e3548; border-radius:8px; backdrop-filter:blur(8px); padding:2px; display:none; }
+  #altstrip canvas { display:block; width:100%; height:100%; }
   /* Glideslope indicator: vertical "meatball" / PAPI strip pinned to the
      right edge under the VSI. Only visible when the plane is roughly
      aligned with the nearest runway and inside ~5 km, so it reads like a
@@ -1005,6 +1017,7 @@
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
 <div id="squawk"><span class="lbl">SQ</span><span class="code" id="squawkCode">1200</span></div>
 <div id="hobbs"><span class="lbl">TRIP</span><span class="val" id="hobbsVal">00:00:00</span></div>
+<div id="altstrip"><canvas id="altstripCv" width="38" height="140"></canvas></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
 <div id="glide"><canvas id="glideCv" width="92" height="320"></canvas></div>
 <div id="ils"><canvas id="ilsCv" width="192" height="192"></canvas></div>
@@ -1107,7 +1120,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw (hold <kbd>Q</kbd> = quick-action menu) · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) / hold = auto-run · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw (hold <kbd>Q</kbd> = quick-action menu) · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) / AP on = alt bug ±100m (Shift = ±10m) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) / hold = auto-run · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -13959,9 +13972,26 @@ addEventListener('keydown', e=>{
     }
     // Pitch trim wheel. `;` = nose down, `'` = nose up. Plain = 5% coarse,
     // Shift = 1% fine. Skip while the intro modal is up (no flight yet) and
-    // while autopilot is on (AP owns pitch — trim would just fight it).
+    // while autopilot is on — in AP mode the same keys repurpose to nudging
+    // the altitude bug (±100 m coarse, Shift = ±10 m fine), mirroring the
+    // heading-bug binding on `[` / `]`. AP altitude-hold reads state.ap.alt
+    // directly, so adjusting the bug is just adjusting state.ap.alt.
     if (state.introOpen) return;
-    if (state.ap.on) return;
+    if (state.ap.on){
+      e.preventDefault();
+      const aStep = e.shiftKey ? 10 : 100; // metres
+      const aDir  = (e.code === 'Semicolon') ? -1 : 1;
+      // Clamp between just-above-ground and a sane ceiling so a rapid-fire
+      // nudge can't drive the AP into the dirt or out past the world.
+      const MIN_BUG = GEAR_H + 50;     // never lower than 50 m above ground
+      const MAX_BUG = GEAR_H + 12000;  // generous cruise ceiling
+      const before  = state.ap.alt;
+      state.ap.alt  = Math.max(MIN_BUG, Math.min(MAX_BUG, state.ap.alt + aDir*aStep));
+      // Re-arm the cruise-capture chime so a fresh bug earns a new capture
+      // event when the plane settles onto it.
+      if (state.ap.alt !== before) state.ap.cruiseLatch = false;
+      return;
+    }
     const step = e.shiftKey ? 0.01 : 0.05;
     const dir  = (e.code === 'Semicolon') ? -1 : 1;
     state.trim = Math.max(-1, Math.min(1, state.trim + dir*step));
@@ -23242,6 +23272,26 @@ function step(dt){
     apRow.style.display = 'none';
   }
 
+  // Altitude bug strip: paired with the heading bug on the compass strip so
+  // the pilot has a complete two-axis preview of where the autopilot is
+  // aiming. Tape and bug both render in the same Kollsman-biased metres as
+  // the HUD #alt readout, so the numbers on the tape match the digital
+  // altimeter without a mental conversion. Visible only while AP is on —
+  // outside AP the gauge has no target to show, and the alt readout already
+  // lives in the main HUD column. Hidden in photo mode via PHOTO_HIDE_IDS.
+  if (altStripEl){
+    if (state.ap.on && !state.photoMode){
+      // The bug = state.ap.alt (world Y of the AP target). Display value is
+      // (target - GEAR_H) biased by the same Kollsman setting as the live
+      // alt readout so the tape ticks and the digital altimeter agree.
+      const bugDisp = Math.max(0, (state.ap.alt - GEAR_H) + baroBiasM);
+      altStripEl.style.display = 'block';
+      drawAltStrip(altMDisp, bugDisp);
+    } else if (altStripEl.style.display !== 'none'){
+      altStripEl.style.display = 'none';
+    }
+  }
+
   // Waypoint HUD row: hidden when no pin. Shows bearing (to-bug, 000–359) and
   // slant distance in km. Auto-clear within 300 m so the row vanishes after
   // arrival; if the AP was following, release the lock and toast the pilot.
@@ -24918,6 +24968,121 @@ function drawVSI(vs){
   vsiCtx.beginPath();
   vsiCtx.arc(cx + 14, cy, 2.5, 0, Math.PI*2);
   vsiCtx.fill();
+}
+
+// ====== Altitude bug strip ======
+// Slim vertical tape pinned just to the left of the VSI. The center of the
+// tape always shows the live altitude (metres, Kollsman-biased to match the
+// HUD #alt readout). A magenta tick + stem marks the autopilot's target
+// altitude. The tape spans ±ALT_STRIP_RANGE_M (400 m) so 100 m of climb
+// fills 1/8 of the tape — a familiar scale that gives the pilot a quick
+// visual feel for how far they have to climb / descend without scanning the
+// digital readouts. Off-edge chevron at the top or bottom when the bug is
+// outside the visible window, matching the heading-bug behavior on the
+// compass strip. Only renders when the autopilot is on; the rest of the time
+// the strip is hidden via display:none so it doesn't crowd the HUD with a
+// gauge that has no live target.
+const altStripEl  = document.getElementById('altstrip');
+const altStripCv  = document.getElementById('altstripCv');
+const altStripCtx = altStripCv ? altStripCv.getContext('2d') : null;
+const ALT_STRIP_RANGE_M = 400;     // metres above/below current alt visible
+const ALT_STRIP_BUG_STEP_PX = 1;   // (visual hint only, math is metres-per-pixel)
+function drawAltStrip(altDispM, bugDispM){
+  if (!altStripCtx || !altStripEl) return;
+  const W = altStripCv.width, H = altStripCv.height;
+  const cx = W/2, cy = H/2;
+  altStripCtx.clearRect(0,0,W,H);
+  // Tape background
+  altStripCtx.fillStyle = 'rgba(0,0,0,0.35)';
+  altStripCtx.fillRect(W/2 - 14, 6, 28, H - 12);
+  altStripCtx.strokeStyle = '#1e3548';
+  altStripCtx.lineWidth = 1;
+  altStripCtx.strokeRect(W/2 - 14, 6, 28, H - 12);
+  // Convert metres -> y. Positive metres = above current alt = upper half
+  // of the tape (smaller y). Match the VSI's vertical convention.
+  const PX_PER_M = (H/2 - 8) / ALT_STRIP_RANGE_M;
+  // Major ticks every 100 m, minor every 50 m.
+  altStripCtx.fillStyle = '#dfe';
+  altStripCtx.font = '9px ui-monospace, monospace';
+  altStripCtx.textAlign = 'right';
+  altStripCtx.textBaseline = 'middle';
+  // Anchor ticks to round-100 m altitudes near the current altitude so the
+  // labels read like a real altimeter tape ("500", "600", "700"), not as
+  // offsets from where the pilot happens to be. Range covers ±500 m so the
+  // edges always have at least one labeled tick visible at any altitude.
+  const baseM = Math.round(altDispM / 100) * 100;
+  for (let d = -500; d <= 500; d += 50){
+    const tickAlt = baseM + d;
+    if (tickAlt < 0) continue;
+    const offset = tickAlt - altDispM;
+    if (offset < -ALT_STRIP_RANGE_M || offset > ALT_STRIP_RANGE_M) continue;
+    const y = cy - offset * PX_PER_M;
+    const isMajor = (tickAlt % 100 === 0);
+    altStripCtx.strokeStyle = isMajor ? '#dfe' : '#6aa';
+    altStripCtx.lineWidth = isMajor ? 1.5 : 1;
+    altStripCtx.beginPath();
+    altStripCtx.moveTo(W/2 - (isMajor ? 12 : 9), y);
+    altStripCtx.lineTo(W/2 - 4, y);
+    altStripCtx.stroke();
+    if (isMajor && tickAlt !== Math.round(altDispM)){
+      // Three-digit labels max so they fit the slim tape; truncate to
+      // hundreds (so "1500" displays as "15" — same trick the compass uses
+      // with "6" for 060°). Pilots cross-check the absolute number on the
+      // central readout, the tape just shows relative spacing.
+      altStripCtx.fillText(String((tickAlt / 100) | 0), W/2 - 14, y);
+    }
+  }
+  // Center caret + live altitude readout box (mirrors the compass center).
+  altStripCtx.fillStyle = 'rgba(0,0,0,0.55)';
+  altStripCtx.fillRect(W/2 - 16, cy - 9, 32, 18);
+  altStripCtx.strokeStyle = '#ffd166';
+  altStripCtx.lineWidth = 1;
+  altStripCtx.strokeRect(W/2 - 16, cy - 9, 32, 18);
+  altStripCtx.fillStyle = '#ffd166';
+  altStripCtx.font = 'bold 11px ui-monospace, monospace';
+  altStripCtx.textAlign = 'center';
+  altStripCtx.textBaseline = 'middle';
+  altStripCtx.fillText(String(Math.round(altDispM)), cx, cy);
+  // Magenta altitude bug: pin at the bug's offset from the current alt,
+  // clamp to the edge of the visible window with an off-edge chevron so the
+  // pilot still sees which way the AP is aiming when the target is past the
+  // strip. Mirrors the heading-bug pattern on the compass strip exactly,
+  // just rotated 90°.
+  if (typeof bugDispM === 'number'){
+    const diff = bugDispM - altDispM;
+    const clamped = Math.max(-ALT_STRIP_RANGE_M, Math.min(ALT_STRIP_RANGE_M, diff));
+    const offEdge = Math.abs(diff) > ALT_STRIP_RANGE_M;
+    const by = cy - clamped * PX_PER_M;
+    altStripCtx.fillStyle = '#ff4ad8';
+    altStripCtx.strokeStyle = '#ff4ad8';
+    altStripCtx.lineWidth = 2;
+    // Sideways triangle nipping in from the right edge of the strip
+    // (the tape's tick rail is on the left half, so the bug rides the right).
+    altStripCtx.beginPath();
+    altStripCtx.moveTo(W/2 + 14, by);
+    altStripCtx.lineTo(W/2 + 6,  by - 6);
+    altStripCtx.lineTo(W/2 + 6,  by + 6);
+    altStripCtx.closePath();
+    altStripCtx.fill();
+    // Short horizontal stem from the triangle into the tick rail so the bug
+    // visually pins to a row on the tape.
+    altStripCtx.beginPath();
+    altStripCtx.moveTo(W/2 + 6, by);
+    altStripCtx.lineTo(W/2 - 14, by);
+    altStripCtx.stroke();
+    // Off-edge chevron pointing toward the bug when it's outside the window.
+    if (offEdge){
+      const dir = diff > 0 ? -1 : 1; // negative dir = up arrow
+      altStripCtx.beginPath();
+      altStripCtx.moveTo(W/2 + 10, by + dir*8);
+      altStripCtx.lineTo(W/2 + 4,  by + dir*14);
+      altStripCtx.lineTo(W/2 - 2,  by + dir*8);
+      altStripCtx.stroke();
+    }
+    // The bug's absolute target value lives in the AP HUD row
+    // (apReadout = "ON · 1234m / 270°"), so the strip stays uncluttered and
+    // just shows the relative spread between current and target.
+  }
 }
 
 // ====== Glideslope indicator (ILS-style "meatball") ======
@@ -32224,7 +32389,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate','qradial'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','altstrip','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate','qradial'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
