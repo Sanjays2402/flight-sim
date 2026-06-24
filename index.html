@@ -123,11 +123,28 @@
      7700 with red text. Code changes fade an amber border highlight over
      1.4s via the `flash` class so the player notices the swap. Hidden in
      photo mode via PHOTO_HIDE_IDS so saved PNGs stay clean. */
-  #squawk { position:fixed; top:88px; left:50%; transform:translate(176px,0); padding:3px 10px; font-size:11px; font-weight:700; letter-spacing:2px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); font-family:inherit; z-index:5; pointer-events:none; }
+  #squawk { position:fixed; top:88px; left:50%; transform:translate(176px,0); padding:3px 10px; font-size:11px; font-weight:700; letter-spacing:2px; color:#cfe; background:rgba(8,14,22,.82); border:1px solid #1e3548; border-radius:6px; backdrop-filter:blur(8px); font-family:inherit; z-index:5; pointer-events:none; display:flex; align-items:center; }
   #squawk .lbl { color:#9bb; font-weight:600; margin-right:6px; letter-spacing:1px; }
   #squawk .code { color:#cfe; }
   #squawk.emerg .code { color:#ff7a7a; text-shadow:0 0 6px rgba(255,90,90,.55); }
   #squawk.flash { animation:sqFlash 1.4s ease-out; }
+  /* IDENT pill: small clickable button on the right edge of the squawk
+     strip. Dim grey when idle, pulses bright green at 1.5 Hz while a
+     pulse is active. Pairs with the existing squawk keypad — no new
+     keybinding is taken, the press lives on the strip itself like the
+     chronograph + VOR canvas-click pattern. While ident is active the
+     squawk code text inherits the same green pulse so the readout pill
+     visibly transmits along with the IDENT lamp. */
+  #squawk .ident { display:inline-flex; align-items:center; gap:4px; margin-left:8px; padding:2px 6px; border-left:1px solid #1e3548; cursor:pointer; pointer-events:auto; user-select:none; color:#5a6068; transition:color .15s ease; }
+  #squawk .ident:hover { color:#cfe; }
+  #squawk .ident .idDot { display:inline-block; width:5px; height:5px; border-radius:50%; background:#3a4048; box-shadow:none; transition:background .15s ease, box-shadow .15s ease; }
+  #squawk .ident .idLbl { font-size:9px; letter-spacing:1.5px; font-weight:700; }
+  #squawk.ident-on .ident { color:#7ee787; }
+  #squawk.ident-on .ident .idDot { background:#7ee787; box-shadow:0 0 6px rgba(126,231,135,.7); animation:sqIdentPulse 0.667s ease-in-out infinite; }
+  #squawk.ident-on .code { animation:sqIdentCodePulse 0.667s ease-in-out infinite; }
+  #squawk.ident-on.emerg .code { animation:none; }
+  @keyframes sqIdentPulse { 0%,100% { opacity:1; box-shadow:0 0 6px rgba(126,231,135,.7); } 50% { opacity:0.45; box-shadow:0 0 2px rgba(126,231,135,.3); } }
+  @keyframes sqIdentCodePulse { 0%,100% { color:#7ee787; text-shadow:0 0 6px rgba(126,231,135,.55); } 50% { color:#cfe; text-shadow:none; } }
   @keyframes sqFlash { 0% { border-color:#ffd166; box-shadow:0 0 12px rgba(255,209,102,.6); } 100% { border-color:#1e3548; box-shadow:none; } }
   @media (max-width: 760px){ #squawk { left:auto; right:8px; transform:none; } }
   /* Trip / Hobbs timer pill — sits just under the squawk strip with the
@@ -1031,7 +1048,7 @@
 </div>
 <div id="compass"><canvas id="compassCv" width="720" height="84"></canvas></div>
 <div id="atc"><span class="tag" id="atcTag">ATC</span><span class="msg" id="atcMsg">Tower, runway 27 clear, winds calm.</span></div>
-<div id="squawk"><span class="lbl">SQ</span><span class="code" id="squawkCode">1200</span></div>
+<div id="squawk"><span class="lbl">SQ</span><span class="code" id="squawkCode">1200</span><span class="ident" id="squawkIdent" title="Click or press IDENT — squawk pulse for ATC radar (18s)"><span class="idDot" id="squawkIdentDot"></span><span class="idLbl">IDENT</span></span></div>
 <div id="hobbs"><span class="lbl">TRIP</span><span class="val" id="hobbsVal">00:00:00</span></div>
 <div id="altstrip"><canvas id="altstripCv" width="38" height="140"></canvas></div>
 <div id="vsi"><canvas id="vsiCv" width="92" height="280"></canvas></div>
@@ -12940,6 +12957,17 @@ const state = {
   // pill colors itself red only in the latter case.
   squawk: '1200',
   squawkEmerg: false,
+  // Transponder IDENT button (radar pulse). Click the IDENT pill on the
+  // squawk strip to send an 18s identification pulse — the readout pulses
+  // bright green at 1.5 Hz, a one-shot PILOT "Squawk ident." line goes out,
+  // and ~3 s later a TWR "radar contact, ident received." reply fires to
+  // close the IFR-style handshake. Auto-clears at `identUntilMs`; the
+  // reply latch (`identReplyFired`) keeps the TWR ack from double-firing
+  // if the pilot mashes IDENT again before the 18 s window closes.
+  identActive: false,
+  identUntilMs: 0,
+  identReplyAtMs: 0,
+  identReplyFired: false,
   // ATIS broadcast (Shift+A). Cooldown timestamp so a held shift+A doesn't
   // fire-spam the ATC strip / chime; cleared on resetPlane() so a hot reset
   // re-arms the call immediately.
@@ -15423,6 +15451,91 @@ function resetSquawkVFR(){
   if (squawkEl) squawkEl.classList.remove('emerg');
 }
 
+// ====== TRANSPONDER IDENT ======
+// Companion to the squawk keypad: 18 s green pulse that simulates the IDENT
+// button on a real transponder (the box ATC sees the radar return brighten
+// for so they can pick the player's blip out of clutter). Click the IDENT
+// pill on the #squawk strip to trigger; the readout + lamp pulse green at
+// 1.5 Hz, a one-shot PILOT "Squawk ident." line goes out, and ~3 s later a
+// TWR "radar contact, ident received." reply closes the handshake. Pure
+// systems flavour — no new mesh, no new physics — the existing transponder
+// plumbing finally has its second half so a full "set squawk → ident on
+// request" procedure plays from the cockpit.
+const IDENT_DURATION_MS = 18000;   // standard real-world IDENT pulse window
+const IDENT_REPLY_DELAY_MS = 3000; // TWR ack ~3s after the press
+function startIdent(){
+  // Gates: never fire under intro / squawk keypad modal so a modal collision
+  // can't double-trigger. Photo / pause / replay / crashed also skipped so
+  // saved screenshots and frozen frames stay clean (mirrors the chronograph
+  // canvas-click gate pattern).
+  if (state.introOpen) return;
+  if (state.sqkeypadOpen) return;
+  if (state.photoMode) return;
+  if (state.paused) return;
+  if (state.replayActive) return;
+  if (state.crashed) return;
+  const now = performance.now();
+  // Refresh the window if pressed mid-pulse so a held / double-tap extends
+  // the active broadcast rather than chopping it short.
+  state.identActive = true;
+  state.identUntilMs = now + IDENT_DURATION_MS;
+  // Re-arm the TWR reply on each fresh press so a mid-pulse re-press buys
+  // a fresh ack ~3 s later (real radar contact would re-confirm too).
+  state.identReplyAtMs = now + IDENT_REPLY_DELAY_MS;
+  state.identReplyFired = false;
+  if (squawkEl){
+    if (!squawkEl.classList.contains('ident-on')) squawkEl.classList.add('ident-on');
+  }
+  pushATC('Squawk ident.', { tag:'PILOT', now:true });
+}
+function _clearIdent(){
+  state.identActive = false;
+  state.identUntilMs = 0;
+  state.identReplyAtMs = 0;
+  state.identReplyFired = false;
+  if (squawkEl) squawkEl.classList.remove('ident-on');
+}
+function tickIdent(){
+  if (!state.identActive) return;
+  // Defensive: any of these states should kill the pulse cleanly so the
+  // green strobe never bleeds into a paused / photo / replay / crashed
+  // frame. Mirrors the gating that startIdent() refuses to arm under.
+  if (state.introOpen || state.photoMode || state.paused || state.replayActive || state.crashed){
+    _clearIdent();
+    return;
+  }
+  const now = performance.now();
+  // TWR ack ~3 s after the press. Latched so a held / re-press doesn't
+  // double-fire the same confirmation line.
+  if (!state.identReplyFired && now >= state.identReplyAtMs){
+    state.identReplyFired = true;
+    pushATC('Cessna, radar contact, ident received.', { tag:'TWR' });
+  }
+  // Auto-clear once the 18 s window closes.
+  if (now >= state.identUntilMs){
+    _clearIdent();
+  }
+}
+// Wire the IDENT pill click. Pure DOM interaction — no new keybinding is
+// taken (the squawk keypad on K and the auto-run checklist on Shift+K both
+// stay free), matching the chronograph + VOR canvas-click pattern.
+(function setupIdentPill(){
+  const pill = document.getElementById('squawkIdent');
+  if (!pill) return;
+  pill.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    startIdent();
+  });
+  // Mobile tap fallback — some touch handlers preventDefault on click; the
+  // pointerdown path catches taps that never deliver a click event.
+  pill.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse') return; // mouse already handled by click
+    e.preventDefault();
+    startIdent();
+  });
+})();
+
 function resetPlane(){
   plane.position.set(MAIN_AP.x, MAIN_AP.elev + GEAR_H, MAIN_AP.z + MAIN_AP.len/2 - 100);
   plane.quaternion.identity();
@@ -15595,6 +15708,14 @@ function resetPlane(){
   // frame ground speed crosses 5 m/s.
   state.tripSec = 0;
   state.tripRunning = false;
+  // Transponder IDENT pulse — a hot reset always drops the pulse so a
+  // freshly spawned plane never starts mid-broadcast. Pill goes back to
+  // dim grey; the next IDENT press kicks a fresh 18 s window.
+  state.identActive = false;
+  state.identUntilMs = 0;
+  state.identReplyAtMs = 0;
+  state.identReplyFired = false;
+  if (squawkEl) squawkEl.classList.remove('ident-on');
   if (typeof hobbsEl !== 'undefined' && hobbsEl){
     hobbsEl.classList.remove('run');
     if (typeof hobbsValEl !== 'undefined' && hobbsValEl) hobbsValEl.textContent = '00:00:00';
@@ -33484,6 +33605,8 @@ function loop(now){
     // once everything has calmed down. Cheap state-machine, runs every
     // frame because the underlying conditions are already-cached booleans.
     tickSquawk();
+    // IDENT pulse — auto-clear at 18 s and fire the TWR ack ~3 s in.
+    tickIdent();
     // Trip / Hobbs chronometer: auto-arms on takeoff roll, pauses on
     // full-stop or crash. Also gated against replay so a post-crash
     // playback doesn't keep adding to a frozen flight's time.
