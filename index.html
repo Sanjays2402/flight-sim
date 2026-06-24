@@ -1099,6 +1099,7 @@
   <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl" id="cpAsiLbl">AIRSPEED km/h</div></div>
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
+  <div class="gauge"><canvas id="cpIls" width="220" height="220" title="ILS LOC + GS cross-needles — vertical = lateral offset, horizontal = 3° glideslope deviation"></canvas><div class="glbl">ILS LOC / GS</div></div>
   <div class="gauge"><canvas id="cpRpm" width="220" height="220"></canvas><div class="glbl">ENGINE RPM</div></div>
   <div class="gauge" id="cpChtGauge"><canvas id="cpCht" width="220" height="220"></canvas><div class="glbl">ENG TEMP °C</div></div>
   <div class="gauge" id="cpOilGauge"><canvas id="cpOil" width="220" height="220"></canvas><div class="glbl">OIL PRESS PSI</div></div>
@@ -26740,6 +26741,7 @@ function drawWeatherRadar(){
 const cpAsiCv = document.getElementById('cpAsi');
 const cpAiCv  = document.getElementById('cpAi');
 const cpAltCv = document.getElementById('cpAlt');
+const cpIlsCv = document.getElementById('cpIls');
 const cpRpmCv = document.getElementById('cpRpm');
 const cpChtCv = document.getElementById('cpCht');
 const cpOilCv = document.getElementById('cpOil');
@@ -26763,6 +26765,7 @@ let _cockpitDuskT = 0;
 const cpAsiCtx = cpAsiCv && cpAsiCv.getContext('2d');
 const cpAiCtx  = cpAiCv  && cpAiCv.getContext('2d');
 const cpAltCtx = cpAltCv && cpAltCv.getContext('2d');
+const cpIlsCtx = cpIlsCv && cpIlsCv.getContext('2d');
 const cpRpmCtx = cpRpmCv && cpRpmCv.getContext('2d');
 const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
@@ -27135,6 +27138,187 @@ function drawCockpitAlt(altM){
   ctx.fillStyle = '#9fb';
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.fillText('BARO ' + (state.baroInHg).toFixed(2), cx, cy + R*0.78);
+}
+// ====== ILS LOC/GS cross-needle cockpit gauge ======
+// Small panel CDI that pairs with the existing HUD-edge #ils cross-pointer
+// and the meatball strip. Reuses _ilsCandidate() + _ilsResolveLock() so the
+// runway picked here matches the HUD needles + the meatball + the approach
+// plate exactly (one auto-pick code path, one manual lock). Angular full
+// deflection matches the spec: ~2.5° lateral, ~0.7° vertical, with the
+// classic 2-dots-each-side scale every real ILS pilot already knows. LOC/GS
+// flags flip to red OFF when out of range or not aligned. Gauge is drawn
+// inside the round bezel that every other panel gauge uses, but the active
+// CDI area is a square inside that disc so the cross-pointer reads right.
+const CP_ILS_MAX_DIST = 8000;       // metres from threshold (auto-pick)
+const CP_ILS_ALIGN_LAT = 1100;      // metres laterally off centerline (auto-pick)
+const CP_ILS_ALIGN_HDG = 45;        // degrees heading off runway course (auto-pick)
+const CP_ILS_LOCK_MAX_DIST = 16000; // metres from threshold (manual lock)
+const CP_ILS_LOC_FULL_DEG = 2.5;    // full LOC deflection (degrees lateral)
+const CP_ILS_GS_FULL_DEG  = 0.7;    // full GS deflection (degrees vs 3°)
+function drawCockpitIls(hdgDeg){
+  if (!cpIlsCtx) return;
+  const W = cpIlsCv.width, H = cpIlsCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpIlsCtx;
+  _cpBezel(ctx, W, H);
+  // Pick the runway end. Mirrors drawILSNeedles auto-pick + manual lock so
+  // the panel gauge and the HUD strip never disagree about which runway is
+  // being chased.
+  let best = null;
+  let locked = false;
+  if (state.ilsLockId && typeof _ilsResolveLock === 'function'){
+    const m = _ilsResolveLock(state.ilsLockId);
+    if (m){
+      const c = _ilsCandidate(m.ri, hdgDeg, m.sign);
+      if (c && c.horiz <= CP_ILS_LOCK_MAX_DIST){
+        best = c;
+        locked = true;
+      }
+    }
+  }
+  if (!best){
+    let bestScore = 1e9;
+    for (const ri of runwayInfos){
+      for (const sign of [+1, -1]){
+        const c = _ilsCandidate(ri, hdgDeg, sign);
+        if (!c) continue;
+        if (c.horiz > CP_ILS_MAX_DIST) continue;
+        if (Math.abs(c.lx) > CP_ILS_ALIGN_LAT) continue;
+        if (Math.abs(c.dh) > CP_ILS_ALIGN_HDG) continue;
+        const score = c.horiz + Math.abs(c.lx) * 1.5 + Math.abs(c.dh) * 40;
+        if (score < bestScore){
+          bestScore = score;
+          best = c;
+        }
+      }
+    }
+  }
+  // CDI area: a square inscribed in the round bezel so the cross-pointer
+  // reads correctly against the dot scale. Half-size sized to leave room
+  // for the LOC/GS flag labels around the disc rim.
+  const half = R * 0.62;
+  // Faint reference cross + 2-dots-each-side scale (real ILS convention).
+  ctx.strokeStyle = '#2a4a6a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - half, cy); ctx.lineTo(cx + half, cy);
+  ctx.moveTo(cx, cy - half); ctx.lineTo(cx, cy + half);
+  ctx.stroke();
+  ctx.fillStyle = '#3a5a7a';
+  for (const i of [-2, -1, 1, 2]){
+    const off = (i / 2) * half;
+    ctx.beginPath(); ctx.arc(cx + off, cy, 2.2, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy + off, 2.2, 0, Math.PI*2); ctx.fill();
+  }
+  // Center reference square (the airplane symbol on a real cross-pointer).
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(cx - 6, cy - 6, 12, 12);
+  if (!best){
+    // OFF flags — red LOC + GS tags so the pilot knows the needles aren't
+    // tracking anything live. Sits at the LEFT (LOC) and TOP (GS) edges so
+    // they don't fight the bezel label text.
+    ctx.fillStyle = '#ff4d4d';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('LOC OFF', cx - half + 2, cy - half - 12);
+    ctx.textAlign = 'right';
+    ctx.fillText('GS OFF', cx + half - 2, cy - half - 12);
+    // Faint hint line at the bottom so the pilot knows the gauge is alive
+    // but not tracking.
+    ctx.fillStyle = '#5a6068';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 9px ui-monospace, monospace';
+    ctx.fillText('NO ILS IN RANGE', cx, cy + R * 0.72);
+    return;
+  }
+  // Live needles. Lateral angle is atan2(lx, horiz) so the deflection scale
+  // is angular (matches the spec) instead of metric. devDeg matches the
+  // existing HUD strip convention: positive = above the 3° glideslope.
+  const latAngDeg = Math.atan2(best.lx, Math.max(1, best.horiz)) * 180/Math.PI;
+  const devDeg    = best.glideAngle - GLIDE_TARGET_DEG;
+  // LOC convention: plane RIGHT of centerline (latAngDeg > 0) → needle
+  // deflects LEFT ("fly left to recapture"), so negate the sign before the
+  // clamp. GS convention: plane ABOVE glideslope (devDeg > 0) → needle
+  // sits LOWER on the screen ("fly down to the needle"), so positive devDeg
+  // pushes the needle down (canvas y grows downward).
+  const locDev = Math.max(-1, Math.min(1, -latAngDeg / CP_ILS_LOC_FULL_DEG));
+  const gsDev  = Math.max(-1, Math.min(1,  devDeg    / CP_ILS_GS_FULL_DEG));
+  const locX = cx + locDev * half;
+  const gsY  = cy + gsDev  * half;
+  // Vertical LOC bar (magenta to match the HUD strip + heading bug palette).
+  ctx.strokeStyle = '#ff66cc';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(locX, cy - half + 4);
+  ctx.lineTo(locX, cy + half - 4);
+  ctx.stroke();
+  // Horizontal GS bar (green to match the meatball center mark).
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(cx - half + 4, gsY);
+  ctx.lineTo(cx + half - 4, gsY);
+  ctx.stroke();
+  // Off-scale chevrons when a needle is pinned at full deflection — echoes
+  // the HUD strip and the heading-bug / meatball off-edge cues.
+  if (Math.abs(latAngDeg) > CP_ILS_LOC_FULL_DEG){
+    ctx.fillStyle = '#ff66cc';
+    const side = (locDev > 0) ? 1 : -1;
+    const tipX = cx + side * (half + 2);
+    ctx.beginPath();
+    ctx.moveTo(tipX,          cy);
+    ctx.lineTo(tipX - side*8, cy - 6);
+    ctx.lineTo(tipX - side*8, cy + 6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (Math.abs(devDeg) > CP_ILS_GS_FULL_DEG){
+    ctx.fillStyle = '#7ee787';
+    const dir = (gsDev > 0) ? 1 : -1;
+    const tipY = cy + dir * (half + 2);
+    ctx.beginPath();
+    ctx.moveTo(cx,     tipY);
+    ctx.lineTo(cx - 6, tipY - dir*8);
+    ctx.lineTo(cx + 6, tipY - dir*8);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Flag area: green LOC + GS active tags. Magenta LOCK tag with the lock
+  // id when the pilot has a manual ILS lock armed, otherwise the runway id.
+  if (locked && typeof _ilsLockIdFor === 'function'){
+    const lockId = _ilsLockIdFor(best.ri, best.sign);
+    ctx.fillStyle = '#ff66cc';
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('LOCK', cx - half + 2, cy - half - 12);
+    ctx.textAlign = 'right';
+    ctx.fillText(lockId, cx + half - 2, cy - half - 12);
+  } else {
+    ctx.fillStyle = '#7ee787';
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('LOC', cx - half + 2, cy - half - 12);
+    ctx.fillStyle = '#7ee787';
+    ctx.textAlign = 'right';
+    ctx.fillText('GS', cx + half - 2, cy - half - 12);
+  }
+  // Bottom-edge runway designator + distance so the gauge identifies the
+  // strip it's chasing. Matches the painted runway numbers + ATC callouts.
+  const courseRad = best.ri.ap.hdg + (best.sign > 0 ? 0 : Math.PI);
+  const designator = (typeof runwayDesignator === 'function')
+    ? runwayDesignator(courseRad)
+    : '—';
+  const distStr = (best.horiz >= 1000)
+    ? (best.horiz / 1000).toFixed(1) + 'km'
+    : Math.round(best.horiz) + 'm';
+  ctx.fillStyle = '#cfe';
+  ctx.font = 'bold 10px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(best.ri.ap.id + ' RWY ' + designator + '  ' + distStr, cx, cy + R * 0.72);
 }
 function drawCockpitRpm(speedKmh, rpmOverride){
   if (!cpRpmCtx) return;
@@ -28813,6 +28997,7 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   drawCockpitAsi(asiV);
   drawCockpitAi(aiQ);
   drawCockpitAlt(altV);
+  drawCockpitIls(hdgDeg || 0);
   drawCockpitRpm(rpmSpeed, rpmOverride);
   drawCockpitCht(chtV);
   drawCockpitOil(oilV);
