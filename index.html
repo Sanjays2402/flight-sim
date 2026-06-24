@@ -9017,6 +9017,149 @@ function clearWingtipCondensation(){
       wtcEmitAccum[side] = 0;
     }
   } catch (_e) { /* pool not initialized yet — nothing to clear */ }
+  // Cone trails share the same emission window — flush them too so a hot
+  // reset doesn't leave a stretched cone frozen mid-air for a frame.
+  try { clearWingtipCondCones(); } catch (_e) { /* not initialized yet */ }
+}
+
+// ====== WINGTIP CONDENSATION CONES ======
+// Short translucent white cone trails off both wingtips during high-G turns
+// at low altitude over water or in rain. Trail length scales with AoA + G
+// load; fades over ~0.8 s. Two ConeGeometry meshes (one per wingtip) hung
+// directly on the plane group so they inherit yaw/pitch/roll for free; we
+// just lerp scale.z (length) and material.opacity each frame against the
+// live trigger strength. Reuses the existing wingtip-vortex spawn point
+// (VORTEX_TIP_OFFSET / _Y / _Z) so the cones sit exactly where the wisps
+// already trail from. Pure scenery polish — no physics side-effect — and
+// the existing high-AoA wisp pool keeps doing its thing alongside.
+const WCC_LIFE_S          = 0.8;     // visible fade window (matches spec)
+const WCC_FADE_PER_S      = 1 / WCC_LIFE_S; // 1/0.8 ≈ 1.25, lerp speed
+const WCC_AOA_MIN_DEG     = 8;       // arm point — softer than WTC wisps
+const WCC_AOA_FULL_DEG    = 16;      // full-strength AoA
+const WCC_G_MIN           = 2.5;     // arm point — real cones need real G
+const WCC_G_FULL          = 5.5;     // full-strength G load
+const WCC_AGL_MAX_M       = 600;     // low-altitude gate (spec)
+const WCC_AGL_FADE_M      = 200;     // taper across the upper 200 m
+const WCC_CONE_LEN_MIN    = 1.6;     // base length at trigger threshold (m)
+const WCC_CONE_LEN_MAX    = 4.8;     // peak length at full G + AoA (m)
+const WCC_CONE_RADIUS     = 0.30;    // half-width at the wingtip (m)
+const WCC_PEAK_OPACITY    = 0.55;    // peak alpha — translucent, not solid
+const WCC_BASE_OFFSET_Z   = 0.45;    // start the cone a touch aft of the tip
+const wccCones = [];
+(function buildWingtipCondCones(){
+  // Build a unit-length cone whose APEX points forward (+Z in local frame)
+  // and whose BASE sits at the wingtip. ConeGeometry defaults aim along +Y
+  // with the apex at +y; we rotate it so the apex points along +Z (forward),
+  // and we offset the geometry so the base mouth lands at the wingtip and
+  // the cone extends backward (-Z) when we set scale.z to a positive value
+  // and rotate it 180° around X via the parent's orientation. Cleaner: build
+  // it so the base sits at z=0 and the tip extends to z=+1; we then negate
+  // scale.z to flip the cone trailing aft of the wingtip. Hung directly on
+  // the plane group so it inherits all attitude changes for free.
+  for (let side = 0; side < 2; side++){
+    const geo = new THREE.ConeGeometry(WCC_CONE_RADIUS, 1.0, 16, 1, true);
+    // Rotate so the cone points along +Z and translate so the base sits at z=0.
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, 0, 0.5);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(
+      side === 0 ? -VORTEX_TIP_OFFSET : VORTEX_TIP_OFFSET,
+      VORTEX_TIP_Y,
+      VORTEX_TIP_Z - WCC_BASE_OFFSET_Z
+    );
+    // Negative scale.z so the cone extends BACKWARD from the wingtip
+    // (trailing aft, like real condensation). Length is set per frame.
+    mesh.scale.set(1, 1, -WCC_CONE_LEN_MIN);
+    mesh.visible = false;
+    mesh.renderOrder = 4; // just under the vortex ribbon (renderOrder 5)
+    mesh.frustumCulled = false;
+    try { plane.add(mesh); } catch (_e) { /* plane not built yet — TDZ */ }
+    wccCones.push({ mesh, mat, opacity: 0, length: WCC_CONE_LEN_MIN });
+  }
+})();
+function wccOverWater(){
+  // Same convention as the bug-splat spawner — terrain reads below 2 m means
+  // we're over a sea/lake tile, or we're inside the ocean band on the west
+  // edge of the map. Self-guards on the optional helpers.
+  try {
+    const px = plane.position.x, pz = plane.position.z;
+    let groundY = 0;
+    if (typeof terrainHeight === 'function') groundY = terrainHeight(px, pz) || 0;
+    if (groundY < 2) return true;
+    if (typeof OCEAN_X === 'number' && px < OCEAN_X + 600) return true;
+  } catch (_e) {}
+  return false;
+}
+function updateWingtipCondCones(dt, aoaDeg, gLoad){
+  if (!wccCones.length) return;
+  const live = !state.photoMode && !state.paused && !state.replayActive
+               && !state.introOpen && !state.crashed && !state.onGround;
+  let target = 0;
+  if (live){
+    // Humid context: rain on, OR over water. Dawn/dusk window is the WTC
+    // wisp's job — cones are the rarer, more dramatic effect that needs
+    // a real moisture source.
+    const humid = !!settings.rain || wccOverWater();
+    if (humid){
+      const absAoa = Math.abs(aoaDeg || 0);
+      const absG   = Math.abs(gLoad || 1.0);
+      const aoaT = Math.max(0, Math.min(1,
+        (absAoa - WCC_AOA_MIN_DEG) / (WCC_AOA_FULL_DEG - WCC_AOA_MIN_DEG)));
+      const gT   = Math.max(0, Math.min(1,
+        (absG - WCC_G_MIN) / (WCC_G_FULL - WCC_G_MIN)));
+      // Both must contribute — a high-AoA stall hover without G shouldn't
+      // pop a cone, and a sustained 4G level turn at 1° AoA shouldn't either.
+      target = aoaT * gT;
+      // Low-altitude gate (spec). Full strength below WCC_AGL_MAX_M, taper
+      // out across the upper WCC_AGL_FADE_M so the effect doesn't pop off
+      // at a hard altitude line.
+      let agl = 0;
+      try {
+        const px = plane.position.x, pz = plane.position.z;
+        const gy = (typeof terrainHeight === 'function') ? (terrainHeight(px, pz) || 0) : 0;
+        agl = Math.max(0, plane.position.y - gy);
+      } catch (_e) { agl = plane.position.y; }
+      if (agl > WCC_AGL_MAX_M){
+        const over = agl - WCC_AGL_MAX_M;
+        const k = Math.max(0, 1 - over / WCC_AGL_FADE_M);
+        target *= k;
+      }
+    }
+  }
+  // Lerp opacity toward the target so cones fade in and out smoothly over
+  // ~WCC_LIFE_S; this is what gives the "fades over ~0.8s" feel the spec
+  // asks for without us having to spawn-and-age individual sprite puffs.
+  const lerpK = Math.min(1, dt * WCC_FADE_PER_S);
+  const lenTarget = WCC_CONE_LEN_MIN + (WCC_CONE_LEN_MAX - WCC_CONE_LEN_MIN) * target;
+  const opTarget  = WCC_PEAK_OPACITY * target;
+  for (let side = 0; side < 2; side++){
+    const c = wccCones[side];
+    c.opacity = c.opacity + (opTarget - c.opacity) * lerpK;
+    c.length  = c.length  + (lenTarget - c.length) * lerpK;
+    c.mat.opacity = c.opacity;
+    c.mesh.scale.z = -c.length; // negative — trails aft
+    c.mesh.visible = c.opacity > 0.01;
+  }
+}
+function clearWingtipCondCones(){
+  // Snap both cones invisible immediately — used on resetPlane() so a hot
+  // restart doesn't inherit a stretched cone from the prior sortie.
+  if (!wccCones || !wccCones.length) return;
+  for (const c of wccCones){
+    c.opacity = 0;
+    c.length = WCC_CONE_LEN_MIN;
+    c.mat.opacity = 0;
+    c.mesh.scale.z = -WCC_CONE_LEN_MIN;
+    c.mesh.visible = false;
+  }
 }
 
 // ====== AI WAKE TURBULENCE ======
@@ -22308,6 +22451,10 @@ function step(dt){
   // Pure visual flavor; the function self-gates on photo/pause/replay/intro/
   // crashed/onGround so frozen frames stay still and saved PNGs stay clean.
   updateWingtipCondensation(dt, THREE.MathUtils.radToDeg(aoa));
+  // Wingtip condensation cones — dramatic high-G + high-AoA cone trails
+  // in humid air (rain or over water) at low altitude. Self-gates against
+  // photo/pause/replay/intro/crash/onGround so frozen frames stay clean.
+  updateWingtipCondCones(dt, THREE.MathUtils.radToDeg(aoa), state.gLoad || 1.0);
 
   // High-altitude contrails — gated on altitude + throttle. Damage model TBD;
   // when it lands it can drive a separate strength boost into this call.
