@@ -11516,7 +11516,7 @@ const state = {
   // playAt cutoff passes so the rumble lands seconds after the visible
   // flash on far cells. Everything resets on resetPlane() so a mission
   // restart re-rolls the storm timeline cleanly.
-  lightning: { nextStrikeMs: 0, flashT: 0, flashDur: 0, peakAlpha: 0, pendingThunder: [] },
+  lightning: { nextStrikeMs: 0, flashT: 0, flashDur: 0, peakAlpha: 0, pendingThunder: [], atcCalledThisFlight: false },
   // Performance.now() cutoff for the radio-static SQUELCH annotation on the
   // ATIS strip. Set the moment a strike fires (gated by settings.lightningStatic)
   // and read each frame by updateAtisStrip() to flip the .sub text to
@@ -14598,6 +14598,7 @@ function resetPlane(){
     state.lightning.flashDur = 0;
     state.lightning.peakAlpha = 0;
     state.lightning.pendingThunder.length = 0;
+    state.lightning.atcCalledThisFlight = false;
   }
   // Drop any pending radio-static SQUELCH overlay so a hot reset doesn't
   // carry a half-faded annotation into the fresh ATIS strip.
@@ -30135,6 +30136,15 @@ function tickLightning(dt){
   if (settings.lightningStatic !== false){
     try { playLightningStaticCrackle(dist); } catch(e){ /* never let audio kill the storm tick */ }
     state.lightningStaticUntil = now + 600;
+  }
+  // One-shot PILOT ATC line the first time the player sees a strike in a
+  // given sortie. Airborne-only so a parked-on-the-apron storm doesn't put
+  // a "holding present heading" call on the strip while we're chocked.
+  // resetPlane() wipes the latch alongside the rest of the lightning state
+  // so each fresh flight re-arms the call cleanly.
+  if (!L.atcCalledThisFlight && !state.onGround && typeof pushATC === 'function'){
+    try { pushATC('Lightning observed, holding present heading.', { tag:'PILOT' }); } catch(e){ /* never let ATC kill the storm tick */ }
+    L.atcCalledThisFlight = true;
   }
   // Re-roll the next strike window.
   L.nextStrikeMs = now + LIGHTNING_MIN_GAP_MS + Math.random() * (LIGHTNING_MAX_GAP_MS - LIGHTNING_MIN_GAP_MS);
