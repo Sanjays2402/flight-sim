@@ -215,6 +215,27 @@
   #kneeboard canvas.plan { display:block; width:100%; height:120px; margin-top:4px; background:#f6efdb; border:1px solid #b3a577; border-radius:3px; }
   #kneeboard .foot { margin-top:8px; padding-top:5px; border-top:1px solid #8a7d56; color:#5a4e2e; font-size:9px; letter-spacing:1px; text-align:center; }
   #kneeboard .nodata { padding:18px 0 22px; text-align:center; color:#7a6b3f; font-size:11px; letter-spacing:1px; }
+  /* Auto-approach plate (#approachPlate) — small bottom-right paper-plate
+     card. Auto-shows on approach: cockpit cam, within 8 km of any runway,
+     aligned within ±30° of the runway course, below 1500 m AGL. Mirrors
+     the kneeboard's ivory/sepia chrome so the two read as printed from
+     the same shop, but lives bottom-right under the cockpit panel so it
+     doesn't fight the existing right-side meatball/ILS column. Pointer-
+     events off (HUD only), hidden by default — drawApproachPlate()
+     flips display:block when all gates pass. Persisted as
+     settings.approachPlate (default ON), toggleable from settings. */
+  #approachPlate { position:fixed; right:12px; bottom:12px; width:208px; padding:8px 10px 7px; font-size:10px; color:#1c2733; background:#f1e8d3; border:1px solid #c2b48a; border-radius:5px; box-shadow:0 4px 16px rgba(0,0,0,.45), inset 0 0 0 2px #efe2c2; display:none; z-index:8; pointer-events:none; font-family:ui-monospace, 'SF Mono', Menlo, Consolas, monospace; line-height:1.35; }
+  #approachPlate.show { display:block; }
+  #approachPlate .hdr { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:3px; margin-bottom:4px; border-bottom:1px solid #8a7d56; }
+  #approachPlate .hdr .id  { color:#1c2733; font-weight:800; font-size:12px; letter-spacing:1.5px; }
+  #approachPlate .hdr .ttl { color:#5a4e2e; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; }
+  #approachPlate .row { display:flex; justify-content:space-between; gap:6px; padding:1px 0; font-size:10px; }
+  #approachPlate .row .lbl { color:#5a4e2e; }
+  #approachPlate .row .val { color:#1c2733; font-weight:700; }
+  #approachPlate canvas.plan { display:block; width:100%; height:78px; margin:4px 0 3px; background:#f6efdb; border:1px solid #b3a577; border-radius:3px; }
+  #approachPlate .miss { margin-top:4px; padding-top:4px; border-top:1px dashed #b3a577; color:#5a4e2e; font-size:9px; letter-spacing:0.5px; line-height:1.35; }
+  #approachPlate .miss .l1 { color:#1c2733; font-weight:700; letter-spacing:1px; }
+  #approachPlate .miss .l2 { color:#5a4e2e; }
   /* ATIS broadcast strip (#atisStrip) — Shift+A. Left-side ivory-paper
      card mirroring the #kneeboard chrome so the briefing reads like the
      same printed shop. Pure HUD overlay: pointer-events off, hidden in
@@ -979,6 +1000,25 @@
   <div class="foot"><kbd>Shift</kbd>+<kbd>N</kbd> close · <kbd>Esc</kbd> dismiss</div>
   <div class="nodata" id="kbNoData" style="display:none">No airport in range.<br>Fly within 12 km of a field.</div>
 </div>
+<!-- Auto-approach plate (#approachPlate). Auto-shows on a stabilized
+     final-approach pose (cockpit cam, <8 km from any runway threshold,
+     within ±30° of the runway course, below 1500m AGL). Mirrors a
+     real Jeppesen-style chart with runway designator, final approach
+     course, decision altitude (200ft AGL ILS standard), a two-line
+     missed approach summary, and a tiny top-down view with runway
+     symbol + plane dot. Updated each frame by drawApproachPlate();
+     hidden by default, persisted as settings.approachPlate. -->
+<div id="approachPlate">
+  <div class="hdr"><span class="id" id="apPlateId">ILS RWY —</span><span class="ttl" id="apPlateAp">—</span></div>
+  <div class="row"><span class="lbl">CRS</span><span class="val" id="apPlateCrs">—</span></div>
+  <div class="row"><span class="lbl">DA</span><span class="val" id="apPlateDa">—</span></div>
+  <div class="row"><span class="lbl">RANGE</span><span class="val" id="apPlateRng">—</span></div>
+  <canvas class="plan" id="apPlateCv" width="384" height="152"></canvas>
+  <div class="miss">
+    <div class="l1" id="apPlateMiss1">MISSED APPROACH</div>
+    <div class="l2" id="apPlateMiss2">Climb to 600m, direct field, hold.</div>
+  </div>
+</div>
 <div id="atisStrip">
   <div class="hdr"><span class="id" id="atisStripId">—</span><span class="nm" id="atisStripInfo">info —</span></div>
   <div class="sub" id="atisStripSub">automatic terminal information</div>
@@ -1126,6 +1166,11 @@
       <div class="top"><span class="name">CO-PILOT</span><span class="val" id="setCopV">ON</span></div>
       <button id="setCopBtn" type="button" style="width:100%">TOGGLE CO-PILOT</button>
       <div class="hint">Soft callouts on downwind, base, and final when you're flying the standard left-hand pattern at a nearby field. OFF mutes the chirp.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">APPROACH PLATE</span><span class="val" id="setApPlateV">ON</span></div>
+      <button id="setApPlateBtn" type="button" style="width:100%">TOGGLE APPROACH PLATE</button>
+      <div class="hint">Paper-style approach plate in the bottom-right of the cockpit cam. Auto-shows within 8 km of a runway, lined up &plusmn;30&deg;, below 1500 m AGL. Pairs with the ILS needles and meatball.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">SMOKE TRAIL COLOR</span><span class="val" id="setTrailV">LIVERY</span></div>
@@ -1496,7 +1541,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false, approachPlate: true };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1610,6 +1655,7 @@ try {
     if (typeof saved.speedUnit === 'string' && SPEED_UNIT_IDS.indexOf(saved.speedUnit) !== -1) settings.speedUnit = saved.speedUnit;
     if (typeof saved.fuelSelector === 'string' && ['BOTH','LEFT','RIGHT'].indexOf(saved.fuelSelector) !== -1) settings.fuelSelector = saved.fuelSelector;
     if (typeof saved.cockpitClockZulu === 'boolean') settings.cockpitClockZulu = saved.cockpitClockZulu;
+    if (typeof saved.approachPlate === 'boolean') settings.approachPlate = saved.approachPlate;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -22459,6 +22505,7 @@ function step(dt){
   drawVSI(vs);
   drawGlideslope(hdg);
   drawILSNeedles(hdg);
+  drawApproachPlate(hdg);
   drawSlopeDevTape(hdg);
   drawCrabIndicator(hdg);
   drawXwTakeoffHint();
@@ -23165,6 +23212,182 @@ function drawILSNeedles(hdgDeg){
   ilsCtx.fillText('L', 4, H - 4);
   ilsCtx.textAlign = 'right';
   ilsCtx.fillText('R', W - 4, H - 4);
+}
+
+// ====== Practice ILS approach plate overlay (#approachPlate) ======
+// Auto-shown paper-style plate that pretends to be a real Jeppesen chart
+// when the player is on a stabilised approach pose. Pairs with the existing
+// meatball / ILS needles / PAPI so the cockpit finally has a printed brief
+// to glance at instead of pure HUD overlay. Activation gates (all must pass):
+//   1. settings.approachPlate is true (default ON, toggleable from settings).
+//   2. state.cam === 1 (cockpit cam only — it's a paper card on the panel).
+//   3. Not photo / pause / replay / intro / crashed.
+//   4. Within 8 km of any runway threshold.
+//   5. Aligned within ±30° of the runway heading.
+//   6. Below 1500 m AGL (above-ground altitude vs the airport elev).
+// Picks the best-scoring candidate the same way drawILSNeedles does so the
+// plate, meatball, and needles all agree on the runway being flown.
+const APP_PLATE_MAX_DIST = 8000;    // metres from threshold
+const APP_PLATE_HDG_CONE = 30;      // degrees of heading off runway course
+const APP_PLATE_MAX_AGL  = 1500;    // metres above field elevation
+const APP_PLATE_DA_AGL   = 60;      // decision altitude, m AGL (~200 ft ILS standard)
+const appPlateEl = document.getElementById('approachPlate');
+const appPlateCv = document.getElementById('apPlateCv');
+const appPlateCtx = appPlateCv ? appPlateCv.getContext('2d') : null;
+function _appPlateHide(){
+  if (appPlateEl && appPlateEl.style.display !== 'none') appPlateEl.style.display = 'none';
+}
+function drawApproachPlate(hdgDeg){
+  if (!appPlateEl || !appPlateCv || !appPlateCtx) return;
+  // Setting + state gates first — cheapest checks so we bail before any
+  // per-runway math runs while we're paused / in photo / out of cockpit.
+  if (!settings.approachPlate){ _appPlateHide(); return; }
+  if (state.cam !== 1){ _appPlateHide(); return; }
+  if (state.introOpen || state.photoMode || state.paused
+      || state.replayActive || state.crashed){ _appPlateHide(); return; }
+  // Pick the best runway end. Reuses _ilsCandidate so the plate agrees with
+  // the cross-pointer needles. Scoring matches drawILSNeedles' auto-pick.
+  let best = null;
+  let bestScore = 1e9;
+  for (const ri of runwayInfos){
+    for (const sign of [+1, -1]){
+      const c = _ilsCandidate(ri, hdgDeg, sign);
+      if (!c) continue;
+      if (c.horiz > APP_PLATE_MAX_DIST) continue;
+      if (Math.abs(c.dh) > APP_PLATE_HDG_CONE) continue;
+      const agl = plane.position.y - c.ri.ap.elev;
+      if (agl > APP_PLATE_MAX_AGL) continue;
+      const score = c.horiz + Math.abs(c.lx) * 1.0 + Math.abs(c.dh) * 30;
+      if (score < bestScore){
+        bestScore = score;
+        best = c;
+      }
+    }
+  }
+  if (!best){ _appPlateHide(); return; }
+  if (appPlateEl.style.display !== 'block') appPlateEl.style.display = 'block';
+  // Header: runway designator + airport id. The designator is rebuilt from
+  // the chosen end so it matches the painted numbers on the runway the
+  // pilot is actually lined up with (e.g. "ILS RWY 27" vs "ILS RWY 09").
+  const courseRad = best.ri.ap.hdg + (best.sign > 0 ? 0 : Math.PI);
+  const designator = (typeof runwayDesignator === 'function')
+    ? runwayDesignator(courseRad)
+    : '—';
+  const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setT('apPlateId', 'ILS RWY ' + designator);
+  setT('apPlateAp', best.ri.ap.id);
+  setT('apPlateCrs', String(Math.round(best.rwyHdg)).padStart(3, '0') + '°');
+  const daMsl = Math.round(best.ri.ap.elev + APP_PLATE_DA_AGL);
+  setT('apPlateDa', daMsl + ' m MSL (' + APP_PLATE_DA_AGL + ' AGL)');
+  setT('apPlateRng', (best.horiz >= 1000)
+    ? (best.horiz / 1000).toFixed(1) + ' km'
+    : Math.round(best.horiz) + ' m');
+  // Missed-approach line 2 names the field so the briefing reads specific.
+  setT('apPlateMiss1', 'MISSED APPROACH');
+  setT('apPlateMiss2', 'Climb 600m, direct ' + best.ri.ap.id + ', hold.');
+  // Plan view: paper-sepia top-down with the runway pointing UP (the
+  // pilot's landing direction reads as "north" on the plate), a 1 km
+  // grid for scale, the active threshold dot, a plane symbol, and a
+  // dashed final approach course down the page so the pilot can eyeball
+  // their offset from centerline at a glance.
+  const ctx = appPlateCtx;
+  const W = appPlateCv.width, H = appPlateCv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f6efdb';
+  ctx.fillRect(0, 0, W, H);
+  // World (x,z) -> canvas (px). Rotate so the chosen landing direction
+  // reads as UP (-y on canvas); +x on canvas = right of centerline on
+  // final, matching the pilot's eye-view of the plate.
+  const halfWorldM = 4500;             // half-width of view in metres (± ~APP_PLATE_MAX_DIST/2)
+  const sx = (W / 2) / halfWorldM;     // metres -> canvas px
+  const cx = W / 2, cy = H * 0.62;     // threshold a touch below center so the inbound leg has room
+  const ang = courseRad;
+  const cs = Math.cos(ang), sn = Math.sin(ang);
+  // Plate world frame is anchored at the touchdown aim point so the plane
+  // dot reads accurately as it crosses the threshold.
+  function w2c(wx, wz){
+    const dx = wx - best.ri.aimX;
+    const dz = wz - best.ri.aimZ;
+    const lx = dx * cs - dz * sn;
+    const lz = -(dx * sn + dz * cs);
+    return { x: cx + lx * sx, y: cy + lz * sx };
+  }
+  // Faint 1 km grid.
+  ctx.strokeStyle = 'rgba(90,78,46,0.18)';
+  ctx.lineWidth = 1;
+  for (let k = -5; k <= 5; k++){
+    if (k === 0) continue;
+    const off = k * 1000 * sx;
+    ctx.beginPath(); ctx.moveTo(cx + off, 0);    ctx.lineTo(cx + off, H);    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,        cy + off); ctx.lineTo(W,         cy + off); ctx.stroke();
+  }
+  // Dashed final approach centerline (from threshold outward).
+  ctx.save();
+  ctx.strokeStyle = '#5a4e2e';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx, H);
+  ctx.stroke();
+  ctx.restore();
+  // Runway: dark rectangle pointing UP from threshold (north on plate).
+  const halfLenPx = Math.max(6, (best.ri.ap.len / 2) * sx);
+  const halfWPx   = Math.max(2, (best.ri.ap.w   / 2) * sx);
+  ctx.fillStyle = '#1c2733';
+  ctx.fillRect(cx - halfWPx, cy - halfLenPx * 2, halfWPx * 2, halfLenPx * 2);
+  // Threshold dot.
+  ctx.fillStyle = '#1c2733';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  // Plane position dot + nose tick showing actual heading on the plate.
+  const pp = w2c(plane.position.x, plane.position.z);
+  if (pp.x > -20 && pp.x < W + 20 && pp.y > -20 && pp.y < H + 20){
+    // dh = plane heading minus runway course. Convert to plate-local angle
+    // (UP = 0 on plate) so the nose-tick rotates with the actual heading.
+    const dhRad = (best.dh) * Math.PI / 180;
+    const noseLen = 9;
+    ctx.save();
+    ctx.translate(pp.x, pp.y);
+    ctx.rotate(dhRad);
+    ctx.fillStyle = '#c43b3b';
+    ctx.beginPath();
+    ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#c43b3b';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -noseLen);
+    ctx.stroke();
+    ctx.restore();
+  }
+  // North tick: small "N" pointing toward geographic north on the plate.
+  // North on the plate is the runway course direction rotated by -courseRad,
+  // so the N arrow sits in the upper-right corner pointing toward true north.
+  ctx.save();
+  const nx = W - 14, ny = 12;
+  ctx.translate(nx, ny);
+  ctx.rotate(-ang);
+  ctx.strokeStyle = '#5a4e2e';
+  ctx.fillStyle   = '#5a4e2e';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, 6);
+  ctx.lineTo(0, -6);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-3, -3);
+  ctx.lineTo(0, -6);
+  ctx.lineTo(3, -3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = 'bold 8px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('N', 0, 11);
+  ctx.restore();
 }
 
 // ====== Approach-slope deviation tape ======
@@ -29081,7 +29304,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
@@ -29828,6 +30051,8 @@ addEventListener('keydown', e => {
   const coldV = document.getElementById('setColdV');
   const copBtn = document.getElementById('setCopBtn');
   const copV = document.getElementById('setCopV');
+  const apPlateBtn = document.getElementById('setApPlateBtn');
+  const apPlateV   = document.getElementById('setApPlateV');
   const twinBtn = document.getElementById('setTwinBtn');
   const twinV = document.getElementById('setTwinV');
   const cowlBtn = document.getElementById('setCowlBtn');
@@ -29973,6 +30198,11 @@ addEventListener('keydown', e => {
       copBtn.textContent = settings.copilot ? 'CO-PILOT: ON' : 'CO-PILOT: OFF';
       copBtn.classList.toggle('primary', settings.copilot);
     }
+    if (apPlateV) apPlateV.textContent = settings.approachPlate ? 'ON' : 'OFF';
+    if (apPlateBtn){
+      apPlateBtn.textContent = settings.approachPlate ? 'APPROACH PLATE: ON' : 'APPROACH PLATE: OFF';
+      apPlateBtn.classList.toggle('primary', settings.approachPlate);
+    }
     if (twinV) twinV.textContent = settings.twinEngine ? 'TWIN' : 'SINGLE';
     if (twinBtn){
       twinBtn.textContent = settings.twinEngine ? 'TWIN ENGINE: ON' : 'TWIN ENGINE: OFF';
@@ -30108,6 +30338,22 @@ addEventListener('keydown', e => {
         state.coPilotArmed.abeam = true;
         state.coPilotArmed.base = true;
         state.coPilotArmed.final = true;
+      }
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (apPlateBtn){
+    apPlateBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.approachPlate = !settings.approachPlate;
+      // Flipping OFF hides the plate immediately so the player isn't stuck
+      // staring at a printed card after they just turned the option off.
+      // The per-frame drawApproachPlate() respects the same flag, so this
+      // is belt-and-braces — keeps the panel from flashing for one frame.
+      if (!settings.approachPlate){
+        const _p = document.getElementById('approachPlate');
+        if (_p) _p.style.display = 'none';
       }
       syncInputs();
       saveSettings();
