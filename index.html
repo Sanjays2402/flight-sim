@@ -1171,6 +1171,7 @@
   <div class="gauge gauge-wide" id="cpEngGauge"><canvas id="cpEng" width="440" height="220" title="Engine monitor — 4 EGT bars + CHT · Shift+G toggle"></canvas><div class="glbl">ENGINE MONITOR (EGT)</div></div>
   <div class="gauge"><canvas id="cpMag" width="220" height="220"></canvas><div class="glbl">MAG COMPASS</div></div>
   <div class="gauge"><canvas id="cpSkid" width="220" height="220" title="Inclinometer — step on the ball for coordinated flight"></canvas><div class="glbl">SLIP / SKID</div></div>
+  <div class="gauge"><canvas id="cpAoa" width="220" height="220" title="Angle of attack — green = normal · amber = approach · red = stall warning"></canvas><div class="glbl">AOA</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
   <div class="gauge"><canvas id="cpFuel" width="220" height="220" title="Fuel quantity — left wing (green) + right wing (cyan) tanks · Shift+Y cycles fuel selector BOTH / LEFT / RIGHT / OFF (OFF = fire-drill cutoff)"></canvas><div class="glbl">FUEL QTY L/R</div></div>
@@ -23143,6 +23144,11 @@ function step(dt){
   if (hdg < 0) hdg += 360;
   const vs = state.vel.y;
   const aoaDeg = THREE.MathUtils.radToDeg(aoa);
+  // Publish AoA in degrees onto state so the cockpit-panel AOA gauge
+  // (cpAoa) and any other read-only consumer can pick it up without
+  // re-deriving the radians → degrees conversion. Pure scalar publish —
+  // physics path unchanged.
+  state.aoaDeg = aoaDeg;
   const todH = Math.floor(state.todHours);
   const todM = Math.floor((state.todHours - todH) * 60);
   $('#tod').textContent = String(todH).padStart(2,'0') + ':' + String(todM).padStart(2,'0');
@@ -28214,6 +28220,7 @@ const cpChtCv = document.getElementById('cpCht');
 const cpOilCv = document.getElementById('cpOil');
 const cpMagCv = document.getElementById('cpMag');
 const cpSkidCv = document.getElementById('cpSkid');
+const cpAoaCv  = document.getElementById('cpAoa');
 const cpBrkCv = document.getElementById('cpBrk');
 const cpFfCv  = document.getElementById('cpFf');
 const cpFuelCv = document.getElementById('cpFuel');
@@ -28238,6 +28245,7 @@ const cpChtCtx = cpChtCv && cpChtCv.getContext('2d');
 const cpOilCtx = cpOilCv && cpOilCv.getContext('2d');
 const cpMagCtx = cpMagCv && cpMagCv.getContext('2d');
 const cpSkidCtx = cpSkidCv && cpSkidCv.getContext('2d');
+const cpAoaCtx  = cpAoaCv  && cpAoaCv.getContext('2d');
 const cpBrkCtx = cpBrkCv && cpBrkCv.getContext('2d');
 const cpFfCtx  = cpFfCv  && cpFfCv.getContext('2d');
 const cpFuelCtx = cpFuelCv && cpFuelCv.getContext('2d');
@@ -29421,6 +29429,135 @@ function drawCockpitSkid(slipNorm){
     ctx.fillText(dev > 0 ? 'R RUDDER' : 'L RUDDER', cx, cy + R * 0.78);
   }
 }
+function drawCockpitAoa(aoaDegOverride){
+  // Vertical color-banded angle-of-attack ladder — the single instrument real
+  // STOL / acrobatic pilots fly approach by. Reads the live AoA published
+  // onto state.aoaDeg by the HUD step (a small scalar publish from where
+  // the stall warning already converts the radians AoA into degrees), so
+  // the gauge tracks the same number the existing stall buffet / wingtip
+  // vortex / wing-condensation-cone systems already act on — a leading
+  // indicator the pilot can read to predict the stall instead of feeling
+  // it. Pure derived gauge: no new physics, no new audio, no new
+  // keybinding. Hidden in photo mode through the standard #cockpitPanel
+  // gate that already covers every sibling gauge.
+  if (!cpAoaCtx) return;
+  const W = cpAoaCv.width, H = cpAoaCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
+  const ctx = cpAoaCtx;
+  _cpBezel(ctx, W, H);
+  // Scale: 0° at the bottom → MAX_AOA (22°) at the top. The roadmap calls
+  // for green 0–8° (normal flight), amber 8–13° (approach / slow-flight)
+  // and red 13°+ (stall warning band) with a fat redline at the published
+  // stall AoA (STALL_AOA = 16°). Constants live next to MAX_AOA already.
+  const AOA_TOP    = 22; // top of the ladder in degrees
+  const AOA_GREEN  = 8;  // green / amber boundary
+  const AOA_AMBER  = 13; // amber / red boundary
+  const AOA_REDLINE = 16; // fat redline tick at the published stall AoA
+  // Ladder geometry: a tall vertical bar centered on the gauge face, with
+  // a little headroom top and bottom so the band paint doesn't run into
+  // the bezel chrome.
+  const ladderX = cx - 8;
+  const ladderW = 26;
+  const padY    = R * 0.30;
+  const yTop    = cy - R + padY;
+  const yBot    = cy + R - padY;
+  const ladderH = yBot - yTop;
+  function aoaToY(a){
+    const t = Math.max(0, Math.min(1, a / AOA_TOP));
+    return yBot - t * ladderH;
+  }
+  // Background frame for the ladder (slightly lighter than the gauge
+  // face so the colored bands read against neutral grey).
+  ctx.fillStyle = '#0a0e14';
+  ctx.fillRect(ladderX - 2, yTop - 2, ladderW + 4, ladderH + 4);
+  // Color bands.
+  // Green band: 0 → AOA_GREEN.
+  ctx.fillStyle = 'rgba(126, 231, 135, 0.85)';
+  ctx.fillRect(ladderX, aoaToY(AOA_GREEN), ladderW, yBot - aoaToY(AOA_GREEN));
+  // Amber band: AOA_GREEN → AOA_AMBER.
+  ctx.fillStyle = 'rgba(255, 176, 32, 0.85)';
+  ctx.fillRect(ladderX, aoaToY(AOA_AMBER), ladderW, aoaToY(AOA_GREEN) - aoaToY(AOA_AMBER));
+  // Red band: AOA_AMBER → AOA_TOP.
+  ctx.fillStyle = 'rgba(255, 82, 82, 0.85)';
+  ctx.fillRect(ladderX, yTop, ladderW, aoaToY(AOA_AMBER) - yTop);
+  // Ladder outline.
+  ctx.strokeStyle = '#1e3548';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(ladderX, yTop, ladderW, ladderH);
+  // Major tick marks + degree labels every 4° along the right side of the
+  // ladder so the pilot can read AoA off the scale, plus a small unit
+  // hint up top to match the °C / PSI / MAG labels on neighboring gauges.
+  ctx.fillStyle = '#dfe';
+  ctx.strokeStyle = '#dfe';
+  ctx.lineWidth = 1.5;
+  ctx.font = 'bold 12px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (let v = 0; v <= AOA_TOP; v += 4){
+    const ty = aoaToY(v);
+    ctx.beginPath();
+    ctx.moveTo(ladderX + ladderW, ty);
+    ctx.lineTo(ladderX + ladderW + 8, ty);
+    ctx.stroke();
+    ctx.fillText(String(v) + '°', ladderX + ladderW + 11, ty);
+  }
+  // Fat redline tick at the published stall AoA — wider + brighter than the
+  // regular ticks so it reads as the "don't cross" marker.
+  {
+    const ty = aoaToY(AOA_REDLINE);
+    ctx.strokeStyle = '#ff5252';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(ladderX - 8, ty);
+    ctx.lineTo(ladderX + ladderW + 8, ty);
+    ctx.stroke();
+  }
+  // "°" unit hint up top, matching the unit labels on neighboring gauges.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 11px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('°', cx, cy - R * 0.78);
+  // Live needle: a chunky amber arrow pinned to the left of the ladder
+  // pointing at the live AoA. Clamped to [-2, AOA_TOP] so a negative AoA
+  // (nose-down dive) parks the arrow just below the green band and a
+  // hard pull past the redline pins it at the top of the scale instead
+  // of running off the face of the gauge.
+  const live = (typeof aoaDegOverride === 'number')
+    ? aoaDegOverride
+    : (Math.abs(state.aoaDeg || 0));
+  const clamped = Math.max(-2, Math.min(AOA_TOP, live));
+  const arrowY  = aoaToY(clamped);
+  // Arrow color tracks band: green / amber / red so the needle reads at
+  // a glance even on a small panel.
+  const arrowColor = clamped >= AOA_AMBER
+    ? '#ff5252'
+    : (clamped >= AOA_GREEN ? '#ffb020' : '#7ee787');
+  ctx.fillStyle = arrowColor;
+  ctx.beginPath();
+  // Arrowhead points right (into the ladder) from the left edge of the bezel.
+  ctx.moveTo(ladderX - 4, arrowY);
+  ctx.lineTo(ladderX - 16, arrowY - 8);
+  ctx.lineTo(ladderX - 16, arrowY + 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  // Digital readout below the ladder. Color mirrors the arrow so the
+  // panel uses a consistent color language. Sign preserved so a nose-down
+  // dive reads as a negative number rather than an absolute value lie.
+  const liveSigned = (typeof aoaDegOverride === 'number') ? aoaDegOverride : (state.aoaDeg || 0);
+  ctx.fillStyle = arrowColor;
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(liveSigned.toFixed(1) + '°', cx, cy + R * 0.62);
+  // STALL legend below the readout when the live AoA is past the redline
+  // so the panel screams the same thing the HUD stall warning does.
+  if (Math.abs(liveSigned) >= AOA_REDLINE){
+    ctx.fillStyle = '#ff5252';
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText('STALL', cx, cy + R * 0.82);
+  }
+}
 function drawCockpitBrake(tempC){
   if (!cpBrkCtx) return;
   const W = cpBrkCv.width, H = cpBrkCv.height, cx = W/2, cy = H/2, R = W/2 - 4;
@@ -30504,6 +30641,25 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
     }
   }
   drawCockpitSkid(skidV);
+  // Angle-of-attack ladder: derived from state.aoaDeg (published each
+  // frame in the HUD step) so the gauge tracks the same number the
+  // stall warning / wingtip vortex / wing-condensation-cone systems
+  // already act on. Self-test override sweeps the live needle from
+  // MAX_AOA back to the live value during the avionics power-up so the
+  // ladder participates in the matched-set startup dance.
+  let aoaSweep;
+  if (state.selfTestT >= 0){
+    const tA = Math.max(0, Math.min(1, state.selfTestT / SELF_TEST_S));
+    const upPhaseA = (tA < 0.5) ? (tA / 0.5) : 1;
+    const settleA  = (tA < 0.5) ? 0 : ((tA - 0.5) / 0.5);
+    const SWEEP_AOA = 22; // top of the ladder
+    if (tA < 0.5){
+      aoaSweep = SWEEP_AOA * upPhaseA;
+    } else {
+      aoaSweep = SWEEP_AOA * (1 - settleA) + (state.aoaDeg || 0) * settleA;
+    }
+  }
+  drawCockpitAoa(aoaSweep);
   drawCockpitBrake(brkV);
   drawCockpitFuelFlow(ffOverride);
   // Twin-needle fuel quantity (LEFT / RIGHT wings) sits next to FUEL FLOW so
