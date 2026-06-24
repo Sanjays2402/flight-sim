@@ -290,6 +290,12 @@
   #preflight .row.ok .state { color:#7ee787; }
   #preflight .foot { margin-top:8px; padding-top:7px; border-top:1px solid #1e3548; color:#9bb; font-size:10px; letter-spacing:1px; }
   #preflight .foot .done { color:#7ee787; font-weight:700; }
+  /* Shift+K hold-to-auto-run progress bar. Sits below the foot line. Hidden
+     unless an auto-run is in progress or being charged via the hold. Width
+     animates over the ~3s the auto-runner takes to walk all six rows. */
+  #pfAutoBar { display:none; margin-top:6px; height:5px; border-radius:3px; background:rgba(255,209,102,.12); overflow:hidden; }
+  #pfAutoBar.show { display:block; }
+  #pfAutoBar > div { height:100%; width:0%; background:linear-gradient(90deg,#ffd166,#7ee787); transition:width .12s linear; box-shadow:0 0 8px rgba(255,209,102,.5); }
   #checklist .ttl { color:#ffd166; font-weight:700; letter-spacing:1px; font-size:10px; margin-bottom:4px; }
   #checklist .row { display:flex; align-items:center; gap:6px; padding:1px 0; font-family:ui-monospace, monospace; font-size:11px; line-height:1.35; }
   #checklist .row .box { display:inline-block; width:11px; text-align:center; color:#6aa; }
@@ -1082,7 +1088,8 @@
   <div class="row" id="pfTrim"><span class="box">☐</span><span class="lbl">TRIM</span><span class="state" id="pfTrimState">—</span></div>
   <div class="row" id="pfFlaps"><span class="box">☐</span><span class="lbl">FLAPS</span><span class="state" id="pfFlapsState">0</span></div>
   <div class="row" id="pfPitot"><span class="box">☐</span><span class="lbl">PITOT / MIXTURE</span><span class="state" id="pfPitotState">CHECK</span></div>
-  <div class="foot" id="pfFoot">0 / 6 complete · <kbd>Shift</kbd>+<kbd>K</kbd> to close</div>
+  <div class="foot" id="pfFoot">0 / 6 complete · <kbd>Shift</kbd>+<kbd>K</kbd> to close · hold for auto-run</div>
+  <div id="pfAutoBar"><div></div></div>
 </div>
 <canvas id="ai" width="140" height="140"></canvas>
 <div id="apinfo">Nearest field: <b id="apnear">—</b><br>Distance: <span id="apdist">—</span></div>
@@ -1100,7 +1107,7 @@
   <div class="light" id="p3"></div><div class="light" id="p4"></div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw (hold <kbd>Q</kbd> = quick-action menu) · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>I</kbd>/<kbd>K</kbd> pitch (<kbd>I</kbd> also cranks the starter when ignition is armed) · <kbd>Shift</kbd>+<kbd>I</kbd> hold = prime carb (cold engine) · <kbd>A</kbd>/<kbd>D</kbd> roll · <kbd>Q</kbd>/<kbd>E</kbd> yaw (hold <kbd>Q</kbd> = quick-action menu) · <kbd>G</kbd> gear · <kbd>Shift</kbd>+<kbd>G</kbd> engine monitor · <kbd>F</kbd> flaps · <kbd>\</kbd> canopy (<kbd>Shift</kbd>+<kbd>\</kbd> throttle friction lock) · <kbd>B</kbd> brakes (ground) / binoculars (ext cam) · <kbd>Shift</kbd>+<kbd>B</kbd> parking brake · <kbd>Z</kbd> reverse thrust (ground) · <kbd>C</kbd> camera · <kbd>V</kbd> quick-look (cockpit) · <kbd>Shift</kbd>+<kbd>V</kbd> ILS lock · <kbd>H</kbd> autopilot · <kbd>Shift</kbd>+<kbd>H</kbd> tailhook · <kbd>[</kbd>/<kbd>]</kbd> heading bug · <kbd>M</kbd> waypoint AP · <kbd>Shift</kbd>+click mini-map = chain route · <kbd>Shift</kbd>+<kbd>M</kbd> clear route / reset trip timer · <kbd>;</kbd>/<kbd>'</kbd> trim (Shift+<kbd>'</kbd> = fine nose-up) · <kbd>Alt</kbd>+<kbd>;</kbd>/<kbd>'</kbd> rudder trim · <kbd>Shift</kbd>+<kbd>,</kbd>/<kbd>Shift</kbd>+<kbd>.</kbd> baro · <kbd>X</kbd> kill engine · <kbd>Shift</kbd>+<kbd>X</kbd> extinguisher · <kbd>L</kbd> landing light · <kbd>N</kbd> wipers · <kbd>U</kbd> pitot heat · <kbd>Shift</kbd>+<kbd>;</kbd> cockpit night mode · <kbd>Shift</kbd>+<kbd>C</kbd> carb heat · <kbd>-</kbd>/<kbd>=</kbd> mixture lean/rich · <kbd>Shift</kbd>+<kbd>F</kbd> cowl flaps · <kbd>T</kbd> +1h · <kbd>Shift</kbd>+<kbd>T</kbd> test chimes (ground) / time keypad (air) · <kbd>Shift</kbd>+<kbd>A</kbd> ATIS · <kbd>Shift</kbd>+<kbd>E</kbd> emergency site · <kbd>J</kbd> jump airport · <kbd>K</kbd> squawk · <kbd>Shift</kbd>+<kbd>K</kbd> pre-flight checklist (ground) / hold = auto-run · <kbd>Shift</kbd>+<kbd>N</kbd> approach plate · <kbd>Y</kbd> ribbon · <kbd>Shift</kbd>+<kbd>Y</kbd> fuel selector · <kbd>~</kbd> airshow smoke · <kbd>Shift</kbd>+<kbd>R</kbd> magneto check (ground) · <kbd>O</kbd> wingman on call / catapult (carrier deck) · <kbd>P</kbd> photo · <kbd>Shift</kbd>+<kbd>P</kbd> bailout · <kbd>/</kbd> photo gallery · <kbd>,</kbd> settings · <kbd>Esc</kbd> pause · <kbd>R</kbd> reset
 </div>
 <div id="minimap"><canvas id="minimapCv" width="320" height="320"></canvas></div>
 <div id="wxradar"><canvas id="wxradarCv" width="192" height="320"></canvas></div>
@@ -12575,6 +12582,22 @@ const state = {
   // gets a fresh chime sequence on every panel session, but a row that
   // ticks/unticks/reticks during the same session pips only once.
   preflightPipMask: 0,
+  // Pre-flight auto-runner (Shift+K hold). preflightAutoT counts up from 0
+  // while the player is holding Shift+K; reaching PREFLIGHT_AUTO_HOLD_S
+  // kicks off the auto-runner which then walks every checklist row in turn,
+  // ticking each underlying state (canopy close, parking brake set, etc.)
+  // and chiming once per row. Releasing Shift+K mid-hold cancels cleanly,
+  // releasing mid-run aborts the runner (existing toggles untouched).
+  // -1 = idle (no hold in progress, no auto-run running).
+  preflightAutoT: -1,
+  // Index of the next checklist row the auto-runner will tick. 0..6 while a
+  // run is in progress; -1 when idle. Drained one item per
+  // PREFLIGHT_AUTO_STEP_S so the whole walk takes ~3 s.
+  preflightAutoIdx: -1,
+  // Per-step countdown inside the auto-runner. Resets to
+  // PREFLIGHT_AUTO_STEP_S after each row tick and counts down to 0 before
+  // the runner advances to the next row.
+  preflightAutoStepT: 0,
   // Engine start checklist card (#coldstartcard) bookkeeping. PipMask is
   // the same trick the preflight panel uses — 4-bit mask of which rows
   // have already chimed this ritual so a parking-brake-on/off/on dance
@@ -13288,6 +13311,24 @@ addEventListener('keyup', e=>{
     state.primeHoldT = -1;
     if (state.coldStart) showStatus('COLD START', 'Shift+I primes · I cranks', 'hard');
   }
+  // Shift+K release — split tap vs hold. preflightAutoT >= 0 means the hold
+  // was armed by the keydown; if it never crossed PREFLIGHT_AUTO_HOLD_S the
+  // user just tapped, so we fall through to the legacy togglePreflight().
+  // If it did cross, the auto-runner already kicked inside step() so the
+  // tap path is suppressed. Releasing mid-run aborts the runner via the
+  // same Shift/K-down check in step(), so this handler only owns the
+  // tap/hold-charging branch.
+  if ((e.code==='KeyK' || e.code==='ShiftLeft' || e.code==='ShiftRight')
+      && state.preflightAutoT >= 0){
+    const wasTap = state.preflightAutoT < PREFLIGHT_AUTO_HOLD_S
+        && state.preflightAutoIdx < 0;
+    // Clear the hold timer either way; the auto-runner (if it kicked) owns
+    // its own preflightAutoIdx lifecycle and the next Shift+K can re-arm.
+    state.preflightAutoT = -1;
+    if (wasTap){
+      try { togglePreflight(); } catch (err) { /* defensive */ }
+    }
+  }
 });
 addEventListener('keydown', e=>{
   if (e.repeat) return;
@@ -13435,15 +13476,26 @@ addEventListener('keydown', e=>{
     }
     return;
   }
-  // Shift+K toggles the pre-flight checklist overlay. Plain K opens the
-  // transponder squawk keypad (handled in setupSquawkUi() below) and is
-  // also tied to the pitch-down control via the global `keys` map, so we
-  // gate strictly on `e.shiftKey` here. togglePreflight() owns the
+  // Shift+K toggles the pre-flight checklist overlay (on quick tap), or
+  // kicks off the auto-runner when held for PREFLIGHT_AUTO_HOLD_S. Plain K
+  // opens the transponder squawk keypad (handled in setupSquawkUi() below)
+  // and is also tied to the pitch-down control via the global `keys` map,
+  // so we gate strictly on `e.shiftKey` here. togglePreflight() owns the
   // open/close + screen-state safety checks (no opening over intro,
   // replay, photo, pause, or a crashed wreck).
+  //
+  // Tap-vs-hold split: keydown arms `preflightAutoT = 0`, the per-frame
+  // tick in step() advances it toward PREFLIGHT_AUTO_HOLD_S (and starts
+  // the auto-run on cross), and the keyup handler does the legacy toggle
+  // ONLY when the hold never crossed the threshold AND the auto-runner
+  // isn't already running.
   if (e.code==='KeyK' && e.shiftKey){
     e.preventDefault();
-    togglePreflight();
+    if (state.preflightAutoT < 0 && state.preflightAutoIdx < 0){
+      // Fresh arm. The keyup handler decides between tap (toggle) and
+      // long-hold (no-op here, the auto-runner already kicked).
+      state.preflightAutoT = 0;
+    }
     return;
   }
   if (e.code==='KeyI' && e.shiftKey){
@@ -15421,6 +15473,13 @@ function resetPlane(){
   // banner + ATC line so a forgotten brake on a hot reset earns its call.
   state.parkingBrakePullLatch = false;
   state.parkingBrakePullStuckT = 0;
+  // Pre-flight auto-runner: wipe any in-progress hold/run so a hot reset
+  // doesn't leak a Shift+K hold timer or a mid-walk row index from the
+  // previous sortie into the new one. The bar (if visible) clears via the
+  // unsafe-gate inside tickPreflightAuto() on the next frame.
+  state.preflightAutoT = -1;
+  state.preflightAutoIdx = -1;
+  state.preflightAutoStepT = 0;
   // Hold-short call: fresh sortie re-arms the hold-short detector so the
   // first taxi out gets the "hold short" / "line up and wait" call.
   state.holdShortArmed = true;
@@ -16623,7 +16682,189 @@ function updatePreflight(force){
     if (done === PREFLIGHT_ROWS.length){
       foot.innerHTML = '<span class="done">✓ READY FOR TAKEOFF<\/span> · Shift+K to close';
     } else {
-      foot.innerHTML = done + ' / ' + PREFLIGHT_ROWS.length + ' complete · Shift+K to close';
+      foot.innerHTML = done + ' / ' + PREFLIGHT_ROWS.length + ' complete · hold Shift+K to auto-run';
+    }
+  }
+}
+// ====== PRE-FLIGHT AUTO-RUNNER (Shift+K hold) ======
+// Holding Shift+K for PREFLIGHT_AUTO_HOLD_S seconds runs the existing
+// pre-flight checklist automatically: walks each PREFLIGHT_ROWS entry in
+// order, ticking the underlying state to OK (close canopy, set parking
+// brake, neutral trim, flaps to stage 1, pitot heat on) and pipping a soft
+// chime per row. Each row takes PREFLIGHT_AUTO_STEP_S so the whole walk
+// finishes in ~3 s. Visual progress bar at the bottom of the checklist
+// card. Release Shift+K early to abort cleanly (rows already ticked stay
+// ticked — they're real state mutations, not just animation).
+//
+// Ground-only + free-flight-only, so the player can't auto-pass a scored
+// mission's ground-check. Honors the same intro/replay/photo/pause/crashed
+// gating the rest of the checklist uses. Pure UI wrapper around existing
+// togglers — no new physics, no new audio path beyond the per-row pip.
+const PREFLIGHT_AUTO_HOLD_S = 1.0;   // hold-Shift+K duration before auto-run kicks
+const PREFLIGHT_AUTO_STEP_S = 0.4;   // seconds per row inside the auto-run
+const PREFLIGHT_AUTO_HOLD_S_INV = 1 / PREFLIGHT_AUTO_HOLD_S;
+const PREFLIGHT_AUTO_TOTAL_S = PREFLIGHT_AUTO_STEP_S * 6; // for the progress bar width math
+// Per-row "apply" actions. Each one nudges the underlying state so the
+// matching PREFLIGHT_ROWS evaluator returns ok=true on the next
+// updatePreflight() tick. Idempotent: already-OK rows are no-ops so a
+// second auto-run doesn't double-toggle anything.
+function preflightAutoApplyRow(id){
+  try {
+    if (id === 'canopy'){
+      if (state.canopyOpen){
+        state.canopyOpen = false;
+        if (typeof playCanopyClunk === 'function') playCanopyClunk(false);
+      }
+    } else if (id === 'brake'){
+      if (!state.parkingBrake){
+        state.parkingBrake = true;
+        if (typeof playParkingBrakeClick === 'function') playParkingBrakeClick(true);
+      }
+    } else if (id === 'fuel'){
+      // Fuel is a real consumable — do not auto-top off, just chime through
+      // (the row stays amber if fuel <25%, that's a real warning the
+      // player should see, not something a Shift+K hold should hide).
+    } else if (id === 'trim'){
+      if (Math.abs(state.trim || 0) >= 0.05){
+        state.trim = 0;
+      }
+    } else if (id === 'flaps'){
+      if ((state.flaps || 0) < 1){
+        // cycleFlaps() advances by one detent; loop up to two times to land
+        // on stage 1 (idempotent: stops once flaps >= 1, never overshoots).
+        for (let g = 0; g < 2 && (state.flaps || 0) < 1; g++){
+          if (typeof cycleFlaps === 'function') cycleFlaps();
+          else { state.flaps = 1; break; }
+        }
+      }
+    } else if (id === 'pitot'){
+      // Pitot heat ON via the canonical toggle so settings.pitotHeat
+      // persists alongside the runtime flag.
+      if (!state.pitotHeatOn && typeof togglePitotHeat === 'function'){
+        togglePitotHeat();
+      }
+    }
+  } catch(e){ /* defensive: a broken setter must not strand the runner */ }
+}
+function preflightAutoAbort(reason){
+  state.preflightAutoIdx = -1;
+  state.preflightAutoStepT = 0;
+  const bar = document.getElementById('pfAutoBar');
+  if (bar){ bar.classList.remove('show'); const inner = bar.firstElementChild; if (inner) inner.style.width = '0%'; }
+  if (reason && typeof showStatus === 'function'){
+    showStatus('AUTO-RUN ABORTED', reason, 'hard');
+  }
+}
+// Called every frame from step(). Handles both the hold-charging phase
+// (preflightAutoT counting up while Shift+K is held) and the in-progress
+// auto-run (preflightAutoIdx walking 0..5).
+function tickPreflightAuto(dt){
+  // Hard safety: any unsafe screen state aborts both phases instantly so
+  // the runner can't sprout under a paused/replayed/photo screen. We rely
+  // on updatePreflight() to also close the panel on these states.
+  const unsafe = state.introOpen || state.replayActive || state.photoMode
+      || state.paused || state.crashed;
+  if (unsafe){
+    if (state.preflightAutoT >= 0) state.preflightAutoT = -1;
+    if (state.preflightAutoIdx >= 0) preflightAutoAbort(null);
+    return;
+  }
+  // Hold-charging phase: Shift+K both physically down, timer climbing.
+  // Releasing either key clears preflightAutoT in the keyup handler so
+  // we don't need to retest it here; we just tick while it's >= 0.
+  if (state.preflightAutoT >= 0 && state.preflightAutoIdx < 0){
+    const stillHeld = !!keys['KeyK'] && (!!keys['ShiftLeft'] || !!keys['ShiftRight']);
+    if (!stillHeld){
+      // Defensive: keys cleared but keyup didn't fire (focus blur, alt-tab).
+      // The keyup handler already runs the tap-vs-hold split; this just
+      // catches the lost-focus case so the hold timer doesn't loop.
+      state.preflightAutoT = -1;
+    } else {
+      state.preflightAutoT += dt;
+      if (state.preflightAutoT >= PREFLIGHT_AUTO_HOLD_S){
+        // Hold completed — kick the auto-runner. Gate against airborne /
+        // scored-mission scenarios so we never auto-pass real ground-check
+        // moments. If gated, abort with a status toast instead of silently
+        // doing nothing (the player held the key for a full second; they
+        // deserve feedback).
+        state.preflightAutoT = -1;
+        if (!state.onGround){
+          if (typeof showStatus === 'function'){
+            showStatus('AUTO-RUN UNAVAILABLE', 'airborne — land first', 'hard');
+          }
+          return;
+        }
+        if (state.mode && state.mode !== 'free'){
+          if (typeof showStatus === 'function'){
+            showStatus('AUTO-RUN UNAVAILABLE', 'free flight only — not in scored missions', 'hard');
+          }
+          return;
+        }
+        // Open the panel if it's closed so the player sees the rows tick.
+        if (!state.preflightOpen && typeof setPreflightOpen === 'function'){
+          try { setPreflightOpen(true); } catch(e){}
+        }
+        state.preflightAutoIdx = 0;
+        // Initialize step timer to a full step so the first row applies
+        // after PREFLIGHT_AUTO_STEP_S (matching subsequent row spacing),
+        // and the bar starts at 0% on the first in-progress frame.
+        state.preflightAutoStepT = PREFLIGHT_AUTO_STEP_S;
+        const bar = document.getElementById('pfAutoBar');
+        if (bar){ bar.classList.add('show'); const inner = bar.firstElementChild; if (inner) inner.style.width = '0%'; }
+        if (typeof showStatus === 'function'){
+          showStatus('PRE-FLIGHT AUTO-RUN', 'walking checklist — release Shift+K to abort', 'good');
+        }
+      }
+    }
+  }
+  // In-progress auto-run: drain step time, advance row by row. Releasing
+  // Shift+K mid-run aborts cleanly (rows already mutated stay mutated;
+  // they're real state, not animation overlays).
+  if (state.preflightAutoIdx >= 0){
+    const stillHeld = !!keys['KeyK'] && (!!keys['ShiftLeft'] || !!keys['ShiftRight']);
+    if (!stillHeld){
+      preflightAutoAbort('release Shift+K aborted run');
+      return;
+    }
+    state.preflightAutoStepT -= dt;
+    if (state.preflightAutoStepT <= 0){
+      const idx = state.preflightAutoIdx;
+      if (idx >= 0 && idx < PREFLIGHT_ROWS.length){
+        const def = PREFLIGHT_ROWS[idx];
+        preflightAutoApplyRow(def.id);
+        // The per-row chime is owned by updatePreflight()'s pip-mask path
+        // (transition-to-ok), so we don't double-chime here. The visual
+        // progress is handled by the per-frame bar update below.
+      }
+      state.preflightAutoIdx = idx + 1;
+      state.preflightAutoStepT = PREFLIGHT_AUTO_STEP_S;
+      if (state.preflightAutoIdx >= PREFLIGHT_ROWS.length){
+        // Last row applied — hold the bar full for a beat then clear.
+        state.preflightAutoIdx = -1;
+        state.preflightAutoStepT = 0;
+        const bar = document.getElementById('pfAutoBar');
+        if (bar){
+          const inner = bar.firstElementChild;
+          if (inner) inner.style.width = '100%';
+          // Fade out the bar after a short hold so the foot row's "READY
+          // FOR TAKEOFF" stamp can carry the moment.
+          setTimeout(() => { try { bar.classList.remove('show'); if (inner) inner.style.width = '0%'; } catch(e){} }, 650);
+        }
+        if (typeof showStatus === 'function'){
+          showStatus('PRE-FLIGHT COMPLETE', 'checklist auto-run done', 'good');
+        }
+      }
+    }
+    // Live bar fill across the whole run regardless of which step we're on.
+    const bar = document.getElementById('pfAutoBar');
+    if (bar){
+      const inner = bar.firstElementChild;
+      if (inner){
+        const idxNow = (state.preflightAutoIdx < 0) ? PREFLIGHT_ROWS.length : state.preflightAutoIdx;
+        const within = (PREFLIGHT_AUTO_STEP_S - state.preflightAutoStepT) / PREFLIGHT_AUTO_STEP_S;
+        const frac = Math.max(0, Math.min(1, (idxNow + within) / PREFLIGHT_ROWS.length));
+        inner.style.width = (frac * 100).toFixed(1) + '%';
+      }
     }
   }
 }
@@ -20460,6 +20701,12 @@ function _aeroBoxFinish(reason){
 }
 
 function step(dt){
+  // Pre-flight auto-runner (Shift+K hold). Owns its own hold timer and
+  // step-by-step row-tick state machine; defined alongside updatePreflight()
+  // so the panel itself owns the UX. Cheap no-op when idle (idx < 0 + T < 0).
+  if (typeof tickPreflightAuto === 'function'){
+    try { tickPreflightAuto(dt); } catch(e){ /* defensive */ }
+  }
   // Shift+I pre-prime hold. While the player holds Shift+I (KeyI down AND
   // shift state active in the keys map—the keyup handler clears primeHoldT on
   // either key releasing), tick primeHoldT toward PRIME_HOLD_S. Hitting the
