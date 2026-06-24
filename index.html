@@ -46,6 +46,14 @@
      so saved screenshots stay clean. */
   #wipers { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #wipers.show { display:block; }
+  /* Cockpit-panel rain streaks — diagonal water streaks raked across the
+     gauge bezel "glass". Lives on its own fixed-position canvas (NOT a
+     child of #cockpitPanel so the panel's circular-canvas CSS doesn't
+     turn it into a disc); positioned each frame via getBoundingClientRect
+     to track the panel as it shifts on resize. z-index sits just above
+     the panel (8 vs panel's 7) so streaks read on top of the gauges. */
+  #cockpitPanelStreaks { position:fixed; left:0; top:0; width:0; height:0; pointer-events:none; z-index:8; display:none; border-radius:10px; }
+  #cockpitPanelStreaks.show { display:block; }
   /* Soft additive sun glare. Sits above the 3D canvas but below the HUD,
      pointer-events off so clicks go through, hidden in photo mode so saved
      PNGs stay clean. */
@@ -915,6 +923,7 @@
 <canvas id="birdSplat"></canvas>
 <canvas id="windshieldRain"></canvas>
 <canvas id="wipers"></canvas>
+<canvas id="cockpitPanelStreaks"></canvas>
 <canvas id="sunGlare"></canvas>
 <div id="lightning"></div>
 <div id="gvision"><div class="grey"></div><div class="red"></div></div>
@@ -28786,6 +28795,135 @@ function updateWipers(dt){
   }
 }
 
+// ====== COCKPIT-PANEL RAIN STREAKS ======
+// Cockpit-cam-only diagonal water streaks raked across the cockpit panel
+// "glass". Pairs with the existing windshield droplets + animated wipers so
+// the entire instrument bezel finally reads as properly wet on a rainy
+// approach. Unlike the windshield-rain droplets (full-screen pool of round
+// beads), these are short tilted streamers running across the panel only;
+// the rake angle scales with airspeed so faster cruise tilts them sharply
+// horizontal, gusts/wind feathers them sideways, and the whole layer fades
+// in/out with the rain toggle. The canvas is positioned each frame to track
+// the cockpit panel via getBoundingClientRect() so it stays glued to the
+// panel as the window resizes. Hidden in photo / pause / replay / intro
+// and on the ground-with-cockpit-cam-off transitions via the same gate
+// every other windshield overlay uses, plus PHOTO_HIDE_IDS so saved PNGs
+// stay clean.
+const panelStreakCanvas = document.getElementById('cockpitPanelStreaks');
+const panelStreakCtx = panelStreakCanvas && panelStreakCanvas.getContext('2d');
+const cockpitPanelEl = document.getElementById('cockpitPanel');
+const panelStreaks = [];
+const PANEL_STREAK_COUNT = 14;
+let panelStreakIntensity = 0;     // 0..1 eased fade so rain on/off doesn't pop
+let panelStreakLastW = 0;         // cache last sized width to skip redundant resizes
+let panelStreakLastH = 0;
+function seedPanelStreaks(){
+  panelStreaks.length = 0;
+  for (let i = 0; i < PANEL_STREAK_COUNT; i++){
+    panelStreaks.push({
+      // Normalized 0..1 across the panel; resized to actual pixels each draw.
+      u: Math.random(),
+      v: Math.random() * 0.95 - 0.05,
+      len: 14 + Math.random() * 22,     // streak length in px
+      thick: 0.7 + Math.random() * 1.0, // line width
+      vy: 38 + Math.random() * 56,      // base downward speed (px/sec)
+      a: 0.35 + Math.random() * 0.35,   // peak alpha
+      seed: Math.random() * Math.PI * 2 // phase stagger
+    });
+  }
+}
+seedPanelStreaks();
+function updateCockpitPanelStreaks(dt){
+  if (!panelStreakCanvas || !panelStreakCtx || !cockpitPanelEl) return;
+  // Gating: cockpit cam, rain on, panel actually visible, not in photo /
+  // replay / pause / intro / crash. We also check the panel's computed
+  // display via offsetParent so a hidden panel never gets streaked over.
+  const cockpit = state.cam === 1;
+  const panelVisible = cockpitPanelEl.classList.contains('show')
+    && cockpitPanelEl.offsetParent !== null;
+  const allow = !!settings.rain && cockpit && panelVisible
+    && !state.photoMode && !state.replayActive && !state.paused
+    && !state.introOpen && !state.crashed;
+  // Ease intensity in/out so toggling rain doesn't pop the streaks instantly.
+  const target = allow ? 1 : 0;
+  panelStreakIntensity += (target - panelStreakIntensity) * Math.min(1, dt * 3.5);
+  if (panelStreakIntensity <= 0.01 && !allow){
+    panelStreakCanvas.classList.remove('show');
+    return;
+  }
+  // Track the panel's on-screen rect so the canvas overlay stays exactly
+  // aligned even after window resize / settings panel open / etc.
+  const r = cockpitPanelEl.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(r.width));
+  const h = Math.max(1, Math.floor(r.height));
+  if (w !== panelStreakLastW || h !== panelStreakLastH){
+    const dpr = Math.min(devicePixelRatio, 2);
+    panelStreakCanvas.width = Math.max(1, Math.floor(w * dpr));
+    panelStreakCanvas.height = Math.max(1, Math.floor(h * dpr));
+    panelStreakCanvas.style.width = w + 'px';
+    panelStreakCanvas.style.height = h + 'px';
+    panelStreakCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    panelStreakLastW = w;
+    panelStreakLastH = h;
+  }
+  panelStreakCanvas.style.left = Math.round(r.left) + 'px';
+  panelStreakCanvas.style.top  = Math.round(r.top)  + 'px';
+  panelStreakCanvas.classList.add('show');
+  // Sideways rake scales with airspeed — calm taxi = nearly vertical
+  // streaks, fast cruise = sharply tilted streamers across the bezel.
+  const spdMs = Math.hypot(state.vel.x, state.vel.y, state.vel.z);
+  let tiltX = -Math.min(spdMs, 95) * 1.35; // negative = streaks slide left as the plane moves forward
+  // Mild crosswind nudge so windy approaches feather the streaks sideways.
+  tiltX += state.wind.x * 0.35;
+  tiltX = Math.max(-220, Math.min(220, tiltX));
+  panelStreakCtx.clearRect(0, 0, w, h);
+  panelStreakCtx.lineCap = 'round';
+  const I = panelStreakIntensity;
+  for (const s of panelStreaks){
+    // Advance vertical position; wrap from below back to a fresh column
+    // when the streak runs off the panel.
+    s.v += ((s.vy + Math.abs(tiltX) * 0.12) * dt) / Math.max(1, h);
+    s.u += (tiltX * dt) / Math.max(1, w);
+    if (s.v > 1.05 || s.u < -0.05 || s.u > 1.05){
+      s.u = Math.random();
+      s.v = -0.05 - Math.random() * 0.12;
+      s.len = 14 + Math.random() * 22;
+      s.thick = 0.7 + Math.random() * 1.0;
+      s.vy = 38 + Math.random() * 56;
+      s.a = 0.35 + Math.random() * 0.35;
+      s.seed = Math.random() * Math.PI * 2;
+      continue;
+    }
+    // Fade in across the top sliver, fade out into the bottom sliver so
+    // streaks appear/vanish softly instead of popping.
+    const fadeIn  = Math.max(0, Math.min(1, s.v / 0.12));
+    const fadeOut = Math.max(0, Math.min(1, (1 - s.v) / 0.10));
+    const alpha = s.a * fadeIn * fadeOut * I;
+    if (alpha <= 0.01) continue;
+    const px = s.u * w;
+    const py = s.v * h;
+    // Streak vector: mostly vertical, raked sideways by tilt. Scaled by
+    // per-streak length so the field has varied stroke lengths.
+    const rake = -tiltX * 0.0090; // dimensionless tilt factor
+    const tipX = px + rake * s.len;
+    const tipY = py - s.len;
+    // Tiny lateral wobble via seed so streaks don't move in lockstep.
+    const wob = Math.sin(s.seed + s.v * 8.0) * 0.6;
+    panelStreakCtx.strokeStyle = 'rgba(200, 220, 240, ' + alpha.toFixed(3) + ')';
+    panelStreakCtx.lineWidth = s.thick;
+    panelStreakCtx.beginPath();
+    panelStreakCtx.moveTo(px + wob, py);
+    panelStreakCtx.lineTo(tipX + wob, tipY);
+    panelStreakCtx.stroke();
+    // Tiny head bead so each streak has a wet-tip leading drop.
+    panelStreakCtx.fillStyle = 'rgba(220, 232, 245, ' + (alpha * 0.85).toFixed(3) + ')';
+    panelStreakCtx.beginPath();
+    panelStreakCtx.arc(px + wob, py, Math.max(0.6, s.thick * 0.9), 0, Math.PI * 2);
+    panelStreakCtx.fill();
+  }
+  panelStreakCtx.globalAlpha = 1.0;
+}
+
 // ====== SUN GLARE ======
 // Soft additive glare disc plus a faint streak across the frame whenever the
 // camera looks roughly toward the sun. Fades out as the angle widens and as
@@ -29474,6 +29612,7 @@ function loop(now){
   updateBirdSplat(dt);
   updateWindshieldRain(dt);
   updateWipers(dt);
+  updateCockpitPanelStreaks(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
   updateStormCells(dt);
@@ -29567,7 +29706,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
