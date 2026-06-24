@@ -46,6 +46,14 @@
      PHOTO_HIDE_IDS so saved screenshots stay clean. */
   #bugSplats { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; display:none; }
   #bugSplats.show { display:block; }
+  /* Cold-morning windshield frost — hex-pattern frost rime hugging the
+     canopy edges + corners on chilly pre-dawn cold-starts. Sits at z-index 0
+     like #bugSplats so #windshieldRain (z=1) + #wipers (z=1) still read on
+     top — defrost is a quiet baseline, not a foreground element. Pointer-
+     events off; hidden in photo mode via PHOTO_HIDE_IDS so saved screenshots
+     stay clean. */
+  #windshieldFrost { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; display:none; }
+  #windshieldFrost.show { display:block; }
   /* Animated windshield wipers: two thin black blades sweeping across the
      lower half of the screen in cockpit cam when rain wiping is active. Sits
      just above #windshieldRain so the blades visibly streak the droplets off
@@ -929,6 +937,7 @@
 <canvas id="rainOverlay"></canvas>
 <canvas id="birdSplat"></canvas>
 <canvas id="bugSplats"></canvas>
+<canvas id="windshieldFrost"></canvas>
 <canvas id="windshieldRain"></canvas>
 <canvas id="wipers"></canvas>
 <canvas id="cockpitPanelStreaks"></canvas>
@@ -948,7 +957,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyContam" style="margin-left:6px;color:#7ee787;font-weight:700" title="Runway surface state — green dry, blue wet, white snow, red ice. Reads from the live weather + a short post-rain dry-out timer so the pill matches the friction your wheels actually feel.">RWY DRY</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">❄ CARB ICE <span id="carbIcePct">0%</span></span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="magPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Magneto selector — Shift+R cycles BOTH→L→R→BOTH for the run-up check">MAGS L</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span><span id="xwCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Crosswind component on the active runway — L = from your left, R = from your right">XW <span id="xwCompT">0kt L</span></span><span id="htCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Headwind / tailwind component on the active runway — H = headwind (good), T = tailwind (bad past 5 kt)"><span id="htCompT">H 0kt</span></span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyContam" style="margin-left:6px;color:#7ee787;font-weight:700" title="Runway surface state — green dry, blue wet, white snow, red ice. Reads from the live weather + a short post-rain dry-out timer so the pill matches the friction your wheels actually feel.">RWY DRY</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">❄ CARB ICE <span id="carbIcePct">0%</span></span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="magPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Magneto selector — Shift+R cycles BOTH→L→R→BOTH for the run-up check">MAGS L</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="defrostPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700" title="Defrost progress — windshield frost clears as CHT climbs past 55°C">❄ DEFROST <span id="defrostT">0%</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span><span id="xwCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Crosswind component on the active runway — L = from your left, R = from your right">XW <span id="xwCompT">0kt L</span></span><span id="htCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Headwind / tailwind component on the active runway — H = headwind (good), T = tailwind (bad past 5 kt)"><span id="htCompT">H 0kt</span></span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -12510,6 +12519,11 @@ addEventListener('keydown', e=>{
           if (airstartRpm > 300 && state.throttle > 0.25){
             state.airRestart = true;
             state.ignitionT = -1;
+            // In-air deadstick restart — the cold-morning frost is irrelevant
+            // by now (you've already burned through climb-out + cruise),
+            // so wipe the overlay so the player isn't fighting it through
+            // a glide back to the deck.
+            if (typeof clearWindshieldFrost === 'function') clearWindshieldFrost();
             showStatus('IGNITION ARMED', 'press I to crank', 'hard');
             pushATC('Restart attempt, cranking on your call.', { tag:'PILOT', now:true });
           } else if (airstartRpm <= 300){
@@ -14162,6 +14176,10 @@ function resetPlane(){
   // Rescue truck — wipe any in-flight crash response so the next sortie
   // doesn't inherit a strobing red box parked next to the runway.
   if (typeof clearRescueTruck === 'function') clearRescueTruck();
+  // Cold-morning windshield frost — wipe any lingering overlay so the next
+  // armColdStart() inside resetPlane gets a clean slate; armWindshieldFrost
+  // re-arms it on the next sortie if conditions match.
+  if (typeof clearWindshieldFrost === 'function') clearWindshieldFrost();
   // Alternator failure: wipe the per-sortie roll + trip schedule + battery
   // counter so a fresh sortie re-rolls cleanly. Also drop any visual dim/dark
   // classes left on the cockpit panel + HUD from a prior failure (the per-
@@ -16404,6 +16422,11 @@ function armColdStart(){
   state.roughIdleT = -1;
   state.coldMorning = false;
   state.throttle = 0;
+  // Cold-morning windshield frost — arms a faint hex-pattern overlay on
+  // the canopy if the engine is genuinely cold (CHT < 30 °C) AND the local
+  // clock reads 04–08 (pre-dawn through sunrise). Defensive call so the
+  // frost module being absent doesn't break the cold-start arm path.
+  if (typeof armWindshieldFrost === 'function') armWindshieldFrost();
   // Fresh checklist chimes for the new ritual — wipe the pip mask so each
   // of the four rows can pip again as the player walks them.
   state.coldStartPipMask = 0;
@@ -22179,6 +22202,28 @@ function step(dt){
       if (primedTEl) primedTEl.textContent = remainS + 's';
     } else {
       primedPillEl.style.display = 'none';
+    }
+  }
+  // Cold-morning defrost pill (WIND row) — blue `❄ DEFROST <NN%>` while a
+  // cold-dawn frost overlay is on the canopy. Reads the inverse of the
+  // frost alpha so the pilot sees their cold-start ritual paying off in
+  // real time. Hidden in photo mode + once the frost is cleared so the
+  // HUD doesn't carry permanent decoration.
+  const defrostPillEl = document.getElementById('defrostPill');
+  const defrostTEl    = document.getElementById('defrostT');
+  if (defrostPillEl){
+    const frostArmed = (typeof frostState !== 'undefined') && frostState && frostState.armed === true;
+    const showFrost = frostArmed
+      && !state.photoMode && !state.crashed && !state.replayActive
+      && !state.introOpen && !state.paused;
+    if (showFrost){
+      const prog = (typeof windshieldFrostProgress === 'function') ? windshieldFrostProgress() : 1;
+      const pct  = Math.max(0, Math.min(100, Math.round(prog * 100)));
+      defrostPillEl.style.display = 'inline';
+      defrostPillEl.style.color = pct >= 80 ? '#7ee787' : '#9ad8ff';
+      if (defrostTEl) defrostTEl.textContent = pct + '%';
+    } else {
+      defrostPillEl.style.display = 'none';
     }
   }
   // Bailout pill (WIND row) — cyan reminder that Shift+P will work right
@@ -29264,6 +29309,215 @@ function updateBugSplats(dt){
   }
 }
 
+// ====== COLD-MORNING WINDSHIELD FROST ======
+// Hex-pattern frost rime on the canopy when a cold-start arms on a chilly
+// pre-dawn morning. Coverage hugs the corners + edges so center-forward
+// visibility stays readable; fades to zero as CHT climbs past ~55 °C over
+// the next 1–2 min of taxi/run-up, mirroring the real GA defrost cycle.
+// Built on a single procedurally-painted texture cached once on init and
+// alpha-modulated each frame so per-frame cost is one quad blend. Cockpit-
+// cam-only via the existing windshield-overlay gate; hidden in photo /
+// pause / replay / intro / crashed via PHOTO_HIDE_IDS so saved PNGs stay
+// clean.
+const frostCanvas = document.getElementById('windshieldFrost');
+const frostCtx = frostCanvas && frostCanvas.getContext('2d');
+let frostLastW = 0, frostLastH = 0;
+// Cached procedurally-painted frost pattern. Built once at the first paint
+// (or whenever the window resizes) and stretched to the live canvas every
+// frame, so the per-frame cost stays at a single drawImage + alpha set.
+let frostPatternCanvas = null;
+let frostPatternW = 0, frostPatternH = 0;
+// Runtime state for the frost overlay. armed = a cold-start ritual arrived
+// on a cold dawn and the frost is on the glass; baseAlpha = the starting
+// alpha for this sortie (lower start temp = more frost); alpha = current
+// displayed alpha (eased toward target). Public-ish: armWindshieldFrost
+// flips armed=true and seeds baseAlpha; clearWindshieldFrost wipes the
+// pool (engine-out in-air restart, hard reset).
+const frostState = { armed: false, baseAlpha: 0, alpha: 0 };
+const FROST_CHT_CLEAR_C = 55;        // CHT at which the glass is fully clear
+const FROST_HOUR_LO     = 4;         // local hour where pre-dawn frost can arm
+const FROST_HOUR_HI     = 8;         // local hour where pre-dawn frost stops arming
+const FROST_START_CHT_C = 30;        // engineTempC must be below this on arm
+function sizeFrostCanvas(){
+  if (!frostCanvas) return;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio, 2);
+  frostCanvas.width  = Math.max(1, Math.floor(w * dpr));
+  frostCanvas.height = Math.max(1, Math.floor(h * dpr));
+  frostCanvas.style.width  = w + 'px';
+  frostCanvas.style.height = h + 'px';
+  if (frostCtx) frostCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  frostLastW = w;
+  frostLastH = h;
+  // Pattern resolution scales with the live canvas but is capped so the
+  // initial paint stays cheap on a 4K display. The pattern is stretched
+  // bilinearly during draw so any small mismatch is invisible.
+  const pw = Math.min(1024, Math.max(320, Math.floor(w)));
+  const ph = Math.min(640,  Math.max(200, Math.floor(h)));
+  if (!frostPatternCanvas || frostPatternW !== pw || frostPatternH !== ph){
+    frostPatternCanvas = document.createElement('canvas');
+    frostPatternCanvas.width = pw;
+    frostPatternCanvas.height = ph;
+    frostPatternW = pw;
+    frostPatternH = ph;
+    paintFrostPattern(frostPatternCanvas);
+  }
+}
+// Paint the cached frost pattern: a soft edge-vignette mask multiplied by a
+// sparse honeycomb of tiny hex crystals + a faint speckle field. Drawn once
+// per resize, then alpha-modulated cheaply each frame.
+function paintFrostPattern(cv){
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+  const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  // Edge / corner vignette mask. Strong toward the corners + edges, falls
+  // off toward the center so the pilot still has forward visibility.
+  const cx = w * 0.5, cy = h * 0.52;
+  const maxR = Math.hypot(w * 0.5, h * 0.5);
+  const vignette = ctx.createRadialGradient(cx, cy, maxR * 0.32, cx, cy, maxR * 0.95);
+  vignette.addColorStop(0,    'rgba(220,236,255,0.00)');
+  vignette.addColorStop(0.55, 'rgba(220,236,255,0.18)');
+  vignette.addColorStop(0.85, 'rgba(225,240,255,0.55)');
+  vignette.addColorStop(1,    'rgba(235,246,255,0.85)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, w, h);
+  // Top / bottom edge bias (frost piles thicker at the canopy frame seams).
+  const topGrad = ctx.createLinearGradient(0, 0, 0, h);
+  topGrad.addColorStop(0,    'rgba(235,246,255,0.32)');
+  topGrad.addColorStop(0.18, 'rgba(235,246,255,0.10)');
+  topGrad.addColorStop(0.82, 'rgba(235,246,255,0.10)');
+  topGrad.addColorStop(1,    'rgba(235,246,255,0.28)');
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+  // Sparse hex-pattern crystal field. Tiny 6-pointed stars scattered with
+  // density biased toward the existing vignette mask, so crystals cluster
+  // in the corners + edges instead of the readable center.
+  const cells = Math.floor((w * h) / 9000);
+  for (let i = 0; i < cells; i++){
+    const x = Math.random() * w;
+    const y = Math.random() * h;
+    // Reject crystals near the readable center (rough vignette estimate)
+    // by rolling a coverage probability based on radial distance.
+    const r = Math.hypot(x - cx, y - cy) / maxR;
+    if (Math.random() > Math.max(0, (r - 0.35) * 1.35)) continue;
+    const arms = 6;
+    const len  = 1.6 + Math.random() * 3.2;
+    const a0   = Math.random() * Math.PI;
+    ctx.strokeStyle = 'rgba(245,250,255,' + (0.45 + Math.random() * 0.35) + ')';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    for (let k = 0; k < arms; k++){
+      const ang = a0 + k * (Math.PI * 2 / arms);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    }
+    ctx.stroke();
+    // Center bead so the crystal reads at small scale.
+    ctx.fillStyle = 'rgba(250,253,255,0.55)';
+    ctx.beginPath();
+    ctx.arc(x, y, 0.85, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Speckle pass: tiny low-alpha frost grains for surface texture.
+  const grains = Math.floor((w * h) / 1800);
+  ctx.fillStyle = 'rgba(245,250,255,0.18)';
+  for (let i = 0; i < grains; i++){
+    const x = Math.random() * w;
+    const y = Math.random() * h;
+    const r = Math.hypot(x - cx, y - cy) / maxR;
+    if (Math.random() > Math.max(0, (r - 0.30) * 1.20)) continue;
+    ctx.fillRect(x, y, 1, 1);
+  }
+}
+sizeFrostCanvas();
+// Public hook: arm the frost overlay if the current conditions match a
+// cold-dawn cold-start. Safe to call from the cold-start arm path even when
+// conditions aren't met — returns without changing state. Lower start CHT
+// = thicker/longer-lasting frost.
+function armWindshieldFrost(){
+  if (!frostCanvas) return;
+  const tod = ((state.todHours || 12) % 24 + 24) % 24;
+  const cht = (typeof state.engineTempC === 'number') ? state.engineTempC : 40;
+  if (tod < FROST_HOUR_LO || tod >= FROST_HOUR_HI) return;
+  if (cht >= FROST_START_CHT_C) return;
+  // Sub-zero pre-dawn (cht near or below 0) earns ~0.55 base alpha so the
+  // canopy reads frozen. A mild 25 °C morning maps to ~0.30. Linear.
+  const chill = Math.min(1, Math.max(0, (FROST_START_CHT_C - cht) / FROST_START_CHT_C));
+  frostState.baseAlpha = 0.30 + chill * 0.30;
+  frostState.alpha = frostState.baseAlpha;
+  frostState.armed = true;
+}
+function clearWindshieldFrost(){
+  frostState.armed = false;
+  frostState.baseAlpha = 0;
+  frostState.alpha = 0;
+  if (frostCtx && frostCanvas){
+    frostCtx.clearRect(0, 0, frostCanvas.width, frostCanvas.height);
+  }
+  if (frostCanvas) frostCanvas.classList.remove('show');
+}
+// Live defrost progress 0..1 (0 = fully frosted, 1 = fully clear). Read by
+// the HUD defrost pill below. Cheap so the HUD can call it every frame.
+function windshieldFrostProgress(){
+  if (!frostState.armed) return 1;
+  const cht = (typeof state.engineTempC === 'number') ? state.engineTempC : 40;
+  if (cht >= FROST_CHT_CLEAR_C) return 1;
+  if (cht <= 0) return 0;
+  return Math.max(0, Math.min(1, cht / FROST_CHT_CLEAR_C));
+}
+function updateWindshieldFrost(dt){
+  if (!frostCanvas || !frostCtx) return;
+  // Same visibility gate every other windshield overlay uses: cockpit cam
+  // only, hidden in photo / pause / replay / intro / crashed.
+  const cockpit = state.cam === 1;
+  const show = cockpit && !state.photoMode && !state.replayActive
+    && !state.paused && !state.introOpen && !state.crashed;
+  // Resize tracking so the overlay follows window changes without a
+  // dedicated resize listener — mirrors the bug-splat pattern.
+  const w = innerWidth, h = innerHeight;
+  if (w !== frostLastW || h !== frostLastH){
+    sizeFrostCanvas();
+  }
+  // Disarm automatically once the engine warms past the clear point so a
+  // long sortie doesn't carry the latch into the next cold-start arm path.
+  if (frostState.armed){
+    const cht = (typeof state.engineTempC === 'number') ? state.engineTempC : 40;
+    if (cht >= FROST_CHT_CLEAR_C) frostState.armed = false;
+  }
+  if (!show || !frostState.armed || frostState.baseAlpha <= 0){
+    // Ease the displayed alpha down so a cam switch or a sudden defrost
+    // doesn't snap the overlay off; once the alpha is effectively zero,
+    // hide the canvas so it doesn't even cost a quad blend.
+    frostState.alpha += (0 - frostState.alpha) * Math.min(1, dt * 4.5);
+    if (frostState.alpha < 0.005){
+      frostState.alpha = 0;
+      frostCanvas.classList.remove('show');
+      return;
+    }
+  } else {
+    // Target alpha tracks defrost progress: full baseAlpha at 0 % progress,
+    // zero at 100 % progress. Eased toward target so a hard CHT step (e.g.
+    // a quick engine kill + restart) doesn't pop the overlay off.
+    const prog = windshieldFrostProgress();
+    const target = frostState.baseAlpha * (1 - prog);
+    frostState.alpha += (target - frostState.alpha) * Math.min(1, dt * 0.9);
+  }
+  if (frostState.alpha <= 0.005){
+    frostCanvas.classList.remove('show');
+    return;
+  }
+  frostCanvas.classList.add('show');
+  frostCtx.clearRect(0, 0, w, h);
+  if (frostPatternCanvas){
+    frostCtx.globalAlpha = frostState.alpha;
+    frostCtx.drawImage(frostPatternCanvas, 0, 0, frostPatternW, frostPatternH, 0, 0, w, h);
+    frostCtx.globalAlpha = 1;
+  }
+}
+
 // ====== SUN GLARE ======
 // Soft additive glare disc plus a faint streak across the frame whenever the
 // camera looks roughly toward the sun. Fades out as the angle widens and as
@@ -30010,6 +30264,7 @@ function loop(now){
   updateWipers(dt);
   updateCockpitPanelStreaks(dt);
   updateBugSplats(dt);
+  updateWindshieldFrost(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
   updateStormCells(dt);
@@ -30104,7 +30359,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
