@@ -931,7 +931,7 @@
   <div class="row"><span class="lbl">AoA</span><span class="val"><span id="aoa">0</span>°</span></div>
   <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
   <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
-  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">❄ CARB ICE <span id="carbIcePct">0%</span></span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="magPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Magneto selector — Shift+R cycles BOTH→L→R→BOTH for the run-up check">MAGS L</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span><span id="xwCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Crosswind component on the active runway — L = from your left, R = from your right">XW <span id="xwCompT">0kt L</span></span><span id="htCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Headwind / tailwind component on the active runway — H = headwind (good), T = tailwind (bad past 5 kt)"><span id="htCompT">H 0kt</span></span></span></div>
+  <div class="row"><span class="lbl">WIND</span><span class="val"><span id="wind">000@0</span><span id="rwyContam" style="margin-left:6px;color:#7ee787;font-weight:700" title="Runway surface state — green dry, blue wet, white snow, red ice. Reads from the live weather + a short post-rain dry-out timer so the pill matches the friction your wheels actually feel.">RWY DRY</span><span id="rwyWet" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">RWY WET</span><span id="rwySnow" style="display:none;margin-left:6px;color:#cfe2f3;font-weight:700">❄ RWY SNOW</span><span id="fogPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700">🌫 FOG</span><span id="pitotHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 PITOT</span><span id="carbHeatPill" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700">🔥 CARB</span><span id="carbIcePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700">❄ CARB ICE <span id="carbIcePct">0%</span></span><span id="mixPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Engine mixture — Minus lean, Equal rich">MIX 100%</span><span id="magPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Magneto selector — Shift+R cycles BOTH→L→R→BOTH for the run-up check">MAGS L</span><span id="primedPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Carb primed — ignition will catch clean">✓ PRIMED <span id="primedT">30s</span></span><span id="cowlPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+F to close cowl flaps">❄ COWL OPEN</span><span id="chopPill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Turbulence — fly the plane, not the gauges">〰 BUMPY</span><span id="ridgePill" style="display:none;margin-left:6px;color:#ffd166;font-weight:700" title="Mountain wave / ridge lift — vertical air over the peaks">〰 RIDGE LIFT</span><span id="bailPill" style="display:none;margin-left:6px;color:#6ad8ff;font-weight:700" title="Shift+P to bail out">🪂 BAIL</span><span id="shearWarn" class="warn" style="display:none;margin-left:6px;color:#ffd166">⚠ WIND SHEAR</span><span id="daPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Density altitude — hot/high air thins out and steals takeoff performance">DA <span id="daPillT">0m</span></span><span id="xwCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Crosswind component on the active runway — L = from your left, R = from your right">XW <span id="xwCompT">0kt L</span></span><span id="htCompPill" style="display:none;margin-left:6px;color:#7ee787;font-weight:700" title="Headwind / tailwind component on the active runway — H = headwind (good), T = tailwind (bad past 5 kt)"><span id="htCompT">H 0kt</span></span></span></div>
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
@@ -14186,6 +14186,11 @@ function resetPlane(){
   // per-flight state, so a hot reset keeps the toggle the player chose.
   state.pitotIce = 0;
   state.pitotIceAtcLatch = false;
+  // Runway dry-out timer clears on reset so a hot restart in dry weather
+  // doesn't carry a stale "WET" hangover from the previous sortie. The
+  // pill itself derives off this + settings.rain so this single field is
+  // the only per-flight state the consolidated pill owns.
+  state.rwyDryT = 0;
   // Carb ice mirrors pitot ice on reset: clear the ice + latch + RPM-dip
   // kick, but preserve carbHeatOn so a fresh sortie respects the player's
   // earlier carb-heat choice.
@@ -21533,17 +21538,60 @@ function step(dt){
       _waRow.style.display = 'none';
     }
   }
+  // Consolidated RWY contamination pill (always-visible WIND-row state).
+  // Reads live weather + a simple post-rain dry-out timer so the player sees
+  // the surface state the wheels actually feel on rollout (the friction drop
+  // itself still lives in the on-ground physics block, unchanged):
+  //   DRY  — green, default
+  //   WET  — blue, rain on OR within RWY_DRYOUT_SECS of rain turning off
+  //   SNOW — white, snow toggle on (and not below freezing)
+  //   ICE  — red, snow toggle on AND OAT under freezing (≲0 °C)
+  // Legacy `rwyWet` / `rwySnow` spans are kept in the DOM (other DONE entries
+  // and pill-cluster comments reference them) but force-hidden here so the
+  // consolidated pill is the single source of truth on the HUD.
+  const wetEl  = document.getElementById('rwyWet');
+  if (wetEl)  wetEl.style.display  = 'none';
+  const snowEl = document.getElementById('rwySnow');
+  if (snowEl) snowEl.style.display = 'none';
+  // Post-rain dry-out timer (seconds since rain stopped). Caps at
+  // RWY_DRYOUT_SECS while rain is on so a brief shower doesn't earn a long
+  // wet hangover, and bleeds back to 0 once rain stops so the pill flips
+  // DRY again ~2 min after the last drop. Snowy / frozen surfaces don't
+  // dry off this way — snow has its own toggle and the WET state defers to
+  // SNOW/ICE below.
+  if (typeof state.rwyDryT !== 'number') state.rwyDryT = 0;
+  const RWY_DRYOUT_SECS = 120;
+  if (settings.rain){
+    state.rwyDryT = Math.min(RWY_DRYOUT_SECS, state.rwyDryT + dt);
+  } else if (state.rwyDryT > 0){
+    state.rwyDryT = Math.max(0, state.rwyDryT - dt);
+  }
+  const contamEl = document.getElementById('rwyContam');
+  if (contamEl){
+    const snowOn = !!(settings.snow && settings.snow !== 'off');
+    let _oatC = 12;
+    try { _oatC = _atisTempC(); } catch(e){}
+    const frozen = snowOn && _oatC <= 0.5;
+    let label = 'RWY DRY', color = '#7ee787';
+    if (frozen)        { label = '❄ RWY ICE';  color = '#ff6b6b'; }
+    else if (snowOn)   { label = '❄ RWY SNOW'; color = '#cfe2f3'; }
+    else if (settings.rain || state.rwyDryT > 0){
+      label = 'RWY WET';
+      color = '#9ad8ff';
+    }
+    contamEl.textContent = label;
+    contamEl.style.color = color;
+    contamEl.style.display = state.photoMode ? 'none' : 'inline';
+  }
   // RWY WET pill — pairs with the rain weather toggle so pilots know to expect
   // a longer rollout before they're on the strip. The actual friction drop
   // lives in the on-ground physics block.
-  const wetEl = document.getElementById('rwyWet');
-  if (wetEl) wetEl.style.display = settings.rain ? 'inline' : 'none';
+  // (Consolidated into rwyContam above; this block intentionally a no-op.)
   // RWY SNOW pill — same idea as RWY WET but for the snow toggle. Heavier
   // friction penalty (~30% braking vs rain's ~45%) is reflected in the
   // physics block; this pill just gives the pilot the visual cue to expect
   // a long, slippery rollout before they're on the strip.
-  const snowEl = document.getElementById('rwySnow');
-  if (snowEl) snowEl.style.display = (settings.snow && settings.snow !== 'off') ? 'inline' : 'none';
+  // (Consolidated into rwyContam above; this block intentionally a no-op.)
   // FOG pill — blue indicator whenever the fog weather toggle is on light or
   // heavy. Hidden in photo mode so saved PNGs stay clean (the fog itself is
   // still rendered, the pill just clears so the HUD doesn't show in the shot).
