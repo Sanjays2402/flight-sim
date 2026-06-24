@@ -21856,8 +21856,14 @@ function step(dt){
       if (_xwKt >= 18)      _xwColor = '#ff5577';
       else if (_xwKt >= 10) _xwColor = '#ffd166';
       xwCompPillEl.style.color = _xwColor;
+      // Publish for the cockpit DA gauge to mirror exactly (same runway-pick
+      // + L/R sign convention). Pure derived state — no physics side effect.
+      state.xwCompShow = true;
+      state.xwCompMs   = _xwBestMs;
     } else {
       if (xwCompPillEl.style.display !== 'none') xwCompPillEl.style.display = 'none';
+      state.xwCompShow = false;
+      state.xwCompMs   = 0;
     }
   }
   // Pre-prime pill (WIND row) — green ✓ PRIMED <Ns> while a Shift+I prime
@@ -27728,6 +27734,22 @@ function drawCockpitDa(daFt, daOverride){
   ctx.fillStyle = '#6aa';
   ctx.font = 'bold 11px ui-monospace, monospace';
   ctx.fillText('PA ' + Math.round(paFt), cx, cy + R*0.66);
+  // Crosswind component echo — mirrors the HUD `XW` pill exactly (same
+  // runway-pick, same L/R sign convention) so the cockpit-cam pilot reads
+  // the live crosswind component without taking their eyes off the panel.
+  // Suppressed during the avionics self-test so the power-up ritual is
+  // clean, and only painted when the HUD pill itself is visible (the WIND
+  // row gates this on ≤ 5 km from a runway + roughly aligned).
+  if (state.xwCompShow && state.selfTestT < 0){
+    const _xwKt   = Math.abs(state.xwCompMs || 0) * 1.94384;
+    const _xwSide = (state.xwCompMs || 0) > 0 ? 'L' : 'R';
+    let _xwColor  = '#7ee787';
+    if (_xwKt >= 18)      _xwColor = '#ff5577';
+    else if (_xwKt >= 10) _xwColor = '#ffd166';
+    ctx.fillStyle = _xwColor;
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText('XW ' + Math.round(_xwKt) + 'kt ' + _xwSide, cx, cy + R*0.86);
+  }
 }
 function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
   // Cheap visibility guard: skip the canvas work when the panel isn't on screen.
