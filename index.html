@@ -5163,6 +5163,46 @@ const _beaconGlareTex = (() => {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 })();
+// Ground-painted shadow disc for the rotating beacon. One red wedge baked
+// into a single shared CanvasTexture — we rotate the disc mesh itself each
+// frame to track the spinning beacon, so all airports share one GPU upload
+// (same trick as the windsock compass-rose disc). The wedge points along
+// canvas +y so when we lay the disc flat (rotation.x = -π/2) and set the
+// disc's local y rotation to the beacon's head yaw, the painted shadow
+// sweeps in the same direction as the rotating green head above it.
+const BEACON_SHADOW_RADIUS_M = 30;          // matches spec: ~30m radius arc on the apron
+const BEACON_SHADOW_PROX_NEAR_M = 1500;     // 1.5 km — start of visibility ramp
+const BEACON_SHADOW_AGL_MAX_M = 300;        // hide above this AGL so cruise air views stay clean
+const _beaconShadowTex = (() => {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+  const cx = cv.getContext('2d');
+  cx.clearRect(0, 0, 256, 256);
+  // One ~70° red wedge centered on canvas +y (12 o'clock), with a soft
+  // radial falloff so the shadow fades out cleanly toward the rim instead
+  // of cutting a hard pizza-slice edge into the apron.
+  const cx0 = 128, cy0 = 128, R = 124;
+  const wedgeHalf = (35 * Math.PI) / 180; // half-width of the wedge in radians (~70° total)
+  // Build the wedge as a path so we can fill it with a radial gradient.
+  // Canvas Y grows downward, so "12 o'clock" is angle = -π/2; we want the
+  // wedge to point up the canvas, which we achieve by sweeping the path
+  // from (-π/2 - wedgeHalf) to (-π/2 + wedgeHalf).
+  cx.save();
+  cx.beginPath();
+  cx.moveTo(cx0, cy0);
+  cx.arc(cx0, cy0, R, -Math.PI/2 - wedgeHalf, -Math.PI/2 + wedgeHalf);
+  cx.closePath();
+  const g = cx.createRadialGradient(cx0, cy0, R * 0.18, cx0, cy0, R);
+  g.addColorStop(0.0,  'rgba(255, 60, 60, 0.65)'); // bright near the tower
+  g.addColorStop(0.55, 'rgba(220, 40, 40, 0.40)');
+  g.addColorStop(1.0,  'rgba(180, 30, 30, 0.00)'); // fade to nothing at the rim
+  cx.fillStyle = g;
+  cx.fill();
+  cx.restore();
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+})();
 function makeAirportBeacon(a){
   // Tower planted on the right side of the runway (local +x) at the approach
   // threshold so it doesn't crowd the windsock on the left. Slim white pole
@@ -5220,10 +5260,39 @@ function makeAirportBeacon(a){
   const whiteGlare = mkGlare(0xfff4d0);
   greenHead.add(greenGlare);
   whiteHead.add(whiteGlare);
+  // Ground shadow disc painted at the tower base. Lives under the same grp
+  // (so it inherits the airport elev/position), at local y=0.02 to avoid
+  // z-fighting with the terrain mesh. Disc itself owns its own rotation
+  // about Y; tickAirportBeacons spins it each frame to match the head.
+  const shadowMat = new THREE.MeshBasicMaterial({
+    map: _beaconShadowTex,
+    transparent: true,
+    depthWrite: false,
+    opacity: 0,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -2,
+    fog: false
+  });
+  const shadowGeo = new THREE.CircleGeometry(BEACON_SHADOW_RADIUS_M, 48);
+  const shadowYaw = new THREE.Group();
+  shadowYaw.position.set(towerX, 0.02, towerZ);
+  // Cancel the parent grp's hdg yaw so the disc's local y rotation directly
+  // corresponds to the beacon head's local yaw (we want the painted wedge
+  // to point exactly where the green head is pointing in world space).
+  shadowYaw.rotation.y = -a.hdg;
+  const shadowDisc = new THREE.Mesh(shadowGeo, shadowMat);
+  shadowDisc.rotation.x = -Math.PI/2;   // flatten onto the XZ plane
+  shadowDisc.renderOrder = -1;          // draw under other airport ground paint
+  shadowDisc.visible = false;           // gated on each frame by proximity + dusk
+  shadowYaw.add(shadowDisc);
+  grp.add(shadowYaw);
   airportBeacons.push({
     ap: a, headGrp, greenMat, whiteMat,
     greenGlare: greenGlare.material, whiteGlare: whiteGlare.material,
-    baseGreen, baseWhite
+    baseGreen, baseWhite,
+    shadowMat, shadowDisc, shadowYaw
   });
 }
 for (const a of AIRPORTS) makeAirportBeacon(a);
@@ -5321,6 +5390,49 @@ function tickAirportBeacons(dt){
     const wPulse = Math.pow(wDot, 6);
     b.greenGlare.opacity = 0.05 * (0.25 + 0.75 * nightT) + 0.85 * gPulse * (0.35 + 0.65 * nightT);
     b.whiteGlare.opacity = 0.05 * (0.25 + 0.75 * nightT) + 0.95 * wPulse * (0.35 + 0.65 * nightT);
+    // Ground shadow disc: rotate to match the head's world yaw, gate on
+    // dusk + proximity + altitude so cruise-air views stay clean. Mirrors
+    // the same dusk gate the beacon glow uses (nightT) and the same
+    // on-ground-or-low-overhead pattern the taxi chevrons use. Guarded so
+    // the module-load priming call (state/plane not yet alive) leaves the
+    // disc invisible until the first real frame.
+    if (b.shadowDisc && typeof plane !== 'undefined' && plane && typeof state !== 'undefined' && state){
+      // Match the painted wedge to the green head's world direction. The
+      // shadowYaw cancels grp's a.hdg, so the disc's local y rotation
+      // equals the head's local y rotation (the same value we just set).
+      b.shadowYaw.rotation.y = -b.ap.hdg + b.headGrp.rotation.y;
+      // Visibility gate: close enough horizontally, and below the AGL
+      // ceiling. We also keep it on whenever the player is touching the
+      // ground at this field, regardless of overhead AGL.
+      let visible = false;
+      let proxT = 0;
+      let aglT = 0;
+      const dx = plane.position.x - b.ap.x;
+      const dz = plane.position.z - b.ap.z;
+      const distH = Math.hypot(dx, dz);
+      const agl = plane.position.y - b.ap.elev;
+      if (distH < BEACON_SHADOW_PROX_NEAR_M){
+        // Linear falloff toward the prox boundary so the disc fades out
+        // smoothly as the player flies away rather than popping off.
+        proxT = 1 - (distH / BEACON_SHADOW_PROX_NEAR_M);
+        // AGL gate — full opacity on the ground at this field, linear fade
+        // to zero by BEACON_SHADOW_AGL_MAX_M, fully hidden above that.
+        if (state.onGround && distH < 700){
+          aglT = 1; // on the apron at this field — show at full strength
+        } else if (agl >= 0 && agl < BEACON_SHADOW_AGL_MAX_M){
+          aglT = 1 - (agl / BEACON_SHADOW_AGL_MAX_M);
+        }
+        visible = (proxT > 0.02 && aglT > 0.02 && nightT > 0.02);
+      }
+      b.shadowDisc.visible = visible;
+      if (visible){
+        // Soft per-frame opacity: dusk-gated like the beacon glow, attenuated
+        // by both how close and how low the player is to the tower base.
+        b.shadowMat.opacity = 0.85 * nightT * proxT * aglT;
+      } else {
+        b.shadowMat.opacity = 0;
+      }
+    }
   }
 }
 tickAirportBeacons(0); // prime so first frame doesn't show un-rotated heads
