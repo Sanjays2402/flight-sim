@@ -759,6 +759,22 @@
     75%  { filter: brightness(.55) contrast(.70) saturate(.55); }
     100% { filter: brightness(.18) contrast(.55) saturate(.25); }
   }
+  /* Master CAUTION / WARNING annunciator pinned to the top-right of the
+     cockpit panel. Aggregates the live amber / red HUD pill state into a
+     single glance-able legend: yellow CAUTION lamp for amber events, red
+     WARNING lamp for red events. Each lamp pulses while latched + unacked,
+     drops to a steady glow after acknowledgement (click the lamp or
+     Shift+M), and dims to a dark glyph when the underlying condition clears.
+     The legend glyph stays visible at all times (real annunciator panels do
+     this) so the pilot always knows which slot is which. */
+  #cpMca { position:absolute; top:-26px; right:8px; display:flex; gap:6px; pointer-events:auto; user-select:none; z-index:1; }
+  #cpMca .lamp { display:inline-flex; align-items:center; justify-content:center; min-width:78px; padding:3px 8px; font-size:10px; letter-spacing:1.5px; font-weight:800; border-radius:4px; border:1px solid rgba(255,255,255,0.12); background:rgba(8,14,22,0.78); color:#5a6068; text-shadow:none; box-shadow:none; cursor:pointer; transition:background .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease, text-shadow .18s ease; }
+  #cpMca .lamp.lit-amber { color:#0a0d12; background:#ffd166; border-color:#b88c2a; text-shadow:0 0 0 transparent; box-shadow:0 0 12px rgba(255,209,102,0.55), inset 0 0 6px rgba(255,255,255,0.25); }
+  #cpMca .lamp.lit-red   { color:#0a0d12; background:#ff5252; border-color:#a02020; text-shadow:0 0 0 transparent; box-shadow:0 0 14px rgba(255,82,82,0.7),   inset 0 0 6px rgba(255,255,255,0.20); }
+  #cpMca .lamp.pulse-amber { animation: mcaPulseAmber 0.9s ease-in-out infinite; }
+  #cpMca .lamp.pulse-red   { animation: mcaPulseRed   0.7s ease-in-out infinite; }
+  @keyframes mcaPulseAmber { 0%,100% { box-shadow:0 0 12px rgba(255,209,102,0.55), inset 0 0 6px rgba(255,255,255,0.25); filter:brightness(1); } 50% { box-shadow:0 0 22px rgba(255,209,102,0.95), inset 0 0 8px rgba(255,255,255,0.45); filter:brightness(1.18); } }
+  @keyframes mcaPulseRed   { 0%,100% { box-shadow:0 0 14px rgba(255,82,82,0.7),   inset 0 0 6px rgba(255,255,255,0.20); filter:brightness(1); } 50% { box-shadow:0 0 24px rgba(255,82,82,1.0),    inset 0 0 8px rgba(255,255,255,0.40); filter:brightness(1.22); } }
   /* Mirror the dim pass on the HUD readouts so the whole instrument scan
      looks like it's running on a depleted battery, not just the gauges. */
   #hud.alt-fail { opacity:.75; }
@@ -1141,6 +1157,10 @@
 </div>
 <div id="cockpitPanel">
   <div id="cpPitotHeat" style="display:none;position:absolute;top:-18px;right:8px;font-size:9px;letter-spacing:1.5px;color:#ff9e3d;font-weight:800;text-shadow:0 0 6px rgba(255,158,61,.55)">● PITOT HEAT</div>
+  <div id="cpMca" title="Master CAUTION / WARNING annunciator — click a lamp to acknowledge (or Shift+M)">
+    <span id="cpMcaCaution" class="lamp" data-mca="caution">⚠ CAUTION</span>
+    <span id="cpMcaWarn"    class="lamp" data-mca="warn">⚠ WARNING</span>
+  </div>
   <div class="gauge"><canvas id="cpAsi" width="220" height="220"></canvas><div class="glbl" id="cpAsiLbl">AIRSPEED km/h</div></div>
   <div class="gauge"><canvas id="cpAi"  width="220" height="220"></canvas><div class="glbl">ATTITUDE</div></div>
   <div class="gauge"><canvas id="cpAlt" width="220" height="220"></canvas><div class="glbl">ALTITUDE m</div></div>
@@ -11148,6 +11168,51 @@ function playFireWarnChirp(){
   }
 }
 
+// Master CAUTION / WARNING annunciator chime — 220 ms two-tone bell. Single
+// shared chime for both lamps; `red=true` swaps in a brighter, higher top
+// note so the pilot reads the severity in their ears. Mirrors the
+// playFireWarnChirp volume-scaling + sfxReady() guard pattern so the
+// master-volume / mute path stays consistent.
+function playMasterChime(red){
+  const ctx = sfxReady();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const vol = (red ? 0.34 : 0.26) * settings.volume;
+  if (vol <= 0) return;
+  // Two-tone bell: a low body tone with a brighter top tone layered on.
+  // Red severity raises both pitches roughly a fifth and stretches the
+  // attack slightly so the pilot reads it as a harder alarm.
+  const bodyHz = red ? 720 : 540;
+  const topHz  = red ? 1100 : 820;
+  const totalDur = 0.22;
+  // Body oscillator.
+  {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(bodyHz, t0);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + totalDur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + totalDur + 0.02);
+  }
+  // Top oscillator — quieter overlay so it reads as a bell, not a buzzer.
+  {
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(topHz, t0);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol * 0.55, t0 + 0.010);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + totalDur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + totalDur + 0.02);
+  }
+}
+
 // Extinguisher discharge SFX — ~0.55s of band-passed noise that reads as a
 // dry-chemical bottle dumping into the cowl: short attack, sustained PSHH,
 // quick decay. Mirrors playFireWarnChirp's volume-scaling pattern so the
@@ -12047,6 +12112,16 @@ const state = {
   fuelSelector: (settings && settings.fuelSelector) || 'BOTH',
   fuelTankT: 0,
   fuelImbalanceAtcLatch: false,
+  // Master CAUTION / WARNING annunciator. `lit` mirrors live aggregated
+  // state (any active amber pill / any active red pill); `acked` latches
+  // once per illumination cycle so the lamp can drop from pulsing to
+  // steady-on without losing the underlying warning. `prev` is the
+  // one-frame edge detector — `playMasterChime()` fires the first frame
+  // either lamp transitions off→on. Reset state lives in resetPlane().
+  mca: {
+    caution: { lit:false, acked:false, prev:false },
+    warn:    { lit:false, acked:false, prev:false },
+  },
   engineOut: false,
   // Cold start ritual (settings.coldStart). When true, throttle is locked at
   // 0 and the engine produces no thrust until the player taps `I` (or the
@@ -13891,6 +13966,13 @@ addEventListener('keydown', e=>{
     state.ap.wpFollow = false;
   }
   if (e.code==='KeyM' && e.shiftKey){
+    // Shift+M priority 0: when the master CAUTION / WARNING annunciator has
+    // a pulsing lamp, the chord acknowledges the pulse(s) instead of
+    // touching the route or Hobbs timer — matches the real-world reach
+    // for the master-caution button when an alarm lights up. Only consumes
+    // the press when something was actually acked; otherwise falls through
+    // to the legacy route-clear / Hobbs-reset chain below.
+    if (typeof mcaAcknowledge === 'function' && mcaAcknowledge('any')) return;
     // Shift+M priority 1: when a route is set (active waypoint or queued
     // chain), wipe the whole route — the pilot is bailing on the plan. The
     // route planner is the higher-stakes surface, so it wins the binding.
@@ -15375,6 +15457,22 @@ function resetPlane(){
   state.fuelR = 0.5;
   state.fuelTankT = 0;
   state.fuelImbalanceAtcLatch = false;
+  // Master CAUTION / WARNING annunciator — wipe both lamp latches so a
+  // hot reset boots with both legends dim. The aggregator will re-light
+  // them on the very next step() tick if a fresh sortie still has an
+  // active condition (e.g. respawning at the apron with the parking brake
+  // set won't carry an acked CAUTION across the reset). Query the lamp
+  // elements inline rather than touching the module-scope cached refs —
+  // resetPlane() runs once at script init before those `const` bindings
+  // initialize (TDZ), so any reference here would throw before first frame.
+  if (state.mca){
+    state.mca.caution.lit = false; state.mca.caution.acked = false; state.mca.caution.prev = false;
+    state.mca.warn.lit    = false; state.mca.warn.acked    = false; state.mca.warn.prev    = false;
+    const _mcaC = document.getElementById('cpMcaCaution');
+    const _mcaW = document.getElementById('cpMcaWarn');
+    if (_mcaC) _mcaC.classList.remove('lit-amber', 'pulse-amber');
+    if (_mcaW) _mcaW.classList.remove('lit-red', 'pulse-red');
+  }
   // Fire-drill OFF position starvation timer — wipe on every fresh sortie
   // so a pilot who reset mid-starvation doesn't carry a stale countdown
   // into the next flight.
@@ -24849,6 +24947,14 @@ function step(dt){
   drawMinimap(hdg);
   drawWeatherRadar();
   drawCockpitPanel(indicatedKmh, altMDisp, hdgMag, dt, speedKmh);
+  // Master CAUTION / WARNING annunciator — aggregates the live amber / red
+  // HUD pill state into one glance-able legend on the cockpit panel. Runs
+  // after the HUD pill updates above so the DOM `display` reads are
+  // current; runs after drawCockpitPanel so the lamps live alongside the
+  // gauges thematically. Pure aggregator — it does not introduce any new
+  // emergency state, it just summarizes what the existing systems already
+  // publish.
+  updateMasterCaution(dt);
 
   // Background color follows the lower sky-band so the off-dome edges blend in.
   if (skyUniforms.bot) scene.background = skyUniforms.bot.value;
@@ -30455,6 +30561,216 @@ function drawCockpitPanel(indicatedKmh, altM, hdgDeg, dt, trueKmh){
     cpEl.style.setProperty('--duskAmt', _cockpitDuskT.toFixed(3));
     cpEl.classList.toggle('dusk', _cockpitDuskT > 0.01);
   } catch(e){}
+}
+
+// ====== Master CAUTION / WARNING annunciator ======
+// Live aggregator: each frame, scan the existing amber / red HUD pills (and
+// a small list of state-level latches like state.oilLowAtcLatch where no
+// HUD pill exists) and roll them up into two glance-able lamps pinned to
+// the top-right of the cockpit panel.
+//
+// The CAUTION (amber) and WARNING (red) lamps each go through three
+// visual states:
+//   * dim glyph        — no active event in that severity slot
+//   * pulsing lit lamp — active + not yet acknowledged (rising-edge chime)
+//   * steady lit lamp  — active + acknowledged (held until the event clears)
+//
+// Acknowledge by clicking either lamp (clears that severity slot's pulse
+// only) or pressing Shift+M (clears whichever lamps are currently lit;
+// falls through to the legacy route-clear chord when no lamps are lit).
+//
+// Pure aggregation — no new physics, no new audio beyond the one-shot bell
+// on the rising edge of each lamp. The list of contributing signals lives
+// in `mcaCautionActive()` / `mcaWarnActive()` below so it stays one place
+// to extend as new emergencies land.
+
+// Cached DOM handles — the lamps are children of #cockpitPanel so they
+// hide/show with the panel automatically (and the PHOTO_HIDE_IDS sweep
+// covers them via the parent), but we still want to mutate their classes
+// when the panel is hidden so the next time it shows the lamps reflect
+// live state without a one-frame stale flash.
+const _mcaBar       = document.getElementById('cpMca');
+const _mcaCautionEl = document.getElementById('cpMcaCaution');
+const _mcaWarnEl    = document.getElementById('cpMcaWarn');
+
+// Cheap DOM "is this HUD pill currently lit?" probe. Mirrors how the rest
+// of the file flips pills via inline `style.display = 'inline'|'block'|'none'`,
+// so we just look for any non-'none' display. Bails safely if the id is
+// missing (defensive against future HTML refactors).
+function _mcaPillLit(id){
+  const el = document.getElementById(id);
+  if (!el) return false;
+  const d = el.style.display;
+  // Pills toggle between '', 'inline', 'block', 'flex' for visible, and
+  // 'none' for hidden. An empty string means CSS default, which for these
+  // span/row pills is visible — but we also want offsetParent !== null so a
+  // hidden parent (e.g. photo mode hiding the whole HUD column) doesn't
+  // light the lamp on us.
+  if (d === 'none') return false;
+  return el.offsetParent !== null;
+}
+
+// Aggregator: any active amber HUD pill OR state-latch we want to roll up.
+// Skipping carb-ice when it has already crossed into the red band so the
+// CAUTION lamp doesn't double-fire alongside the WARNING lamp for the same
+// underlying event.
+function _mcaCautionActive(){
+  // Hard suppress while the panel itself is in a non-flight state. The
+  // existing pills already suppress themselves in most of these cases, but
+  // doing it here too belts-and-braces the aggregator so a stale DOM read
+  // can't fake a lamp through e.g. crashed/replay.
+  if (state.photoMode || state.crashed || state.replayActive
+      || state.introOpen || state.paused) return false;
+  // Carb ice: amber only when the existing pill is amber-colored. The HUD
+  // pill flips its text color to red past CARB_ICE_AMBER_MAX, in which case
+  // it belongs in the WARNING aggregator instead.
+  {
+    const carbEl = document.getElementById('carbIcePill');
+    if (carbEl && carbEl.style.display !== 'none' && carbEl.offsetParent !== null){
+      const c = (state.carbIce || 0);
+      if (c >= 0.15 && c <= (typeof CARB_ICE_AMBER_MAX !== 'undefined' ? CARB_ICE_AMBER_MAX : 0.6)) return true;
+    }
+  }
+  if (_mcaPillLit('pitotIce'))     return true;
+  if (_mcaPillLit('fuelImbPill'))  return true;
+  if (_mcaPillLit('magPill'))      return true;
+  if (_mcaPillLit('shearWarn'))    return true;
+  if (_mcaPillLit('gearWarn'))     return true;
+  if (_mcaPillLit('fuelStarve'))   return true;
+  if (_mcaPillLit('trafficWarn'))  return true;
+  if (_mcaPillLit('electrical'))   return true;
+  // Density altitude: amber tier only — the pill colors itself, so check
+  // the actual style.color rather than just visibility. Treat anything
+  // that isn't the resting green as caution-worthy (red rolls up into
+  // WARNING below).
+  {
+    const da = document.getElementById('daPill');
+    if (da && da.style.display !== 'none' && da.offsetParent !== null){
+      const col = (da.style.color || '').toLowerCase();
+      if (col && col !== '#7ee787' && col !== 'rgb(126, 231, 135)'
+          && col !== '#ff5252' && col !== 'rgb(255, 82, 82)') return true;
+    }
+  }
+  // ENG TEMP pill in amber stage — it strobes amber before the redline
+  // latch trips. Once the latch trips, the pill goes red; that case rolls
+  // up into WARNING below.
+  {
+    const et = document.getElementById('engtemp');
+    if (et && et.style.display !== 'none' && et.offsetParent !== null
+        && !state.engineTempWarnLatch) return true;
+  }
+  return false;
+}
+
+// Aggregator: any active red HUD pill OR state-latch we want to roll up.
+function _mcaWarnActive(){
+  if (state.photoMode || state.crashed || state.replayActive
+      || state.introOpen || state.paused) return false;
+  if (state.engineFire)            return true;
+  if (state.oilLowAtcLatch)        return true;
+  if (state.engineTempWarnLatch)   return true;
+  // Terrain pull-up has its own block-display pill rather than a state flag.
+  if (_mcaPillLit('terrain'))      return true;
+  // Fuel critical at or below 10%: matches the HUD #fuel red-blink
+  // threshold so the lamp lights at the same beat the pilot's eye catches
+  // the readout flashing.
+  if (state.fuel > 0 && state.fuel <= 0.10) return true;
+  // Carb ice in the red band (severity above CARB_ICE_AMBER_MAX).
+  {
+    const carbEl = document.getElementById('carbIcePill');
+    if (carbEl && carbEl.style.display !== 'none' && carbEl.offsetParent !== null){
+      const c = (state.carbIce || 0);
+      if (c > (typeof CARB_ICE_AMBER_MAX !== 'undefined' ? CARB_ICE_AMBER_MAX : 0.6)) return true;
+    }
+  }
+  // FUEL-row "⚠ FUEL STARVED" red pill — lit by the deeper <2% stage.
+  if (_mcaPillLit('fuelStarved'))  return true;
+  return false;
+}
+
+function updateMasterCaution(/* dt */){
+  // Update the active flags first. The DOM reads above are read-only so it
+  // doesn't matter what order they happen in.
+  const cautionLit = _mcaCautionActive();
+  const warnLit    = _mcaWarnActive();
+  const mca = state.mca;
+  // Rising edge: fire the one-shot chime + arm the pulse state. The
+  // `acked` flag wipes on each rising edge so a fresh event re-arms the
+  // pulse + chime even if the same lamp slot was already steady-lit a
+  // moment ago (e.g. quick on/off/on event).
+  if (cautionLit && !mca.caution.prev){
+    mca.caution.acked = false;
+    if (typeof playMasterChime === 'function') playMasterChime(false);
+  }
+  if (warnLit && !mca.warn.prev){
+    mca.warn.acked = false;
+    if (typeof playMasterChime === 'function') playMasterChime(true);
+  }
+  mca.caution.lit  = cautionLit;
+  mca.warn.lit     = warnLit;
+  mca.caution.prev = cautionLit;
+  mca.warn.prev    = warnLit;
+  // Falling edge: drop ack so the next illumination starts pulsing again
+  // from a clean slate.
+  if (!cautionLit) mca.caution.acked = false;
+  if (!warnLit)    mca.warn.acked    = false;
+  // Flush DOM classes. Done unconditionally so the lamps reflect live
+  // aggregate state even when the cockpit panel is currently hidden (the
+  // panel hides the lamps via display:none anyway, so this is cheap and
+  // keeps the next reveal flash-free).
+  if (_mcaCautionEl){
+    _mcaCautionEl.classList.toggle('lit-amber', cautionLit);
+    _mcaCautionEl.classList.toggle('pulse-amber', cautionLit && !mca.caution.acked);
+  }
+  if (_mcaWarnEl){
+    _mcaWarnEl.classList.toggle('lit-red', warnLit);
+    _mcaWarnEl.classList.toggle('pulse-red', warnLit && !mca.warn.acked);
+  }
+}
+
+// Manual acknowledgement entry point. `slot` is 'caution', 'warn', or 'any'.
+// 'any' is the Shift+M chord path: clears whichever lamps are currently
+// pulsing. Returns true if it actually acked something so the keydown
+// handler can decide whether to fall through to the legacy route-clear
+// chord (which lives on the same chord).
+function mcaAcknowledge(slot){
+  const mca = state.mca;
+  let acked = false;
+  if ((slot === 'caution' || slot === 'any') && mca.caution.lit && !mca.caution.acked){
+    mca.caution.acked = true;
+    acked = true;
+  }
+  if ((slot === 'warn' || slot === 'any') && mca.warn.lit && !mca.warn.acked){
+    mca.warn.acked = true;
+    acked = true;
+  }
+  // Immediately flush the pulse class so the visual reaction is instant
+  // (otherwise it waits for the next step() tick to re-evaluate).
+  if (acked){
+    if (_mcaCautionEl) _mcaCautionEl.classList.toggle('pulse-amber', mca.caution.lit && !mca.caution.acked);
+    if (_mcaWarnEl)    _mcaWarnEl.classList.toggle('pulse-red',     mca.warn.lit    && !mca.warn.acked);
+  }
+  return acked;
+}
+
+// Click handlers on the lamps. Each lamp acks only its own severity slot
+// so the pilot can acknowledge a CAUTION while a separate WARNING is still
+// pulsing. Pointer-events live on the lamps so the panel itself stays
+// transparent to the camera-orbit drag in chase cam (the panel only shows
+// in cockpit cam anyway, but defensive).
+if (_mcaCautionEl){
+  _mcaCautionEl.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    mcaAcknowledge('caution');
+  });
+}
+if (_mcaWarnEl){
+  _mcaWarnEl.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    mcaAcknowledge('warn');
+  });
 }
 
 // ====== Camera ======
