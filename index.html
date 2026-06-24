@@ -978,7 +978,7 @@
   <div class="row" id="windAloftRow" style="display:none"><span class="lbl">↑WND</span><span class="val"><span id="windAloft" style="color:#9bd0ff">000@0</span><span style="color:#6aa;margin-left:4px;font-weight:400">AGL HI</span></span></div>
   <div class="row"><span class="lbl">TIME</span><span class="val" id="tod">12:00</span></div>
   <div class="row"><span class="lbl">DMG</span><span class="val"><span id="dmg">0%</span><span id="repair" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▼ REPAIR</span></span></div>
-  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span><span id="fuelSelPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700" title="Fuel tank selector — Shift+Y cycles BOTH / LEFT / RIGHT">SEL: <span id="fuelSelPillT">BOTH</span></span><span id="fuelImbPill" style="display:none;margin-left:6px;color:#ffb020;font-weight:700" title="Left and right tanks are more than 15% apart — switch selector to even them out">⛽ IMBALANCE</span><span id="fuelStarved" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700" title="Tank nearly dry — engine is surging on the dregs">⚠ FUEL STARVED</span></span></div>
+  <div class="row"><span class="lbl">FUEL</span><span class="val"><span id="fuel">100%</span><span id="refuel" style="display:none;color:#7ee787;font-weight:700;margin-left:6px">▲ FUEL</span><span id="fuelTe" style="display:none;margin-left:8px;color:#7ee787;font-weight:700" title="Time to empty at current fuel flow">T/E <span id="fuelTeVal">—</span></span><span id="fuelSelPill" style="display:none;margin-left:6px;color:#9ad8ff;font-weight:700" title="Fuel tank selector — Shift+Y cycles BOTH / LEFT / RIGHT / OFF (OFF = fire-drill cutoff)">SEL: <span id="fuelSelPillT">BOTH</span></span><span id="fuelImbPill" style="display:none;margin-left:6px;color:#ffb020;font-weight:700" title="Left and right tanks are more than 15% apart — switch selector to even them out">⛽ IMBALANCE</span><span id="fuelStarved" style="display:none;margin-left:6px;color:#ff9e3d;font-weight:700" title="Tank nearly dry — engine is surging on the dregs">⚠ FUEL STARVED</span></span></div>
   <div class="row" id="apRow" style="display:none"><span class="lbl">AP</span><span class="val" id="apReadout" style="color:#7ee787">ON</span></div>
   <div class="row" id="wpRow" style="display:none"><span class="lbl">WPT</span><span class="val" id="wpReadout" style="color:#e88be8">—</span></div>
   <div class="row" id="emrRow" style="display:none"><span class="lbl">EMR</span><span class="val" id="emrReadout" style="color:#ff6cf7;font-weight:700">—</span></div>
@@ -1140,7 +1140,7 @@
   <div class="gauge"><canvas id="cpSkid" width="220" height="220" title="Inclinometer — step on the ball for coordinated flight"></canvas><div class="glbl">SLIP / SKID</div></div>
   <div class="gauge"><canvas id="cpBrk" width="220" height="220"></canvas><div class="glbl">BRAKE TEMP °C</div></div>
   <div class="gauge"><canvas id="cpFf"  width="220" height="220"></canvas><div class="glbl">FUEL FLOW GPH</div></div>
-  <div class="gauge"><canvas id="cpFuel" width="220" height="220" title="Fuel quantity — left wing (green) + right wing (cyan) tanks · Shift+Y cycles fuel selector BOTH / LEFT / RIGHT"></canvas><div class="glbl">FUEL QTY L/R</div></div>
+  <div class="gauge"><canvas id="cpFuel" width="220" height="220" title="Fuel quantity — left wing (green) + right wing (cyan) tanks · Shift+Y cycles fuel selector BOTH / LEFT / RIGHT / OFF (OFF = fire-drill cutoff)"></canvas><div class="glbl">FUEL QTY L/R</div></div>
   <div class="gauge"><canvas id="cpChr" width="220" height="220" title="Click: start/stop · Right-click: lap · Double-click: reset"></canvas><div class="glbl">STOPWATCH</div></div>
   <div class="gauge"><canvas id="cpVor" width="220" height="220" title="Click around the dial to set OBS course · Right-click to center on current bearing"></canvas><div class="glbl">VOR / CDI</div></div>
   <div class="gauge"><canvas id="cpClk" width="220" height="220" title="Cockpit clock — click the dial to toggle ZULU / LOCAL"></canvas><div class="glbl">CLOCK</div></div>
@@ -1718,7 +1718,7 @@ try {
     if (typeof saved.nightPanel === 'boolean') settings.nightPanel = saved.nightPanel;
     if (typeof saved.copilot === 'boolean') settings.copilot = saved.copilot;
     if (typeof saved.speedUnit === 'string' && SPEED_UNIT_IDS.indexOf(saved.speedUnit) !== -1) settings.speedUnit = saved.speedUnit;
-    if (typeof saved.fuelSelector === 'string' && ['BOTH','LEFT','RIGHT'].indexOf(saved.fuelSelector) !== -1) settings.fuelSelector = saved.fuelSelector;
+    if (typeof saved.fuelSelector === 'string' && ['BOTH','LEFT','RIGHT','OFF'].indexOf(saved.fuelSelector) !== -1) settings.fuelSelector = saved.fuelSelector;
     if (typeof saved.cockpitClockZulu === 'boolean') settings.cockpitClockZulu = saved.cockpitClockZulu;
     if (typeof saved.approachPlate === 'boolean') settings.approachPlate = saved.approachPlate;
     if (typeof saved.lightningStatic === 'boolean') settings.lightningStatic = saved.lightningStatic;
@@ -14010,15 +14010,18 @@ addEventListener('keydown', e=>{
     showStatus('RIBBON ' + (state.ribbonOn ? 'ON' : 'OFF'), null, state.ribbonOn ? 'good' : 'hard');
   }
   if (e.code==='KeyY' && e.shiftKey){
-    // Fuel tank selector. Cycles BOTH → LEFT → RIGHT → BOTH so a pilot can
-    // bias which wing the engine is drawing from on a long cruise to even
-    // out an imbalance, or in an emergency to draw the good tank when the
-    // other is leaking. Same lever lives in the cockpit cpFuel gauge
-    // readout, in the HUD FUEL row's SEL: pill, and persists to settings
-    // (mirrors carbHeat / cowlFlaps).
+    // Fuel tank selector. Cycles BOTH → LEFT → RIGHT → OFF → BOTH so a
+    // pilot can bias which wing the engine is drawing from on a long
+    // cruise to even out an imbalance, or in an emergency to draw the
+    // good tank when the other is leaking. OFF is the fire-drill position
+    // (no fuel feed at all) and pairs with the engine-fire emergency
+    // checklist popup so the pilot can tick the FUEL SELECTOR OFF row.
+    // Same lever lives in the cockpit cpFuel gauge readout, in the HUD
+    // FUEL row's SEL: pill, and persists to settings (mirrors carbHeat /
+    // cowlFlaps).
     if (state.introOpen) return;
     e.preventDefault();
-    const cycle = { BOTH:'LEFT', LEFT:'RIGHT', RIGHT:'BOTH' };
+    const cycle = { BOTH:'LEFT', LEFT:'RIGHT', RIGHT:'OFF', OFF:'BOTH' };
     const cur = state.fuelSelector || 'BOTH';
     const next = cycle[cur] || 'BOTH';
     state.fuelSelector = next;
@@ -15331,6 +15334,10 @@ function resetPlane(){
   state.fuelR = 0.5;
   state.fuelTankT = 0;
   state.fuelImbalanceAtcLatch = false;
+  // Fire-drill OFF position starvation timer — wipe on every fresh sortie
+  // so a pilot who reset mid-starvation doesn't carry a stale countdown
+  // into the next flight.
+  state.fuelOffStarveT = 0;
   // Touch-and-go streak is per-run — a full reset wipes it. Lifetime peak
   // is already preserved in pilotStats.bestTgStreak.
   state.tgStreak = 0;
@@ -17164,35 +17171,40 @@ const EMERG_FLOWS = {
     title:  '🔥 ENGINE FIRE',
     sub:    'EMERGENCY CHECKLIST',
     rows: [
-      // Step 1 — starve the fire. Real-world: pull the mixture to idle-cutoff.
-      // In-sim: any path that drives state.mixture below 5 % counts (the
-      // `-` key, leaning hotkeys, or the existing mixture lever click).
-      { label:'MIXTURE CUT',
-        check: () => {
-          const m = state.mixture || 0;
-          return { ok: m <= 0.05, state: Math.round(m * 100) + '%' };
-        } },
-      // Step 2 — throttle to idle so the prop stops fanning the flames.
+      // Step 1 — throttle to idle so the prop stops fanning the flames and
+      // the engine stops drawing fuel toward the fire. First action in the
+      // real POH fire procedure too.
       { label:'THROTTLE IDLE',
         check: () => {
           const t = state.throttle || 0;
           return { ok: t <= 0.05, state: Math.round(t * 100) + '%' };
         } },
-      // Step 3 — ignition off (`X` toggle). engineOut === true is the
-      // single source of truth for "the magnetos are dead" across the sim.
-      { label:'IGNITION OFF',
-        check: () => ({ ok: !!state.engineOut, state: state.engineOut ? 'OFF' : 'ON' }) },
-      // Step 4 — glide to a field. We can't auto-detect intent, but we CAN
-      // detect a controlled descent (sinking + airspeed above stall margin)
-      // which is exactly the posture you want for a fire-out glide. Falls
-      // back to a `—` placeholder on the ground or in level flight so the
-      // row doesn't lie.
-      { label:'GLIDE TO FIELD',
+      // Step 2 — mixture to idle-cutoff. Real-world: pull the mixture full
+      // lean to stop carburettor fuel feed. In-sim: any path that drives
+      // state.mixture below 5 % counts (the `-` key, leaning hotkeys, or
+      // the existing mixture lever click).
+      { label:'MIXTURE CUTOFF',
         check: () => {
-          const sinking = state.vel && state.vel.y < -0.5;
-          const flying  = !state.onGround && !state.crashed;
-          return { ok: flying && sinking, state: flying ? (sinking ? 'SINK' : '—') : 'GND' };
+          const m = state.mixture || 0;
+          return { ok: m <= 0.05, state: Math.round(m * 100) + '%' };
         } },
+      // Step 3 — fuel selector OFF. Belt-and-braces with mixture cutoff:
+      // physically removes the fuel feed to the engine bay so a leaking
+      // line can't keep feeding flame even if the mixture lever fails.
+      // Shift+Y now cycles BOTH → LEFT → RIGHT → OFF → BOTH so the pilot
+      // can park the selector on OFF as part of the fire drill.
+      { label:'FUEL SELECTOR OFF',
+        check: () => {
+          const sel = state.fuelSelector || 'BOTH';
+          return { ok: sel === 'OFF', state: sel };
+        } },
+      // Step 4 — discharge the onboard extinguisher. `extUsed` latches
+      // true the moment Shift+X dumps the bottle (only path that flips
+      // it, so this read is unambiguous). The bottle is a one-shot per
+      // sortie so ticking this row also tells the pilot they've used
+      // their only chemical option.
+      { label:'EXTINGUISHER (Shift+X)',
+        check: () => ({ ok: !!state.extUsed, state: state.extUsed ? 'USED' : 'ARMED' }) },
     ],
   },
   overheat: {
@@ -21294,7 +21306,14 @@ function step(dt){
       };
       let leftover = 0;
       const sel = state.fuelSelector || 'BOTH';
-      if (sel === 'LEFT'){
+      if (sel === 'OFF'){
+        // Selector parked at OFF — no fuel feed at all. The engine will
+        // starve on the next branch when burnDelta can't be drawn (leftover
+        // equals the full ask). This is the fire-drill position: pilot is
+        // intentionally cutting fuel to starve a fire / shut the engine
+        // down on the ground. No tank drain, no imbalance buildup.
+        leftover = burnDelta;
+      } else if (sel === 'LEFT'){
         leftover = _drawFrom('fuelL', burnDelta);
         if (leftover > 0) leftover = _drawFrom('fuelR', leftover);
       } else if (sel === 'RIGHT'){
@@ -21334,6 +21353,35 @@ function step(dt){
       state.throttle = 0;
       showStatus('FUEL EXHAUSTED', 'Deadstick — glide her in', 'hard');
       pushATC('Fuel exhausted, declaring emergency.', { tag:'PILOT', now:true });
+    }
+    // Fuel selector OFF — engine starves even with full tanks. Allow a
+    // short carb-bowl drain so a quick mis-tap on Shift+Y doesn't instantly
+    // kill the engine (mirrors the real fuel-line latency); after
+    // FUEL_OFF_STARVE_S of continuous OFF the engine cuts. Status banner +
+    // ATC nudge match the FUEL EXHAUSTED path so the pilot reads it as the
+    // same kind of event. Gated on a live, running engine (not cold-start
+    // or in-air restart) so a saved-OFF selector doesn't sabotage the
+    // cold-start crank ritual — the pilot will see the SEL pill go red
+    // and cycle back to BOTH before pressing I.
+    if (!state.engineOut && state.fuel > 0 && !state.coldStart && !state.airRestart){
+      const FUEL_OFF_STARVE_S = 4.0;
+      const sel = state.fuelSelector || 'BOTH';
+      if (sel === 'OFF'){
+        state.fuelOffStarveT = (state.fuelOffStarveT || 0) + (dt || 0);
+        if (state.fuelOffStarveT >= FUEL_OFF_STARVE_S){
+          state.engineOut = true;
+          state.throttle = 0;
+          state.fuelOffStarveT = 0;
+          showStatus('FUEL CUTOFF', 'Selector OFF — engine starved', 'hard');
+          if (typeof pushATC === 'function'){
+            pushATC('Fuel selector off, engine secured.', { tag:'PILOT', now:true });
+          }
+        }
+      } else {
+        state.fuelOffStarveT = 0;
+      }
+    } else {
+      state.fuelOffStarveT = 0;
     }
   }
   // Graded low-fuel ATC nudges. The HUD already color-flashes amber/red below
@@ -23541,7 +23589,9 @@ function step(dt){
     fuelSelPillEl.style.display = showSel ? 'inline' : 'none';
     if (showSel){
       fuelSelPillTEl.textContent = sel;
-      fuelSelPillEl.style.color = sel === 'LEFT' ? '#7ee787' : '#6ad8ff';
+      fuelSelPillEl.style.color = sel === 'OFF'  ? '#ff5252'
+                                : sel === 'LEFT' ? '#7ee787'
+                                : '#6ad8ff';
     }
   }
   // Fuel imbalance pill — amber when the two wing tanks drift more than
@@ -29230,14 +29280,20 @@ function drawCockpitFuel(lOverride, rOverride){
   ctx.fillText(rPct + '%', cx + R*0.40, cy + R*0.50);
   // Selector lever readout in the middle, color-keyed so a one-tank draw is
   // visually obvious. BOTH = neutral, LEFT/RIGHT = warmer color so the
-  // pilot doesn't forget they're feeding off a single wing.
+  // pilot doesn't forget they're feeding off a single wing. OFF = red so
+  // the fire-drill cutoff position reads as a danger state at a glance.
   const sel = state.fuelSelector || 'BOTH';
   ctx.font = 'bold 13px ui-monospace, monospace';
   ctx.fillStyle = '#6aa';
   ctx.fillText('SEL', cx, cy + R*0.08);
   ctx.font = 'bold 16px ui-monospace, monospace';
-  ctx.fillStyle = sel === 'BOTH' ? '#7ee787' : sel === 'LEFT' ? '#7ee787' : '#6ad8ff';
-  ctx.fillText(sel === 'BOTH' ? 'BOTH' : (sel === 'LEFT' ? 'L' : 'R'), cx, cy + R*0.22);
+  ctx.fillStyle = sel === 'OFF' ? '#ff5252'
+                 : sel === 'BOTH' ? '#7ee787'
+                 : sel === 'LEFT' ? '#7ee787'
+                 : '#6ad8ff';
+  ctx.fillText(sel === 'BOTH' ? 'BOTH'
+              : sel === 'OFF'  ? 'OFF'
+              : (sel === 'LEFT' ? 'L' : 'R'), cx, cy + R*0.22);
 }
 function _formatChrono(ms){
   // MM:SS.t with a one-digit tenths field so the readout fits the gauge
