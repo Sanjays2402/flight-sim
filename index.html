@@ -69,6 +69,15 @@
      the panel (8 vs panel's 7) so streaks read on top of the gauges. */
   #cockpitPanelStreaks { position:fixed; left:0; top:0; width:0; height:0; pointer-events:none; z-index:8; display:none; border-radius:10px; }
   #cockpitPanelStreaks.show { display:block; }
+  /* Magnetic whiskey compass — small swinging card floating just above the
+     cockpit panel area. Lives on its own fixed-position canvas (NOT a child
+     of #cockpitPanel so the panel's circular-canvas CSS doesn't turn it
+     into a disc). Positioned each frame via getBoundingClientRect of
+     #cockpitPanel so the card tracks the panel as it shifts on resize.
+     z-index sits just above the panel (8 vs panel's 7) so the card reads
+     on top. Hidden in photo mode via PHOTO_HIDE_IDS so saved PNGs stay clean. */
+  #whiskeyCompass { position:fixed; left:0; top:0; width:0; height:0; pointer-events:none; z-index:8; display:none; }
+  #whiskeyCompass.show { display:block; }
   /* Soft additive sun glare. Sits above the 3D canvas but below the HUD,
      pointer-events off so clicks go through, hidden in photo mode so saved
      PNGs stay clean. */
@@ -1003,6 +1012,7 @@
 <canvas id="windshieldRain"></canvas>
 <canvas id="wipers"></canvas>
 <canvas id="cockpitPanelStreaks"></canvas>
+<canvas id="whiskeyCompass"></canvas>
 <canvas id="sunGlare"></canvas>
 <div id="lightning"></div>
 <div id="gvision"><div class="grey"></div><div class="red"></div></div>
@@ -32292,6 +32302,228 @@ function updateCockpitPanelStreaks(dt){
   panelStreakCtx.globalAlpha = 1.0;
 }
 
+// ====== MAGNETIC WHISKEY COMPASS (cockpit overhead) ======
+// Small swinging compass card mounted at the top edge of the cockpit panel
+// area, the way every real GA cabin has a wet whiskey compass perched on
+// top of the glareshield. Pure cockpit flavour — reads the same magnetic
+// heading the HUD compass strip and the panel-mounted cpMag gauge use,
+// then lags it through a damped 2nd-order spring so quick rolls and yaw
+// inputs visibly slosh the card before it settles. No new state on the
+// global state object, no new keybind, no new audio: one float for the
+// current swing offset + one float for the velocity, both lazily seeded
+// the first frame the function runs and self-recovering on hot resets
+// (resetPlane clears nothing; the spring will just track back to the live
+// heading within a couple of seconds either way). Lives on its own fixed-
+// position canvas (NOT a child of #cockpitPanel so the circular-canvas
+// CSS doesn't turn it into a disc); positioned each frame via the panel's
+// getBoundingClientRect so it tracks the panel as it shifts on resize.
+const whiskeyCv = document.getElementById('whiskeyCompass');
+const whiskeyCtx = whiskeyCv && whiskeyCv.getContext('2d');
+const WHISKEY_W = 220;               // card width in CSS px
+const WHISKEY_H = 64;                // card height in CSS px
+const WHISKEY_GAP_PX = 6;            // vertical gap above #cockpitPanel
+let whiskeyLastW = 0;
+let whiskeyLastH = 0;
+let whiskeySwing = 0;                // eased indicated-heading offset in degrees
+let whiskeySwingVel = 0;             // angular velocity of the spring (deg/s)
+let whiskeyPrevHdg = null;           // previous live heading for yaw-rate input
+function updateWhiskeyCompass(dt){
+  if (!whiskeyCv || !whiskeyCtx || !cockpitPanelEl) return;
+  // Cockpit cam only, panel actually visible, not in photo / replay /
+  // pause / intro / crash. Mirrors the cockpit-panel-streaks gate so the
+  // whiskey compass appears + disappears in lockstep with the gauges.
+  const cockpit = state.cam === 1;
+  const panelVisible = cockpitPanelEl.classList.contains('show')
+    && cockpitPanelEl.offsetParent !== null;
+  const allow = cockpit && panelVisible
+    && !state.photoMode && !state.replayActive && !state.paused
+    && !state.introOpen && !state.crashed;
+  if (!allow){
+    whiskeyCv.classList.remove('show');
+    return;
+  }
+  // Live magnetic heading — same source the HUD compass strip uses.
+  // Falls back to 0 if the plane quaternion read trips (mirrors the
+  // defensive pattern used by drawCompass + drawCockpitMag).
+  let hdgMag = 0;
+  try {
+    const e = new THREE.Euler().setFromQuaternion(plane.quaternion, 'YXZ');
+    const hdgTrue = ((-e.y * 180/Math.PI) % 360 + 360) % 360;
+    hdgMag = trueToMagDeg(hdgTrue);
+  } catch (_e) { /* fall through with hdgMag = 0 */ }
+  // 2nd-order spring on the indicated heading so the card slosh-lags
+  // behind a quick turn instead of snapping. Stiffness + damping tuned
+  // so the natural frequency lands near ~2 Hz with mild overshoot — the
+  // classic wet-compass personality every VFR pilot recognises.
+  const WHISKEY_STIFFNESS = 158; // (2*π*~2 Hz)^2 ≈ 158 rad²/s²
+  const WHISKEY_DAMPING   = 9.0;
+  if (whiskeyPrevHdg === null) whiskeyPrevHdg = hdgMag;
+  // Drive the spring with the yaw rate (deg/sec) so quick rolls visibly
+  // throw the card before it settles. Shortest-path delta so a 359°→1°
+  // wrap doesn't fling the card 358° the wrong way.
+  let dh = ((hdgMag - whiskeyPrevHdg) + 540) % 360 - 180;
+  whiskeyPrevHdg = hdgMag;
+  // Treat the swing as a position offset (deg) lagging behind 0. Spring
+  // target is 0 (card eventually catches up to the live heading);
+  // injecting the yaw delta pushes the card the opposite way the plane
+  // just turned, so a hard right turn slings the card visibly left.
+  const dtClamped = Math.min(0.1, Math.max(0, dt || 0));
+  whiskeySwingVel += -dh * 35.0;                 // yaw kick into the spring
+  const accel = -WHISKEY_STIFFNESS * whiskeySwing - WHISKEY_DAMPING * whiskeySwingVel;
+  whiskeySwingVel += accel * dtClamped;
+  whiskeySwing    += whiskeySwingVel * dtClamped;
+  // Clamp the swing so a violent aerobatic snap-roll doesn't fling the
+  // visible numbers off the card; ±25° is well past the cosmetic range
+  // a real card sloshes through.
+  if (whiskeySwing >  25) { whiskeySwing =  25; whiskeySwingVel *= -0.3; }
+  if (whiskeySwing < -25) { whiskeySwing = -25; whiskeySwingVel *= -0.3; }
+  const indicated = hdgMag + whiskeySwing;
+  // Position the canvas centered horizontally over the cockpit panel,
+  // sitting WHISKEY_GAP_PX above its top edge. Pulled fresh each frame
+  // so window resizes / settings panel open / etc. don't desync the
+  // overlay.
+  const r = cockpitPanelEl.getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const left = Math.round(cx - WHISKEY_W / 2);
+  const top  = Math.round(r.top - WHISKEY_H - WHISKEY_GAP_PX);
+  whiskeyCv.style.left = left + 'px';
+  whiskeyCv.style.top  = top  + 'px';
+  if (whiskeyLastW !== WHISKEY_W || whiskeyLastH !== WHISKEY_H){
+    const dpr = Math.min(devicePixelRatio, 2);
+    whiskeyCv.width  = Math.max(1, Math.floor(WHISKEY_W * dpr));
+    whiskeyCv.height = Math.max(1, Math.floor(WHISKEY_H * dpr));
+    whiskeyCv.style.width  = WHISKEY_W + 'px';
+    whiskeyCv.style.height = WHISKEY_H + 'px';
+    whiskeyCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    whiskeyLastW = WHISKEY_W;
+    whiskeyLastH = WHISKEY_H;
+  }
+  whiskeyCv.classList.add('show');
+  // ---- Render ----
+  const ctx = whiskeyCtx;
+  ctx.clearRect(0, 0, WHISKEY_W, WHISKEY_H);
+  // Body: a small dark glass housing with a brass rim. Slightly trapezoidal
+  // so it reads as the bezel of a wet card poking up off the glareshield.
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,14,22,0.86)';
+  ctx.strokeStyle = '#1e3548';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  const rad = 8;
+  ctx.moveTo(rad, 0);
+  ctx.lineTo(WHISKEY_W - rad, 0);
+  ctx.quadraticCurveTo(WHISKEY_W, 0, WHISKEY_W, rad);
+  ctx.lineTo(WHISKEY_W, WHISKEY_H - rad);
+  ctx.quadraticCurveTo(WHISKEY_W, WHISKEY_H, WHISKEY_W - rad, WHISKEY_H);
+  ctx.lineTo(rad, WHISKEY_H);
+  ctx.quadraticCurveTo(0, WHISKEY_H, 0, WHISKEY_H - rad);
+  ctx.lineTo(0, rad);
+  ctx.quadraticCurveTo(0, 0, rad, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Inner glass: a darker inset where the spinning card lives.
+  const innerL = 8;
+  const innerR = WHISKEY_W - 8;
+  const innerT = 8;
+  const innerB = WHISKEY_H - 8;
+  ctx.fillStyle = '#05080c';
+  ctx.beginPath();
+  ctx.rect(innerL, innerT, innerR - innerL, innerB - innerT);
+  ctx.fill();
+  // Clip to the inner glass so the rolling card doesn't paint over the rim.
+  ctx.beginPath();
+  ctx.rect(innerL + 1, innerT + 1, innerR - innerL - 2, innerB - innerT - 2);
+  ctx.clip();
+  // Card scrolls horizontally so a ~60° window centered on the indicated
+  // heading sits behind the lubber line. degPerPx tuned so the cardinals
+  // sit comfortably across the visible glass.
+  const visibleDeg = 70;
+  const cxPx = WHISKEY_W / 2;
+  const innerW = innerR - innerL - 2;
+  const pxPerDeg = innerW / visibleDeg;
+  // Subtle paper-coloured wash so the card reads as a real lit ring,
+  // not a black void. Vertical gradient hints at the curve of a real
+  // card so the centre line catches a touch more highlight.
+  const grad = ctx.createLinearGradient(0, innerT, 0, innerB);
+  grad.addColorStop(0,    'rgba(20, 32, 44, 0.55)');
+  grad.addColorStop(0.5,  'rgba(36, 52, 68, 0.75)');
+  grad.addColorStop(1,    'rgba(14, 22, 32, 0.55)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(innerL + 1, innerT + 1, innerW, innerB - innerT - 2);
+  // Tick marks + numerals across the visible window. We step every 10°
+  // so the field has plenty of texture; cardinals get big letters,
+  // 30/60 marks get small two-digit numbers, plain 10° marks are just
+  // tick lines.
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const yTickTop = innerT + 4;
+  const yTickBot = innerB - 14;
+  const yLabel   = innerT + (innerB - innerT) * 0.62;
+  for (let d = -90; d <= 90; d += 10){
+    const cardHdg = indicated + d;
+    const wrapped = ((Math.round(cardHdg) % 360) + 360) % 360;
+    const xPx = cxPx + d * pxPerDeg;
+    if (xPx < innerL + 2 || xPx > innerR - 2) continue;
+    const isCardinal = (wrapped % 90 === 0);
+    const isMajor    = (wrapped % 30 === 0);
+    ctx.strokeStyle = isCardinal ? '#ffd166' : (isMajor ? '#cfe' : '#7a98ad');
+    ctx.lineWidth = isCardinal ? 1.8 : (isMajor ? 1.2 : 0.8);
+    const tickH = isCardinal ? 9 : (isMajor ? 6 : 3);
+    ctx.beginPath();
+    ctx.moveTo(xPx, yTickTop);
+    ctx.lineTo(xPx, yTickTop + tickH);
+    ctx.stroke();
+    if (isCardinal){
+      let label = '';
+      if (wrapped === 0)   label = 'N';
+      else if (wrapped === 90)  label = 'E';
+      else if (wrapped === 180) label = 'S';
+      else if (wrapped === 270) label = 'W';
+      ctx.fillStyle = (wrapped === 0) ? '#ff7b7b' : '#ffd166';
+      ctx.font = 'bold 18px ui-monospace, monospace';
+      ctx.fillText(label, xPx, yLabel);
+    } else if (isMajor){
+      ctx.fillStyle = '#dfe';
+      ctx.font = 'bold 11px ui-monospace, monospace';
+      ctx.fillText(String(wrapped / 10).padStart(2, '0'), xPx, yLabel);
+    }
+  }
+  // Centre lubber line + lubber notch. Bright amber so it pops against
+  // the cooler card wash.
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(cxPx, innerT - 1);
+  ctx.lineTo(cxPx, innerB + 1);
+  ctx.stroke();
+  // Tiny notch arrowheads top + bottom so the lubber line reads as a
+  // proper index mark, the way real wet compasses are painted.
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.moveTo(cxPx,     innerT + 1);
+  ctx.lineTo(cxPx - 4, innerT - 3);
+  ctx.lineTo(cxPx + 4, innerT - 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cxPx,     innerB - 1);
+  ctx.lineTo(cxPx - 4, innerB + 3);
+  ctx.lineTo(cxPx + 4, innerB + 3);
+  ctx.closePath();
+  ctx.fill();
+  // Tiny "MAG" label tucked in the bottom-right corner so the player
+  // can tell this card reads magnetic, matching the cpMag gauge legend.
+  ctx.fillStyle = '#6aa';
+  ctx.font = 'bold 9px ui-monospace, monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('MAG', WHISKEY_W - 6, WHISKEY_H - 4);
+  ctx.restore();
+}
+
 // ====== INSECT SPLAT WINDSHIELD BUILDUP ======
 // Sparse yellow-brown smudges that accumulate on the canopy during
 // low-altitude daytime flight. Bugs only meet the windshield when you're
@@ -33617,6 +33849,7 @@ function loop(now){
   updateWindshieldRain(dt);
   updateWipers(dt);
   updateCockpitPanelStreaks(dt);
+  updateWhiskeyCompass(dt);
   updateBugSplats(dt);
   updateWindshieldFrost(dt);
   updateBinoculars(dt);
@@ -33714,7 +33947,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','altstrip','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate','qradial'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','altstrip','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','whiskeyCompass','bugSplats','windshieldFrost','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate','qradial'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
