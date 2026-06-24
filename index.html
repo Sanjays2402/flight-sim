@@ -20026,7 +20026,56 @@ function step(dt){
         // Damage from a bad touchdown scales with sink rate. Any landing >3 m/s adds %.
         const dmgAdd = Math.max(0, (sinkRate - 3) / 8);
         if (dmgAdd > 0) state.damage = Math.min(1, state.damage + dmgAdd);
-        if (sinkRate > 10 || !state.gearDown || !onRunway){
+        // Slow gear-up landing = survivable PROP STRIKE. If the gear is the
+        // only reason this is a bad landing AND the touchdown is slow, soft,
+        // and otherwise sane (on a runway, mild bank/pitch), eat a heavy but
+        // recoverable damage hit instead of ending the flight. Fast wheels-up
+        // still goes to the crash branch via the >50kt or hard-sink guards.
+        // Numbers: under 50kt (~93 km/h) ground speed, sink under 4 m/s,
+        // damage = 40% base + up to 20% scaled by sink rate so a 0 m/s
+        // belly-flop costs ~40% and a 4 m/s thump costs ~60%.
+        const propStrike = !state.gearDown && onRunway && fwdKmh < 93
+              && sinkRate <= 4 && Math.abs(rollDeg) <= 12 && Math.abs(pitchDeg) <= 18;
+        if (propStrike){
+          const dmgPropBase = 0.40;
+          const dmgPropSink = Math.min(0.20, Math.max(0, sinkRate / 4) * 0.20);
+          const dmgProp = dmgPropBase + dmgPropSink;
+          state.damage = Math.min(1, state.damage + dmgProp);
+          showStatus('GEAR UP — PROP STRIKE', '+' + Math.round(dmgProp*100) + '% dmg', 'bad');
+          pushATC('You forgot the gear. That\u2019s a prop strike.', { now:true });
+          // Wheels (well, belly) touched the runway — flash the lights.
+          if (land && land.ri) flareRunwayLights(land.ri.ap);
+          // Big chassis thump for the head-bob — belly landings hit hard.
+          state.touchdownJoltT = 1;
+          // Belly scrape paints heavier marks. Use a synthetic sink rate so
+          // the existing paintSkidmarks() darkness curve picks up the slide.
+          if (land && land.ri){
+            const _cs = Math.cos(-land.ri.ap.hdg), _sn = Math.sin(-land.ri.ap.hdg);
+            const _latMs = state.vel.x*_cs - state.vel.z*_sn;
+            paintSkidmarks(land.ri.ap, land.lx, land.lz, Math.max(sinkRate, 5), _latMs, true);
+          }
+          // Kill the engine — a prop strike grenades the engine. Players have
+          // to taxi off on momentum (or call it a day) instead of just powering
+          // away from a gear-up like nothing happened.
+          state.engineOn = false;
+          state.throttle = 0;
+          // Show the landing card so the player gets the post-mortem layout
+          // (touchdown speed, sink, etc.) with the GEAR UP reason baked in.
+          showLandCard({
+            speedKmh: fwdKmh,
+            sinkRate,
+            centerOffset: land ? land.lx : 0,
+            gTd: state.gLoad,
+            tdX: plane.position.x,
+            tdZ: plane.position.z,
+            rolloutM: 0,
+            rollComplete: false,
+            hard: true,
+            bounced: false,
+            reason: 'GEAR UP — PROP STRIKE'
+          });
+          startReplay();
+        } else if (sinkRate > 10 || !state.gearDown || !onRunway){
           state.damage = 1;
           showStatus('CRASHED', reason, 'bad');
           pushATC('Crash, crash, crash — rolling the trucks.', { now:true });
