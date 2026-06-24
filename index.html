@@ -12434,6 +12434,15 @@ const state = {
   stormCells: [],
   stormCellsNextSpawnMs: 0,
   stall: 0,
+  // Pre-stall stick shaker latch (Pre-stall stick shaker feature). Flips
+  // true 2° before the published STALL_AOA so the pilot gets a tactile
+  // (yoke wobble) + audible (motor buzz) precursor BEFORE the full stall
+  // buffet kicks in. Hysteresis: cleared once AoA falls 0.5° below the
+  // arm threshold so a wobbly approach doesn't strobe the warning. Pure
+  // additive — no flight model touch, lives alongside the existing
+  // state.stall buffet/audio chain. Reset in resetPlane() alongside the
+  // stall latch so a hot reset starts on a clean slate.
+  stickShakerActive: false,
   vortex: 0,
   // Crash report card data: peakG and peakSink track the worst values seen
   // during the current flight, reset on resetPlane(). crashReport is populated
@@ -15730,6 +15739,8 @@ function resetPlane(){
   // not a per-flight state, matching the carbHeatOn / pitotHeatOn pattern.
   state.cowlAtcLatch = !!state.cowlFlapsOpen;
   state.stall = 0;
+  state.stickShakerActive = false;
+  setShakerAudio(false);
   state.vortex = 0;
   // Fresh flight = fresh crash trackers. Hide the card if it was up from a
   // prior wreck; click handler also hides it but R/menu can bypass clicks.
@@ -16167,6 +16178,76 @@ function setStallAudio(active){
   } else {
     gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
   }
+}
+
+// ====== Pre-stall stick shaker buzz ======
+// Continuous low-amplitude motor-buzz layer that sits below the stall horn
+// in the warning chain — armed ~2° before STALL_AOA so the pilot gets a
+// tactile + audible precursor BEFORE the full stall buffet kicks in. Built
+// on a single shared 80 Hz square oscillator (motor-shaker fundamental)
+// gated by a master gain, lazily inited the first time setShakerAudio()
+// runs with active=true, so non-shaking sessions pay nothing. The one-shot
+// `playShakerBuzz()` below fires the moment the latch first arms (an 80 ms
+// transient at higher gain so the kick-on reads as a "motor catches" thump
+// instead of a creep-in fade). After that one-shot, the continuous buzz
+// layer lerps in at -16 dB (~0.025 master) so it nags the pilot without
+// drowning the engine note.
+let shakerAudio = null;
+function initShakerAudio(){
+  if (shakerAudio) return;
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  try {
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = 80;     // motor-shaker fundamental, low + insistent
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    shakerAudio = { ctx, osc, gain };
+  } catch(e){ /* audio not available — silently skip */ }
+}
+function setShakerAudio(active){
+  if (!shakerAudio){
+    if (!active) return;          // never spin up just to be silent
+    initShakerAudio();
+    if (!shakerAudio) return;
+  }
+  const { ctx, gain } = shakerAudio;
+  if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+  if (active){
+    // -16 dB ≈ 0.025 master; multiplied by the user's master volume so a
+    // muted sim stays silent. Mild AM at ~9 Hz so the buzz reads as a real
+    // motor-shaker instead of a flat tone.
+    const am = 0.78 + 0.22 * Math.sin(performance.now() * 0.018);
+    const target = 0.025 * settings.volume * am;
+    gain.gain.setTargetAtTime(target, ctx.currentTime, 0.03);
+  } else {
+    gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+  }
+}
+// One-shot 80 ms motor-buzz transient — fires the frame the shaker latch
+// first arms so the kick-on reads as a distinct "catch" instead of a slow
+// fade. Higher gain than the continuous layer (~0.06 master) so the edge
+// punches through, then exponentially decays back into the steady buzz.
+function playShakerBuzz(){
+  const ctx = (typeof sfxReady === 'function') ? sfxReady() : null;
+  if (!ctx) return;
+  const vol = 0.06 * settings.volume;
+  if (vol <= 0) return;
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(80, t0);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.008);
+  g.gain.setValueAtTime(vol, t0 + 0.055);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.10);
 }
 
 // ====== Rain audio loop on the canopy ======
@@ -23038,6 +23119,15 @@ function step(dt){
       if (yokeVisible){
         yokePivot.rotation.x = -elevatorAnim * YOKE_PITCH_MAX_RAD;
         yokePivot.rotation.z = -aileronAnim  * YOKE_ROLL_MAX_RAD;
+        // Pre-stall stick shaker wobble — a tiny ±0.015 rad sinusoidal
+        // pitch jitter layered on top of the elevator-driven yoke pose at
+        // ~18 Hz so the column visibly buzzes in the pilot's hand the
+        // moment the latch arms. Latch is set in updateHud() with the
+        // hysteresis and the airborne / above-stallspeed gates so we just
+        // read state.stickShakerActive here. Pure additive.
+        if (state.stickShakerActive){
+          yokePivot.rotation.x += Math.sin(performance.now() * 0.018 * Math.PI * 2) * 0.015;
+        }
       }
     }
     // Cockpit throttle quadrant: mirror the smoothed throttle setting onto
@@ -24347,6 +24437,35 @@ function step(dt){
   state.stall = state.stall * 0.6 + stallIntensity * 0.4;
   setStallAudio(stallActive);
   $('#stall').style.display = stallActive ? 'block' : 'none';
+  // Pre-stall stick shaker — arms ~2° BEFORE the published STALL_AOA so the
+  // pilot gets a tactile + audible precursor before the full stall warning
+  // chain (horn / buffet / wing drop) kicks in. Hysteresis on the clear path
+  // (0.5° below the arm threshold) keeps a wobbly approach from strobing the
+  // latch on/off. Same airborne + above-stallspeed gates the stall horn uses
+  // so the shaker can't fire on the ground or on a parked cold soak. The
+  // yokeGroup wobble lives in the cockpit-yoke tick (read state.stickShakerActive
+  // + flip-edge of a one-shot buzz SFX), and the cockpit AoA gauge reads the
+  // same latch to pulse its amber band outline.
+  const STICK_SHAKER_AOA_DEG = (STALL_AOA * 180 / Math.PI) - 2; // 14° with STALL_AOA=16°
+  const STICK_SHAKER_CLEAR_DEG = STICK_SHAKER_AOA_DEG - 0.5;    // 13.5° hysteresis
+  const _shakerLiveDeg = Math.abs(aoaDeg);
+  const _shakerGate = speed > 10 && !state.onGround
+    && !state.crashed && !state.replayActive && !state.paused
+    && !state.introOpen && !state.photoMode;
+  const _shakerPrev = !!state.stickShakerActive;
+  let _shakerNow = _shakerPrev;
+  if (_shakerGate){
+    if (_shakerPrev){
+      if (_shakerLiveDeg < STICK_SHAKER_CLEAR_DEG) _shakerNow = false;
+    } else {
+      if (_shakerLiveDeg >= STICK_SHAKER_AOA_DEG) _shakerNow = true;
+    }
+  } else {
+    _shakerNow = false;
+  }
+  state.stickShakerActive = _shakerNow;
+  setShakerAudio(_shakerNow);
+  if (_shakerNow && !_shakerPrev) playShakerBuzz();   // one-shot on rising edge
   // Rain audio loop on the canopy. Plays a soft pink-noise pad while
   // `settings.rain` is on, layered under the engine. Cockpit cam = ~10%
   // master, off-cam = ~3% master so the storm is audible from chase /
@@ -29619,6 +29738,19 @@ function drawCockpitAoa(aoaDegOverride){
   // Amber band: AOA_GREEN → AOA_AMBER.
   ctx.fillStyle = 'rgba(255, 176, 32, 0.85)';
   ctx.fillRect(ladderX, aoaToY(AOA_AMBER), ladderW, aoaToY(AOA_GREEN) - aoaToY(AOA_AMBER));
+  // Pre-stall stick shaker pulse — a thin amber-to-white outline traced
+  // around the amber band whenever the stick shaker latch is armed so the
+  // pilot sees + feels + hears the warning at once. Pulse breathes at
+  // ~6 Hz off perfNow so the outline keeps animating even on slow frames.
+  // No-op when the latch is clear so a normal cruise pays nothing.
+  if (state.stickShakerActive){
+    const yAmberTop = aoaToY(AOA_AMBER);
+    const yAmberBot = aoaToY(AOA_GREEN);
+    const _pulse = 0.55 + 0.45 * Math.sin(performance.now() * 0.012 * Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 209, 102, ' + _pulse.toFixed(3) + ')';
+    ctx.lineWidth = 2.2;
+    ctx.strokeRect(ladderX - 1, yAmberTop - 1, ladderW + 2, (yAmberBot - yAmberTop) + 2);
+  }
   // Red band: AOA_AMBER → AOA_TOP.
   ctx.fillStyle = 'rgba(255, 82, 82, 0.85)';
   ctx.fillRect(ladderX, yTop, ladderW, aoaToY(AOA_AMBER) - yTop);
@@ -33284,6 +33416,7 @@ function loop(now){
       propGroupL.rotation.z = propGroupR.rotation.z = propGroup.rotation.z;
       updateCamera(dt);
       setStallAudio(false);
+      setShakerAudio(false);
       setRainAudio(0);
     } else if (state.replayActive){
       // Replay mode: stop simulating, just play back the buffer.
@@ -34775,6 +34908,7 @@ updateCamModeUi();
     // Quiet the horn so its last gain target doesn't hang while step()
     // isn't running to retrigger it.
     setStallAudio(false);
+    setShakerAudio(false);
     setRainAudio(0);
   }
   function closePause(){
@@ -34809,6 +34943,7 @@ updateCamModeUi();
     state.introOpen = true;
     if (missionEl) missionEl.style.display = 'none';
     setStallAudio(false);
+    setShakerAudio(false);
     setRainAudio(0);
     if (intro) intro.style.display = 'flex';
     if (typeof refreshRankPill === 'function') refreshRankPill();
