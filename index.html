@@ -6519,6 +6519,54 @@ const THROTTLE_BACK_MAX_RAD = 0.85;
 // not twitchy" feel.
 let throttleLeverAnim = 0;        // 0..1, smoothed throttle for the lever
 
+// ====== COCKPIT RUDDER PEDALS ======
+// Companion to the cockpit yoke + throttle quadrant — the third primary
+// control. Two small grey pedal blocks parented under the plane at the
+// cockpit-floor level just ahead of the camera eye, each pivoting around
+// its own back-edge axis on the live rudder input. Visual only — no flight
+// model change — but every Q/E yaw input, Alt+;/' rudder trim, and AP
+// auto-coordination during a banked turn finally has a foot-level echo so
+// a slip/skid for crosswind landings reads as a real pilot input rather
+// than a disembodied ball drift on the inclinometer. Same gating as the
+// yoke / throttle: cockpit cam only, hidden in photo / pause / replay /
+// intro / crashed.
+const pedalGroup = new THREE.Group();
+// Each pedal pivots around its own back-edge axis so a press tilts the
+// front of the pedal down toward the firewall (matching real rudder pedal
+// geometry). The pivot is positioned at the back edge of the pedal, the
+// pedal mesh sits forward of the pivot so the pivot is the hinge.
+const pedalLeftPivot  = new THREE.Group();
+const pedalRightPivot = new THREE.Group();
+// Floor-level position: just ahead of the camera eye (which sits at
+// plane-local (0, 0.55, 0.4)), at floor height (y=0.02), in front of the
+// pilot so the pedals are in the lower-FOV when looking forward.
+// Pedals sit ~0.08 m apart so the inner edges read as two distinct foot
+// positions instead of one merged block.
+pedalLeftPivot.position.set(-0.05, 0.02, 0.28);
+pedalRightPivot.position.set(0.05, 0.02, 0.28);
+const pedalGeo = new THREE.BoxGeometry(0.05, 0.025, 0.10);
+const pedalMat = new THREE.MeshLambertMaterial({ color: 0x4a4f55 });
+const pedalLeftMesh  = new THREE.Mesh(pedalGeo, pedalMat);
+const pedalRightMesh = new THREE.Mesh(pedalGeo, pedalMat);
+// Offset the pedal mesh forward of the pivot so the pivot sits at the back
+// edge of the pedal — pressing the pedal then tilts the front down.
+pedalLeftMesh.position.set(0, 0, -0.05);
+pedalRightMesh.position.set(0, 0, -0.05);
+pedalLeftPivot.add(pedalLeftMesh);
+pedalRightPivot.add(pedalRightMesh);
+pedalGroup.add(pedalLeftPivot);
+pedalGroup.add(pedalRightPivot);
+plane.add(pedalGroup);
+pedalGroup.visible = false;
+// Max pedal press angle — ~26°, plenty of visible travel without the front
+// edge of the pedal punching through the floor mesh.
+const PEDAL_PRESS_MAX_RAD = 0.45;
+// Smoothed pedal positions so a sudden Q/E tap doesn't twitch the pedals.
+// Eased toward target each frame using the same SURFACE_RATE the yoke /
+// throttle use so all three cockpit controls share the same feel.
+let pedalLeftAnim  = 0;  // 0..1, smoothed left-pedal press (rudderAnim<0)
+let pedalRightAnim = 0;  // 0..1, smoothed right-pedal press (rudderAnim>0)
+
 // Smoothed surface deflection state. Eased toward target each frame so a
 // stick snap doesn't make the surfaces visibly twitch. Max deflection picked
 // to read like real-world max travel (~22° aileron/elevator, ~28° rudder)
@@ -22965,6 +23013,34 @@ function step(dt){
         }
       }
     }
+    // Cockpit rudder pedals: mirror the smoothed rudderAnim (already
+    // SURFACE_RATE-eased above) onto two foot pedals. rudderAnim<0 = left
+    // rudder = left pedal presses; rudderAnim>0 = right rudder = right
+    // pedal presses. Same gating as the yoke / throttle. Each pedal tilts
+    // forward (rotation.x positive = front edge down) on press; the
+    // un-pressed pedal stays flat at zero. The smoothed pedalLeftAnim /
+    // pedalRightAnim chase the rudderAnim split at SURFACE_RATE so a Q/E
+    // tap reads as a clean pedal press rather than a snap, even though
+    // rudderAnim itself is already smoothed (a second-order smooth keeps
+    // the pedals feeling weighted underfoot rather than flicking).
+    if (pedalGroup){
+      const pedalVisible = state.cam === 1
+        && !state.photoMode && !state.paused
+        && !state.replayActive && !state.introOpen
+        && !state.crashed;
+      pedalGroup.visible = pedalVisible;
+      if (pedalVisible){
+        const pedStep = SURFACE_RATE * dt;
+        const lTarget = Math.max(0, -rudderAnim);
+        const rTarget = Math.max(0,  rudderAnim);
+        if (pedalLeftAnim  < lTarget) pedalLeftAnim  = Math.min(lTarget, pedalLeftAnim  + pedStep);
+        else if (pedalLeftAnim  > lTarget) pedalLeftAnim  = Math.max(lTarget, pedalLeftAnim  - pedStep);
+        if (pedalRightAnim < rTarget) pedalRightAnim = Math.min(rTarget, pedalRightAnim + pedStep);
+        else if (pedalRightAnim > rTarget) pedalRightAnim = Math.max(rTarget, pedalRightAnim - pedStep);
+        pedalLeftPivot.rotation.x  = pedalLeftAnim  * PEDAL_PRESS_MAX_RAD;
+        pedalRightPivot.rotation.x = pedalRightAnim * PEDAL_PRESS_MAX_RAD;
+      }
+    }
   }
 
   // Wing flex: bend the wingtip pivots upward proportional to the live G-load
@@ -30962,6 +31038,10 @@ function updateCamModeUi(){
     // exact same reason as the yoke — skip here so the airframe-hide loop
     // doesn't override that visibility decision.
     if (typeof throttleGroup !== 'undefined' && child === throttleGroup) continue;
+    // pedalGroup is owned by the per-frame cockpit-pedal tick for the same
+    // reason as the yoke + throttle — skip here so the airframe-hide loop
+    // doesn't override that visibility decision.
+    if (typeof pedalGroup !== 'undefined' && child === pedalGroup) continue;
     child.visible = !cockpit;
   }
   // Cockpit instrument panel only shows in cockpit cam. Photo mode hides it via
