@@ -3719,6 +3719,139 @@ const carrierGroup = (function buildCarrier(){
   runwayInfos.push({ ap: a, aimX: a.x, aimZ: a.z, lights: null });
   return g;
 })();
+
+// ====== CARRIER DECK HANDLER ======
+// Yellow-shirt deck handler standing ~30 m ahead of the catapult arm-up box
+// on the starboard side of the deck centerline (clear of the cat track,
+// well off the island superstructure). Three poses tied to the existing
+// catapult ritual so the figure reads as actually running the launch:
+//   - HOLD   (arms raised crossed overhead)   → engine running on deck, not yet arming
+//   - RUN-UP (one arm forward, other up)      → catArmT > 0, hold-O charging
+//   - LAUNCH (arms slammed forward + down)    → catFireT >= 0, cat firing
+// 3-line ATC strip times to the same beats: "Hookup" on first parking with
+// engine running, "Run up engines" on arm-start, "Cleared for cat shot" on
+// fire. Hidden in photo mode so saved PNGs stay clean. Pure scenery —
+// physics + arming + firing all stay in updateCatapult / catapultEligible.
+const deckHandlerState = (function buildDeckHandler(){
+  const a = CARRIER;
+  const grp = new THREE.Group();
+  grp.position.set(a.x, a.elev, a.z);
+  grp.rotation.y = a.hdg;
+  scene.add(grp);
+  // Stand on starboard side of centerline, ahead of the arm-up box. Cat
+  // track sits on the centerline so the handler stays off the launch lane.
+  // standZ = +85 puts the figure ~45 m ahead of the front of the box
+  // (box ends at lz = +40) and ~35 m short of the bow lip (lz = +120).
+  const standX = 5.5;          // starboard offset from centerline (well clear of island at lx 10..18)
+  const standZ = 85;           // bow-side of the arm-up box, visible to a parked-and-arming plane
+  const vestMat = new THREE.MeshLambertMaterial({ color: 0xffd23a });             // yellow shirt (cat officer)
+  const pantMat = new THREE.MeshLambertMaterial({ color: 0x222831 });
+  const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a47a });
+  const wandMat = new THREE.MeshLambertMaterial({ color: 0xff6b35, emissive: 0x402015, emissiveIntensity: 0.4 }); // orange paddles
+  // Body — same primitive stack as the airport marshaller so the silhouette
+  // reads as the same crew family.
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.85, 0.30), pantMat);
+  legs.position.set(standX, 0.425, standZ);
+  grp.add(legs);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.65, 0.30), vestMat);
+  torso.position.set(standX, 0.85 + 0.325, standZ);
+  grp.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), skinMat);
+  head.position.set(standX, 0.85 + 0.65 + 0.18, standZ);
+  grp.add(head);
+  // Arm pivots at the shoulders so we can pose the wands by setting
+  // pivot.rotation.x for the hold/run-up/launch poses.
+  function makeArm(sideX){
+    const pivot = new THREE.Group();
+    pivot.position.set(standX + sideX * 0.30, 0.85 + 0.55, standZ);
+    const arm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 0.45, 6),
+      vestMat
+    );
+    arm.position.set(0, -0.225, 0);
+    pivot.add(arm);
+    // Paddle at the end of the arm — a flat slab so the LSO-style read
+    // pops harder than the airport marshaller's thin wand.
+    const wand = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.55, 0.02),
+      wandMat
+    );
+    wand.position.set(0, -0.45 - 0.275, 0);
+    pivot.add(wand);
+    pivot.rotation.x = -2.3; // start in HOLD (arms up overhead)
+    grp.add(pivot);
+    return pivot;
+  }
+  const leftArm  = makeArm(-1);
+  const rightArm = makeArm( 1);
+  return {
+    group: grp, leftArm, rightArm,
+    poseRot: -2.3,           // current eased rotation.x for both arms
+    hookupLatch: false,      // "Hookup" ATC line fires once per arrival on deck
+    runupLatch: false,       // "Run up engines" fires once per arming cycle
+    fireLatch: false         // "Cleared for cat shot" fires once per firing cycle
+  };
+})();
+function updateDeckHandler(dt){
+  const dh = deckHandlerState;
+  // Photo mode hides the figure entirely so saved PNGs stay clean.
+  const hidden = !!(state && state.photoMode);
+  if (dh.group.visible === hidden) dh.group.visible = !hidden;
+  if (hidden) return;
+  // Only animate / fire ATC when the player is actually on the deck. The
+  // figure stays visible standing in HOLD pose otherwise (it's a static
+  // scenery prop), but ATC + pose changes gate to deck-presence so cruise
+  // passes don't trip the strip.
+  const onDeck = !!state.onGround && (carrierDeckHeight(plane.position.x, plane.position.z) !== null);
+  const engineLive = !state.engineOut && state.fuel > 0 && !state.coldStart;
+  const gsKmh = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+  const isHoldingShort = onDeck && engineLive && gsKmh < CAT_MAX_GROUND_KMH;
+  // ATC: first frame the pilot parks on the deck with the engine running,
+  // fire the hookup call. Re-arms when the plane leaves the deck (catapult
+  // launch, water swim, or a touch-and-go off the bow).
+  if (isHoldingShort && !dh.hookupLatch){
+    dh.hookupLatch = true;
+    if (typeof pushATC === 'function') pushATC('Hookup, hookup.', { tag:'GRD' });
+  }
+  if (!onDeck){
+    // Re-arm all three latches once we leave the deck so the next arrival
+    // gets the full 3-line strip again.
+    dh.hookupLatch = false;
+    dh.runupLatch  = false;
+    dh.fireLatch   = false;
+  }
+  // ATC: first frame the player starts charging the cat (arm timer rising),
+  // fire the run-up call. Re-arms when arm + fire both drop back to 0.
+  if (isHoldingShort && state.catArmT > 0.05 && !dh.runupLatch){
+    dh.runupLatch = true;
+    if (typeof pushATC === 'function') pushATC('Run up engines.', { tag:'GRD' });
+  }
+  if (state.catArmT <= 0.01 && state.catFireT < 0) dh.runupLatch = false;
+  // ATC: first frame the cat trips (firing branch starts), fire the cleared
+  // call. The existing PILOT "Cat firing, hang on." already plays on the
+  // same beat, so this lands as the deck crew's matching cue. Re-arms
+  // when firing completes.
+  if (state.catFireT >= 0 && !dh.fireLatch){
+    dh.fireLatch = true;
+    if (typeof pushATC === 'function') pushATC('Cleared for cat shot.', { tag:'GRD' });
+  }
+  if (state.catFireT < 0 && state.catArmT <= 0.01) dh.fireLatch = false;
+  // Pose targets — three eased rotation.x values that read clearly from a
+  // cockpit-cam parked spot:
+  //   HOLD   ≈ -2.3 rad (arms raised crossed overhead — "stop / hold")
+  //   RUN-UP ≈ -1.5 rad (arms held high pointing forward — "run them up")
+  //   LAUNCH ≈  0.6 rad (arms slammed down and forward — "GO!")
+  let targetRot = -2.3;
+  if (state.catFireT >= 0)         targetRot =  0.6;   // launch / arms-down
+  else if (state.catArmT > 0.05)   targetRot = -1.5;   // run-up / arms forward & high
+  else                              targetRot = -2.3;  // hold / arms overhead
+  // Ease the pose toward the target at ~6/sec so the swing reads as a
+  // deliberate signal, not a teleport. A sharp pose change (launch drop)
+  // still snaps fast enough to feel decisive.
+  dh.poseRot += (targetRot - dh.poseRot) * Math.min(1, dt * 6);
+  dh.leftArm.rotation.x  = dh.poseRot;
+  dh.rightArm.rotation.x = dh.poseRot;
+}
 // Prime time-of-day so the very first frame matches the starting hour (sky/sun/lights).
 applyTimeOfDay(9.0);
 
@@ -23559,6 +23692,11 @@ function step(dt){
   // wands animate when the player taxis within 25 m at <8 km/h, one ATC call
   // per arrival. Pure scenery, hidden in photo mode.
   updateMarshallers(dt);
+  // Carrier deck handler: yellow-shirt cat officer ahead of the arm-up box,
+  // poses tied to the catapult ritual (HOLD / RUN-UP / LAUNCH), 3-line ATC
+  // strip ("Hookup" / "Run up engines" / "Cleared for cat shot") that times
+  // with the existing arm + fire beats. Pure scenery, hidden in photo mode.
+  updateDeckHandler(dt);
   // Slow tug + fuel truck per airport drifting around the apron — pure
   // scenery, gated to on-ground or low-overhead near the field so air views
   // stay clean.
