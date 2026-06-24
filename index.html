@@ -39,6 +39,13 @@
      PHOTO_HIDE_IDS so saved screenshots stay clean. */
   #windshieldRain { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; display:none; }
   #windshieldRain.show { display:block; }
+  /* Insect splat windshield buildup — sparse yellow-brown smudges accumulate
+     on the canopy during low-altitude daytime flight. Sits just under
+     #windshieldRain (z-index 0 vs windshieldRain's 1) so rain droplets and
+     wipers still read on top. Pointer-events off; hidden in photo mode via
+     PHOTO_HIDE_IDS so saved screenshots stay clean. */
+  #bugSplats { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; display:none; }
+  #bugSplats.show { display:block; }
   /* Animated windshield wipers: two thin black blades sweeping across the
      lower half of the screen in cockpit cam when rain wiping is active. Sits
      just above #windshieldRain so the blades visibly streak the droplets off
@@ -921,6 +928,7 @@
 <canvas id="c"></canvas>
 <canvas id="rainOverlay"></canvas>
 <canvas id="birdSplat"></canvas>
+<canvas id="bugSplats"></canvas>
 <canvas id="windshieldRain"></canvas>
 <canvas id="wipers"></canvas>
 <canvas id="cockpitPanelStreaks"></canvas>
@@ -19960,6 +19968,10 @@ function step(dt){
         state.damage = Math.max(0, state.damage - REFUEL_RATE * dt);
         state.repairing = true;
       }
+      // Pit stop also clears any accumulated bug splatter on the canopy —
+      // one truck, one squeegee. Defensive call so the bug-splat module
+      // being absent doesn't break refueling.
+      if (typeof clearBugSplats === 'function') clearBugSplats();
       // Topping off the tank also clears a dry-tank engine-out so the pilot
       // can fire back up and taxi away without hitting reset.
       if (state.engineOut && state.fuel > 0.05){
@@ -28871,6 +28883,10 @@ function updateWipers(dt){
   const sign = vel > 0 ? 1 : (vel < 0 ? -1 : 0);
   if (sign !== 0 && wiperLastSign !== 0 && sign !== wiperLastSign){
     playWiperThwip();
+    // Wipers also squeegee bug splatter on each end-of-stroke reverse,
+    // just like they clear water droplets. Defensive call (function may
+    // not exist if the bug-splat block was edited out).
+    if (typeof wiperClearBugSplats === 'function') wiperClearBugSplats();
   }
   if (sign !== 0) wiperLastSign = sign;
   // Draw the two blades. Pivots sit just below the lower edge so the arc
@@ -29058,6 +29074,194 @@ function updateCockpitPanelStreaks(dt){
     panelStreakCtx.fill();
   }
   panelStreakCtx.globalAlpha = 1.0;
+}
+
+// ====== INSECT SPLAT WINDSHIELD BUILDUP ======
+// Sparse yellow-brown smudges that accumulate on the canopy during
+// low-altitude daytime flight. Bugs only meet the windshield when you're
+// down in the bug layer (below 300 m AGL), in the warm hours (09:00-19:00),
+// not over water (no bugs out at sea), and not in rain (bugs hate rain).
+// New top-level canvas mirrors the rain-streak overlay pattern: sized via
+// getBoundingClientRect() each frame so window resizes track, z-indexed
+// just under the windshield droplets so rain still wins visually. Each
+// splat is a small irregular blob with a faint amber halo and a tiny
+// downward streak from the slipstream. Wipers (N) clear splats on each
+// stroke just like they clear droplets, and a full refuel/repair on the
+// apron also clears the pool (one truck, one squeegee). Cockpit-cam-only
+// via the same gate every other windshield overlay uses; hidden in photo /
+// pause / replay / intro / crashed via PHOTO_HIDE_IDS so saved PNGs stay
+// clean.
+const bugSplatCanvas = document.getElementById('bugSplats');
+const bugSplatCtx = bugSplatCanvas && bugSplatCanvas.getContext('2d');
+const bugSplats = [];
+const BUG_SPLAT_CAP = 18;            // hard cap so the canopy stays readable
+const BUG_SPLAT_SPAWN_S = 12;        // average seconds between new splats under gating
+const BUG_AGL_MAX = 300;             // bugs live below 300 m AGL
+const BUG_HOUR_LO = 9;               // local hour bug layer wakes up
+const BUG_HOUR_HI = 19;              // local hour bug layer beds down
+let bugSpawnT = 0;                   // accumulator for the next-splat scheduler
+let bugSplatLastW = 0;
+let bugSplatLastH = 0;
+function sizeBugSplatCanvas(){
+  if (!bugSplatCanvas) return;
+  const w = innerWidth, h = innerHeight;
+  const dpr = Math.min(devicePixelRatio, 2);
+  bugSplatCanvas.width = Math.max(1, Math.floor(w * dpr));
+  bugSplatCanvas.height = Math.max(1, Math.floor(h * dpr));
+  bugSplatCanvas.style.width = w + 'px';
+  bugSplatCanvas.style.height = h + 'px';
+  if (bugSplatCtx) bugSplatCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bugSplatLastW = w;
+  bugSplatLastH = h;
+}
+sizeBugSplatCanvas();
+// Public-ish hook so the apron pit stop and resetPlane can flush the pool
+// (the resetPlane wiring is handled below in the bottom-of-block hook list).
+function clearBugSplats(){
+  bugSplats.length = 0;
+  bugSpawnT = 0;
+  if (bugSplatCtx && bugSplatCanvas){
+    bugSplatCtx.clearRect(0, 0, bugSplatCanvas.width, bugSplatCanvas.height);
+  }
+}
+// Wipe splats inside a wiper-blade arc on each sweep. Called by the wiper
+// pass below — we mirror the rain droplet "squeegee on the down-stroke"
+// behavior so the existing wiper SFX/visuals stay coherent.
+function wiperClearBugSplats(){
+  if (!bugSplats.length) return;
+  // Cheap: just clear every splat whose x sits inside the bottom 50% of
+  // the canvas (where the blade arcs live). One stroke wipes the whole
+  // visible field over ~2 passes, which matches how real wipers gradually
+  // clear bug splatter instead of vanishing it in one swipe.
+  const h = innerHeight;
+  const cutY = h * 0.50;
+  for (let i = bugSplats.length - 1; i >= 0; i--){
+    const b = bugSplats[i];
+    if (b.y >= cutY && Math.random() < 0.55) bugSplats.splice(i, 1);
+  }
+}
+function spawnBugSplat(){
+  if (bugSplats.length >= BUG_SPLAT_CAP) return;
+  const w = innerWidth, h = innerHeight;
+  // Spawn in the upper-center band where the windshield catches most bugs;
+  // a little jitter into the sides so the canopy doesn't always splat the
+  // same column. Avoid the bottom 25% (that's gauges / dash territory).
+  const cx = w * (0.18 + Math.random() * 0.64);
+  const cy = h * (0.10 + Math.random() * 0.55);
+  // Irregular blob: 3-5 sub-dots clustered around the center so each splat
+  // reads as squashed guts instead of a perfect circle.
+  const lobes = 3 + Math.floor(Math.random() * 3);
+  const parts = [];
+  for (let i = 0; i < lobes; i++){
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * 4;
+    parts.push({
+      dx: Math.cos(a) * r,
+      dy: Math.sin(a) * r,
+      r:  2.0 + Math.random() * 3.0
+    });
+  }
+  // Yellow-brown color band: amber yolk through dirtier brown, randomized
+  // per splat so the canopy reads as varied bug juice rather than monotone.
+  const tint = Math.random();
+  const hueR = Math.floor(165 + tint * 50);   // 165-215
+  const hueG = Math.floor(115 + tint * 40);   // 115-155
+  const hueB = Math.floor(35  + tint * 25);   // 35-60
+  bugSplats.push({
+    x: cx,
+    y: cy,
+    parts,
+    r: 5 + Math.random() * 4,                 // outer halo radius
+    rgb: [hueR, hueG, hueB],
+    streak: 6 + Math.random() * 10,           // downward smear length
+    born: performance.now()
+  });
+}
+function updateBugSplats(dt){
+  if (!bugSplatCanvas || !bugSplatCtx) return;
+  // Visible only in cockpit cam, never in photo / pause / replay / intro /
+  // crashed. Same gate every other windshield overlay uses.
+  const cockpit = state.cam === 1;
+  const show = cockpit && !state.photoMode && !state.replayActive
+    && !state.paused && !state.introOpen && !state.crashed;
+  if (!show){
+    bugSplatCanvas.classList.remove('show');
+    return;
+  }
+  // Resize if window moved under us.
+  const w = innerWidth, h = innerHeight;
+  if (w !== bugSplatLastW || h !== bugSplatLastH){
+    sizeBugSplatCanvas();
+  }
+  // Spawn gating: low altitude + warm hours + not over water + not raining
+  // + actually moving forward (parked planes don't catch bugs). We sample
+  // AGL the same way the existing autopilot/PAPI code does — plane MSL
+  // minus terrain height below the plane. Over water is detected via the
+  // existing terrain height (sea/lake reads below 2 m) plus the OCEAN_X
+  // ocean band on the west side of the map.
+  const px = plane.position.x, pz = plane.position.z;
+  let groundY = 0;
+  try { if (typeof terrainHeight === 'function') groundY = terrainHeight(px, pz) || 0; } catch(_){ groundY = 0; }
+  const agl = Math.max(0, plane.position.y - groundY);
+  const tod = ((state.todHours || 12) % 24 + 24) % 24;
+  const overWater = (groundY < 2) || (typeof OCEAN_X === 'number' && px < OCEAN_X + 600);
+  const speed = Math.hypot(state.vel.x, state.vel.y, state.vel.z);
+  const spawnAllowed = agl < BUG_AGL_MAX
+    && tod >= BUG_HOUR_LO && tod <= BUG_HOUR_HI
+    && !overWater && !settings.rain
+    && !state.onGround && speed > 12;
+  if (spawnAllowed){
+    bugSpawnT += dt;
+    // Faster spawn at lower altitude (bugs densest near the deck). Linear
+    // taper from full-rate at 50 m to half-rate at 300 m.
+    const altK = 1 - 0.5 * Math.min(1, Math.max(0, (agl - 50) / 250));
+    const target = BUG_SPLAT_SPAWN_S / Math.max(0.1, altK);
+    if (bugSpawnT > target){
+      bugSpawnT = 0;
+      spawnBugSplat();
+    }
+  } else {
+    bugSpawnT = 0;
+  }
+  // Nothing on the glass and nothing to spawn? Hide and exit before paint.
+  if (!bugSplats.length){
+    bugSplatCanvas.classList.remove('show');
+    return;
+  }
+  bugSplatCanvas.classList.add('show');
+  bugSplatCtx.clearRect(0, 0, w, h);
+  for (const b of bugSplats){
+    // Soft amber halo first (under the body) so each splat looks like wet
+    // bug juice spreading out from a squished center.
+    const halo = bugSplatCtx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 1.6);
+    halo.addColorStop(0, 'rgba(' + b.rgb[0] + ',' + b.rgb[1] + ',' + b.rgb[2] + ',0.28)');
+    halo.addColorStop(1, 'rgba(' + b.rgb[0] + ',' + b.rgb[1] + ',' + b.rgb[2] + ',0)');
+    bugSplatCtx.fillStyle = halo;
+    bugSplatCtx.beginPath();
+    bugSplatCtx.arc(b.x, b.y, b.r * 1.6, 0, Math.PI * 2);
+    bugSplatCtx.fill();
+    // Streak trail (slipstream-flicked downward smear). Drawn before the
+    // body so the body sits on top of its own tail.
+    bugSplatCtx.strokeStyle = 'rgba(' + b.rgb[0] + ',' + b.rgb[1] + ',' + b.rgb[2] + ',0.42)';
+    bugSplatCtx.lineCap = 'round';
+    bugSplatCtx.lineWidth = 1.5;
+    bugSplatCtx.beginPath();
+    bugSplatCtx.moveTo(b.x, b.y);
+    bugSplatCtx.lineTo(b.x + 1.2, b.y + b.streak);
+    bugSplatCtx.stroke();
+    // Irregular body — cluster of sub-dots so each splat reads as squashed
+    // guts instead of a perfect disc.
+    for (const p of b.parts){
+      const grad = bugSplatCtx.createRadialGradient(b.x + p.dx, b.y + p.dy, 0, b.x + p.dx, b.y + p.dy, p.r);
+      grad.addColorStop(0,    'rgba(' + b.rgb[0] + ',' + b.rgb[1] + ',' + b.rgb[2] + ',0.78)');
+      grad.addColorStop(0.7,  'rgba(' + Math.max(0, b.rgb[0]-30) + ',' + Math.max(0, b.rgb[1]-30) + ',' + Math.max(0, b.rgb[2]-15) + ',0.55)');
+      grad.addColorStop(1,    'rgba(' + Math.max(0, b.rgb[0]-50) + ',' + Math.max(0, b.rgb[1]-50) + ',' + Math.max(0, b.rgb[2]-25) + ',0)');
+      bugSplatCtx.fillStyle = grad;
+      bugSplatCtx.beginPath();
+      bugSplatCtx.arc(b.x + p.dx, b.y + p.dy, p.r, 0, Math.PI * 2);
+      bugSplatCtx.fill();
+    }
+  }
 }
 
 // ====== SUN GLARE ======
@@ -29805,6 +30009,7 @@ function loop(now){
   updateWindshieldRain(dt);
   updateWipers(dt);
   updateCockpitPanelStreaks(dt);
+  updateBugSplats(dt);
   updateBinoculars(dt);
   updateSunGlare(dt);
   updateStormCells(dt);
@@ -29838,6 +30043,7 @@ addEventListener('resize', ()=>{
   sizeBirdSplatCanvas();
   sizeWindshieldRainCanvas();
   sizeWiperCanvas();
+  sizeBugSplatCanvas();
   sizeSunGlareCanvas();
 });
 
@@ -29898,7 +30104,7 @@ const photoEl = document.getElementById('photo');
 // each element was before (e.g. #mission is normally hidden in free flight,
 // #replay only shows after a landing, etc.). The intro modal isn't in the
 // list because photo mode is gated to post-intro anyway.
-const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
+const PHOTO_HIDE_IDS = ['hud','compass','atc','squawk','hobbs','vsi','glide','ils','aslope','crab','xwhint','checklist','ai','apinfo','score','papi','help','minimap','wxradar','cammode','setbtn','airshow','mission','aerobox','replay','replayScrub','mctrl','status','missionDone','hopRibbon','cruise','cockpitPanel','rainOverlay','birdSplat','windshieldRain','wipers','cockpitPanelStreaks','bugSplats','sunGlare','lightning','gvision','bino','crashcard','landcard','bailcard','sqkeypad','timekeypad','ilskeypad','shearEscape','preflight','kneeboard','atisStrip','gallery','coldstartcard','approachPlate'];
 let photoPrevDisplay = {};
 let photoDragId = -1;
 let photoDragLastX = 0, photoDragLastY = 0;
