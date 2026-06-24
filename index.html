@@ -11078,6 +11078,11 @@ const state = {
   reverserT: 0,
   reverserPrevActive: false,
   reverserDustT: 0,
+  // Latch — set true the frame the main wheels first touch down after
+  // being airborne, cleared the frame we break ground again. Keeps a single
+  // landing from spamming dust every step() while still letting porpoise
+  // bounces fire fresh puffs on each re-contact.
+  tireDustFired: false,
   // Cold-start catch flare timer for the visible exhaust flame (seconds).
   exhaustCatchT: 0,
   vel: new THREE.Vector3(0,0,0),
@@ -13991,6 +13996,8 @@ function resetPlane(){
   state.reverserPrevActive = false;
   state.reverserDustT = 0;
   clearReverseDust();
+  state.tireDustFired = false;
+  clearTireDust();
   // Tailhook (Shift+H). Stowed by default — deck landings outside the wires
   // still get the existing high-friction arrestor cheat, but a real trap
   // requires the hook to be down. Animation lerps in updateTailhookAnim().
@@ -17210,6 +17217,89 @@ function clearReverseDust(){
   } catch (_e) { /* pool not initialized yet — nothing to clear */ }
 }
 
+// Tire-dust puff fired the moment the main wheels first contact the runway
+// after being airborne. Mirrors the reverse-thrust dust pool pattern (same
+// airshowTex, same per-frame opacity + scale lerp) so we don't bake another
+// canvas or allocate per frame. Puff size + count scale with the sink rate
+// at touchdown so a greaser (≤1.5 m/s) earns a wisp, a firm landing (~2.5)
+// earns a clear puff, and a hard landing (≥4) erupts a chunky bloom. Off-
+// field (grass/dirt) touchdowns push slightly bigger puffs since loose soil
+// kicks up more than asphalt. Carrier deck is exempt (no dust on steel).
+const TIRE_DUST_MAX = 24;          // hard cap on live puffs (~12 per main wheel)
+const TIRE_DUST_LIFE = 0.9;        // seconds before a puff fully fades
+const TIRE_DUST_START_R = 0.6;     // base initial radius (m); scaled by puff size
+const TIRE_DUST_GROW = 2.6;        // additional radius growth over lifetime (m)
+const tireDustPool = [];
+let tireDustHead = 0;
+for (let i = 0; i < TIRE_DUST_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0xc8b896
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(TIRE_DUST_START_R);
+  spr.visible = false;
+  scene.add(spr);
+  tireDustPool.push({ spr, mat, life: 0, sizeMul: 1, opaMul: 1 });
+}
+function emitTireDust(sinkRate, offField){
+  // Severity 0..1: 1.5 m/s ≈ wisp (0.15), 2.5 ≈ clear puff (0.45),
+  // 4+ m/s ≈ chunky bloom (1.0). Linear ramp with a soft floor so even a
+  // textbook greaser leaves a faint trace.
+  const sev = Math.max(0.15, Math.min(1, (sinkRate - 0.3) / 3.7));
+  // Puff count per side: 1 wisp on a greaser, up to 5 on a slammer.
+  const perSide = Math.max(1, Math.round(1 + sev * 4));
+  // Off-field touchdowns kick a bit more material into the air.
+  const sizeMul = (offField ? 1.35 : 1.0) * (0.6 + sev * 0.9);
+  const opaMul = offField ? 0.85 : 0.7;
+  // Tan-grey on asphalt, warmer brown on grass/dirt so the surface reads.
+  const tint = offField ? 0xb09060 : 0xc8b896;
+  const sides = [-1.1, 1.1];
+  for (const sx of sides){
+    for (let i = 0; i < perSide; i++){
+      // Tiny ring spread so a hard bloom looks like a cloud, not a point.
+      const ang = (i / perSide) * Math.PI * 2 + (sx > 0 ? 0.3 : -0.3);
+      const ringR = 0.25 + sev * 0.6;
+      const offX = sx + Math.cos(ang) * ringR;
+      const offZ = Math.sin(ang) * ringR - 0.1;
+      const local = new THREE.Vector3(offX, 0.1, offZ);
+      const world = local.applyMatrix4(plane.matrixWorld);
+      world.y = Math.max(0, world.y);
+      const p = tireDustPool[tireDustHead];
+      tireDustHead = (tireDustHead + 1) % TIRE_DUST_MAX;
+      p.spr.position.copy(world);
+      p.sizeMul = sizeMul * (0.85 + Math.random() * 0.3);
+      p.opaMul = opaMul;
+      p.mat.color.setHex(tint);
+      p.spr.scale.setScalar(TIRE_DUST_START_R * p.sizeMul);
+      p.mat.opacity = 0.6 * opaMul;
+      p.spr.visible = true;
+      p.life = TIRE_DUST_LIFE;
+    }
+  }
+}
+function updateTireDust(dt){
+  for (const p of tireDustPool){
+    if (p.life <= 0){ if (p.spr.visible) p.spr.visible = false; continue; }
+    p.life -= dt;
+    const t = Math.max(0, p.life / TIRE_DUST_LIFE); // 1 → 0
+    p.mat.opacity = 0.6 * p.opaMul * t;
+    const r = (TIRE_DUST_START_R + TIRE_DUST_GROW * (1 - t)) * p.sizeMul;
+    p.spr.scale.setScalar(r);
+    // Settle upward and slightly back so the cloud reads as drifting dust.
+    p.spr.position.y += 0.5 * dt;
+    if (p.life <= 0) p.spr.visible = false;
+  }
+}
+function clearTireDust(){
+  // Same TDZ guard as clearReverseDust — resetPlane() runs once at script
+  // load before this pool exists.
+  try {
+    for (const p of tireDustPool){ p.life = 0; p.mat.opacity = 0; p.spr.visible = false; }
+    tireDustHead = 0;
+  } catch (_e) { /* pool not initialized yet — nothing to clear */ }
+}
+
 // ====== CARRIER STEAM CATAPULT ======
 // Hold O while parked stationary on the carrier deck inside the touchdown box
 // and pointed within ±20° of the deck heading. catArmT counts seconds held
@@ -19981,6 +20071,24 @@ function step(dt){
       const pitchDeg = THREE.MathUtils.radToDeg(tmpE.x);
       const rollDeg  = THREE.MathUtils.radToDeg(tmpE.z);
       const fwdKmh = Math.max(0, vFwd) * 3.6;
+      // Tire-dust puff on first wheel touchdown. Fires once per air→ground
+      // transition (latched on state.tireDustFired, re-armed in the airborne
+      // branch below when the plane breaks ground), so a single landing gets
+      // exactly two ground-contact puffs (one per main wheel ring) and a
+      // porpoise bounce earns a fresh pair on each subsequent contact.
+      // Carrier deck is exempt — a steel deck doesn't kick up dust. Off-field
+      // contacts (grass/dirt strip, taxiway, off-airport) get slightly bigger
+      // warmer-brown puffs since loose soil throws more material than asphalt.
+      // Skipped on bellies-up gear-up touchdowns (no wheels, no dust). Puff
+      // size + count scale with sink rate so a greaser earns a wisp and a
+      // slammer erupts a chunky bloom.
+      if (!state.tireDustFired && state.gearDown){
+        const onCarrierDeck = !!(land && land.ri && land.ri.ap === CARRIER);
+        if (!onCarrierDeck){
+          emitTireDust(sinkRate, !onRunway);
+        }
+        state.tireDustFired = true;
+      }
       // Crosswind kick-off arming. Compute the signed angle between the
       // unit nose-forward (XZ plane only) and the unit ground-track
       // direction the wheels are about to bite. When the crab exceeds
@@ -20604,6 +20712,10 @@ function step(dt){
     }
   } else {
     state.onGround = false;
+    // Re-arm the tire-dust latch the frame we break ground again, so a
+    // touch-and-go (or porpoise bounce) gets a fresh pair of puffs on the
+    // next wheels-down moment instead of only firing on the first landing.
+    state.tireDustFired = false;
     // Airborne: reverser only operates on the runway, so force-disengage here
     // so the visual + HUD pill ease back to off if the player keeps Z held.
     state.reverserActive = false;
@@ -20781,6 +20893,7 @@ function step(dt){
   propGroup.rotation.x = state.reverserT * 0.35;
   propGroupL.rotation.x = propGroupR.rotation.x = propGroup.rotation.x;
   updateReverseDust(dt);
+  updateTireDust(dt);
   // Exhaust flame puff — pulses bright on full throttle and during the
   // cold-start catch. Cheap per-frame material opacity write on a handful
   // of additive sphere meshes.
