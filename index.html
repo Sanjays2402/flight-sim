@@ -10313,6 +10313,114 @@ function playFireWarnChirp(){
   }
 }
 
+// ====== DAMAGE SMOKE TRAIL ======
+// Independent of the engine-fire plume. Once state.damage crosses 50% the
+// cowl starts pouring a thin grey trail; the plume darkens and thickens as
+// damage climbs past 75%, going full black at 90%. Pure scenery — no
+// physics, no audio — but a wounded plane finally LOOKS wounded long
+// before the airframe-failure crash branch fires. Mirrors the airshow /
+// fire / AI plume pattern (shared airshowTex, fixed sprite pool, ring head,
+// per-frame age + drift loop) but with its own smaller pool + lower emit
+// rate so it doesn't crowd the airshow / fire / ribbon plumes.
+const DMG_SMOKE_THRESHOLD = 0.50;        // damage fraction where the trail starts
+const DMG_SMOKE_HEAVY = 0.75;            // damage fraction where the trail darkens + thickens
+const DMG_SMOKE_FULL_BLACK = 0.90;       // damage fraction where the trail goes full black
+const DMG_SMOKE_MAX = 80;                // pool size — smaller than fire (140) so it doesn't dominate
+const DMG_SMOKE_LIFE = 5.0;              // seconds each puff lives
+const DMG_SMOKE_START_R = 0.55;          // initial sprite radius
+const DMG_SMOKE_GROW = 2.6;              // radius growth across life
+const DMG_SMOKE_EMIT_MIN = 6;            // puffs/sec at 50% damage
+const DMG_SMOKE_EMIT_MAX = 22;           // puffs/sec at 100% damage
+const dmgSmokePool = [];
+let dmgSmokeHead = 0;
+for (let i = 0; i < DMG_SMOKE_MAX; i++){
+  const mat = new THREE.SpriteMaterial({
+    map: airshowTex, transparent: true, depthWrite: false,
+    opacity: 0, color: 0x666666
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.setScalar(DMG_SMOKE_START_R);
+  spr.visible = false;
+  spr.renderOrder = 4;
+  scene.add(spr);
+  dmgSmokePool.push({ spr, mat, age: DMG_SMOKE_LIFE + 1, life: DMG_SMOKE_LIFE });
+}
+let dmgSmokeAccum = 0;
+const _dmgTmpOff = new THREE.Vector3();
+const _dmgTmpWorld = new THREE.Vector3();
+function spawnDmgSmoke(world, severity){
+  const p = dmgSmokePool[dmgSmokeHead];
+  dmgSmokeHead = (dmgSmokeHead + 1) % DMG_SMOKE_MAX;
+  p.spr.position.copy(world);
+  p.spr.scale.setScalar(DMG_SMOKE_START_R);
+  // Tint ramps from medium grey at 50% damage to near-black at 90%+.
+  // severity is the normalized 0..1 darkness ramp (computed in the loop).
+  const v = 0.42 - 0.34 * severity + (Math.random() - 0.5) * 0.04;
+  const vc = Math.max(0.03, Math.min(0.55, v));
+  p.mat.color.setRGB(vc, vc, vc);
+  p.age = 0;
+  p.spr.visible = true;
+}
+function clearDamageSmokeFx(){
+  for (const p of dmgSmokePool){ p.spr.visible = false; p.mat.opacity = 0; p.age = p.life + 1; }
+  dmgSmokeAccum = 0;
+}
+function updateDamageSmoke(dt){
+  // Visuals gated on the standard non-emergency-context mask so saved PNGs,
+  // pause frames, the intro/menu world, and post-crash replays stay clean.
+  // The pool keeps aging out either way so a quick toggle (e.g. cam swap)
+  // leaves a natural trailing tail instead of popping. Also hidden in the
+  // cockpit cam — we're behind the firewall, so a plume at the nose would
+  // sit IN the windshield and look terrible.
+  const dmg = state.damage || 0;
+  const showFx = dmg >= DMG_SMOKE_THRESHOLD
+    && !state.paused && !state.replayActive && !state.photoMode
+    && !state.crashed && !state.introOpen
+    && state.cam !== 1;
+  if (showFx){
+    // Severity 0..1 across the 50%-100% damage band — drives emit rate +
+    // darkness so a 51% airframe wisp-trail visibly grows into a 95%
+    // full-black plume as the damage HUD climbs.
+    const span = Math.max(1e-3, 1 - DMG_SMOKE_THRESHOLD);
+    const severity = Math.max(0, Math.min(1, (dmg - DMG_SMOKE_THRESHOLD) / span));
+    const emitPerSec = DMG_SMOKE_EMIT_MIN + (DMG_SMOKE_EMIT_MAX - DMG_SMOKE_EMIT_MIN) * severity;
+    dmgSmokeAccum += emitPerSec * dt;
+    while (dmgSmokeAccum >= 1){
+      dmgSmokeAccum -= 1;
+      _dmgTmpWorld.copy(_dmgTmpOff.copy(FIRE_COWL_OFFSET))
+        .applyQuaternion(plane.quaternion).add(plane.position);
+      spawnDmgSmoke(_dmgTmpWorld, severity);
+    }
+  } else {
+    dmgSmokeAccum = 0;
+  }
+  // Age every puff, drift back with wind + slow lift so the plume curls up
+  // behind the plane. Mirrors the engine-fire smoke loop.
+  for (const p of dmgSmokePool){
+    if (!p.spr.visible) continue;
+    p.age += dt;
+    if (p.age >= p.life){
+      p.spr.visible = false;
+      p.mat.opacity = 0;
+      continue;
+    }
+    const t = p.age / p.life;
+    p.spr.position.x += state.wind.x * 0.25 * dt;
+    p.spr.position.z += state.wind.z * 0.25 * dt;
+    p.spr.position.y += 0.4 * dt;
+    const r = DMG_SMOKE_START_R + DMG_SMOKE_GROW * t;
+    p.spr.scale.setScalar(r);
+    const fadeIn = Math.min(1, t / 0.10);
+    const fadeOut = Math.min(1, (1 - t) / 0.45);
+    // Heavy damage thickens the trail (peak opacity climbs from 0.55 at
+    // threshold to 0.85 at full-black). Computed off the puff's own birth
+    // tint so dramatic damage swings during a puff's life don't pop.
+    const tint = p.mat.color.r; // single channel — grey is r=g=b
+    const heaviness = Math.max(0.55, Math.min(0.92, 1.0 - tint * 1.05));
+    p.mat.opacity = heaviness * fadeIn * fadeOut;
+  }
+}
+
 // ====== CRASH DEBRIS FIELD ======
 // Visual punctuation for a wreck. When the plane crashes (terrain impact,
 // airframe failure, gear-up slam), spawn a small fixed pool of dark-grey
@@ -13953,6 +14061,10 @@ function resetPlane(){
   state.engineFireBeepAt = 0;
   state.nextFireRollMs = 0;
   clearEngineFireFx();
+  // Damage smoke trail — wipe any active wisp so a hot reset on a wounded
+  // bird doesn't inherit a phantom plume drifting on the old position.
+  // Safe no-op when nothing is active so a reset on the apron pays nothing.
+  if (typeof clearDamageSmokeFx === 'function') clearDamageSmokeFx();
   // Crash debris field — wipe shards + smoke column so the next sortie
   // starts on a clean slate. clearCrashDebris() is a no-op when nothing is
   // active so a hot reset on the apron pays nothing.
@@ -20498,6 +20610,12 @@ function step(dt){
   // visuals). Both calls self-gate so a clean cruise pays nothing.
   maybeRollEngineFire(dt);
   updateEngineFire(dt);
+  // Damage smoke trail — thin grey wisp at >=50% airframe damage that
+  // darkens + thickens through 75% and goes full black at 90%. Independent
+  // of the engine-fire plume so a wounded-but-not-burning bird still LOOKS
+  // wounded long before the airframe-failure crash branch fires. Self-gates
+  // on damage threshold + the standard non-emergency-context mask.
+  updateDamageSmoke(dt);
   // Parachute bailout sim. Self-gates on phase==='idle' so a non-ejected
   // flight pays nothing; advances pilot + canopy pose, runs the phase
   // chain, and pops the summary card on touchdown.
