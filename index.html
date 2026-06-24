@@ -6970,7 +6970,26 @@ function tickNavLights(dt){
     }
   }
 }
+// Force the wingtip anti-collision strobes dark (emissive + glare sprite
+// to 0) without touching the steady red/green/tail bulbs. Called from the
+// loop's frozen branches (photo / pause / replay / intro / crashed) so a
+// saved PNG or paused screenshot never catches the strobe mid-flash.
+// Pure additive guard — `tickNavLights` itself still owns the live cadence
+// in the live branch, so a frame coming OUT of pause re-lights cleanly on
+// the very next live tick.
+function freezeNavStrobes(){
+  for (const rig of navLightRigs){
+    for (const p of rig.parts){
+      if (p.kind !== 'strobe') continue;
+      // Zero emissive — bulb collapses to its dark base color.
+      if (p.mat && p.mat.emissive) p.mat.emissive.setRGB(0, 0, 0);
+      // Zero glare sprite so the additive disc disappears from the PNG.
+      if (p.sprMat) p.sprMat.opacity = 0;
+    }
+  }
+}
 tickNavLights(0); // prime so first frame doesn't ship un-lit nav lights
+freezeNavStrobes(); // and make sure the prime frame doesn't leak a strobe pop into an immediate screenshot
 
 // ====== RUNWAY END IDENTIFIER LIGHTS (REIL) ======
 // A pair of bright synchronized white strobes flanking each runway threshold
@@ -33818,6 +33837,17 @@ function loop(now){
     propGroup.rotation.z += 0.4*dt;
     propGroupL.rotation.z = propGroupR.rotation.z = propGroup.rotation.z;
     updateCamera(dt);
+  }
+  // Wingtip anti-collision strobes: blank them out the moment the sim
+  // freezes (photo / pause / replay / intro / crashed) so a saved PNG or
+  // paused screenshot never catches the strobe mid-flash. `tickNavLights`
+  // only advances inside `step()`, so without this guard the bulbs would
+  // stay at whatever emissive the last live frame set them to. Steady
+  // red/green/tail nav lights are left alone — those are realistic to
+  // see lit on a parked airframe at night.
+  if (state.photoMode || state.paused || state.replayActive
+      || state.introOpen || state.crashed){
+    freezeNavStrobes();
   }
   // Make sure the ghost is hidden any frame we didn't run the live update
   // path above (paused / replay / photo / intro). Cheap idempotent toggle.
