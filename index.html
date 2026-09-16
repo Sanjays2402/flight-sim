@@ -1299,6 +1299,16 @@
       <div class="hint">Paper-style approach plate in the bottom-right of the cockpit cam. Auto-shows within 8 km of a runway, lined up &plusmn;30&deg;, below 1500 m AGL. Pairs with the ILS needles and meatball.</div>
     </div>
     <div class="row">
+      <div class="top"><span class="name">INVERT PITCH</span><span class="val" id="setInvPitchV">OFF</span></div>
+      <button id="setInvPitchBtn" type="button" style="width:100%">INVERT PITCH: OFF</button>
+      <div class="hint">Flips the pitch axis (<kbd>I</kbd> = nose down, <kbd>K</kbd> = nose up) and the virtual stick's up/down. For players who expect the opposite stick feel.</div>
+    </div>
+    <div class="row">
+      <div class="top"><span class="name">INVERT ROLL</span><span class="val" id="setInvRollV">OFF</span></div>
+      <button id="setInvRollBtn" type="button" style="width:100%">INVERT ROLL: OFF</button>
+      <div class="hint">Flips the roll axis (<kbd>A</kbd> = roll right, <kbd>D</kbd> = roll left) and the virtual stick's left/right.</div>
+    </div>
+    <div class="row">
       <div class="top"><span class="name">SMOKE TRAIL COLOR</span><span class="val" id="setTrailV">LIVERY</span></div>
       <select id="setTrail"></select>
       <div class="hint">Ribbon (<kbd>Y</kbd>) and airshow smoke (<kbd>~</kbd>) color. LIVERY follows your paint scheme.</div>
@@ -1668,7 +1678,7 @@ const LIVERIES = [
   { name: 'SUNSET',  fuse: 0xff7a2a, accent: 0x2b1a45 },
   { name: 'STEALTH', fuse: 0x202428, accent: 0x7ee787 },
 ];
-const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false, approachPlate: true, lightningStatic: true };
+const SETTINGS_DEFAULT = { sensitivity: 1.0, fov: 70, volume: 1.0, livery: 0, rain: false, snow: 'off', fog: 'off', trailColor: 'livery', smokeLength: 5, coldStart: true, twinEngine: false, landingLight: false, wipers: 'auto', pitotHeat: false, carbHeat: false, cowlFlaps: false, frictionLock: false, aerobaticBest: 0, voice: 'radio', nightPanel: false, lastMixture: 1.0, copilot: true, speedUnit: 'kmh', fuelSelector: 'BOTH', cockpitClockZulu: false, approachPlate: true, lightningStatic: true, invertPitch: false, invertRoll: false };
 // Fog weather levels. 'off' restores the default long-range haze; 'light' and
 // 'heavy' both clamp the camera fog near/far so the world dissolves into a
 // soft grey wall. Pure rendering knob — no flight-model side effects, so it
@@ -1784,6 +1794,8 @@ try {
     if (typeof saved.cockpitClockZulu === 'boolean') settings.cockpitClockZulu = saved.cockpitClockZulu;
     if (typeof saved.approachPlate === 'boolean') settings.approachPlate = saved.approachPlate;
     if (typeof saved.lightningStatic === 'boolean') settings.lightningStatic = saved.lightningStatic;
+    if (typeof saved.invertPitch === 'boolean') settings.invertPitch = saved.invertPitch;
+    if (typeof saved.invertRoll === 'boolean') settings.invertRoll = saved.invertRoll;
   }
 } catch(e){ /* corrupt prefs — ignore, use defaults */ }
 camera.fov = settings.fov;
@@ -21763,6 +21775,11 @@ function step(dt){
       pIn = Math.max(-1, Math.min(1, pIn));
       rIn = Math.max(-1, Math.min(1, rIn));
     }
+    // Axis inversion (Settings): flips keyboard and virtual-stick pitch/roll
+    // for players who expect the opposite stick feel. Autopilot and trim are
+    // unaffected — only the player's hand on the controls.
+    if (settings.invertPitch) pIn = -pIn;
+    if (settings.invertRoll) rIn = -rIn;
   }
 
   // Autopilot: holds altitude + heading. Engages via H. Any manual stick input
@@ -34823,6 +34840,10 @@ addEventListener('keydown', e => {
   const copV = document.getElementById('setCopV');
   const apPlateBtn = document.getElementById('setApPlateBtn');
   const apPlateV   = document.getElementById('setApPlateV');
+  const invPitchBtn = document.getElementById('setInvPitchBtn');
+  const invPitchV   = document.getElementById('setInvPitchV');
+  const invRollBtn  = document.getElementById('setInvRollBtn');
+  const invRollV    = document.getElementById('setInvRollV');
   const twinBtn = document.getElementById('setTwinBtn');
   const twinV = document.getElementById('setTwinV');
   const cowlBtn = document.getElementById('setCowlBtn');
@@ -34979,6 +35000,16 @@ addEventListener('keydown', e => {
       apPlateBtn.textContent = settings.approachPlate ? 'APPROACH PLATE: ON' : 'APPROACH PLATE: OFF';
       apPlateBtn.classList.toggle('primary', settings.approachPlate);
     }
+    if (invPitchV) invPitchV.textContent = settings.invertPitch ? 'ON' : 'OFF';
+    if (invPitchBtn){
+      invPitchBtn.textContent = settings.invertPitch ? 'INVERT PITCH: ON' : 'INVERT PITCH: OFF';
+      invPitchBtn.classList.toggle('primary', settings.invertPitch);
+    }
+    if (invRollV) invRollV.textContent = settings.invertRoll ? 'ON' : 'OFF';
+    if (invRollBtn){
+      invRollBtn.textContent = settings.invertRoll ? 'INVERT ROLL: ON' : 'INVERT ROLL: OFF';
+      invRollBtn.classList.toggle('primary', settings.invertRoll);
+    }
     if (twinV) twinV.textContent = settings.twinEngine ? 'TWIN' : 'SINGLE';
     if (twinBtn){
       twinBtn.textContent = settings.twinEngine ? 'TWIN ENGINE: ON' : 'TWIN ENGINE: OFF';
@@ -35111,6 +35142,24 @@ addEventListener('keydown', e => {
         state.ignitionT = -1;
         hideStatus();
       }
+      syncInputs();
+      saveSettings();
+    });
+  }
+  // Axis inversion toggles: flip pitch and roll input for players who expect
+  // the opposite stick feel. Persisted with the rest of settings.
+  if (invPitchBtn){
+    invPitchBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.invertPitch = !settings.invertPitch;
+      syncInputs();
+      saveSettings();
+    });
+  }
+  if (invRollBtn){
+    invRollBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settings.invertRoll = !settings.invertRoll;
       syncInputs();
       saveSettings();
     });

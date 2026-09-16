@@ -24,6 +24,8 @@ Open `index.html` in any modern browser (or visit the live page) and fly.
 | Camera cycle (chase / cockpit / fly-by / orbit) | `C` |
 | Reset to runway | `R` |
 | Dismiss intro | Click or `Space` |
+| Invert pitch axis | Settings (`,` key) → INVERT PITCH |
+| Invert roll axis | Settings (`,` key) → INVERT ROLL |
 
 ## How to fly
 
@@ -56,6 +58,10 @@ Open `index.html` in any modern browser (or visit the live page) and fly.
 * Thrust scales linearly with throttle; gravity always pulling
 * Stall warning when AoA ≥ ~14° in the air
 * Positive longitudinal stability: airframe weather-vanes toward velocity vector
+
+## Settings
+
+Open Settings with `,` (comma) to tweak sensitivity, FOV, weather, liveries, and control preferences. The **INVERT PITCH** / **INVERT ROLL** toggles flip the pitch and roll axes (keyboard + virtual stick) for players who expect the opposite stick feel — autopilot and trim are unaffected. All settings persist in the browser via localStorage.
 
 ## HUD
 
